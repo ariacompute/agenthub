@@ -8,10 +8,12 @@
 package registry
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -116,6 +118,28 @@ const (
 	CodeDuplicate        = httputil.Code("resource_already_exists")
 )
 
+// ResourceStore persists the catalogue. It is the port the registry delegates
+// to: the default implementation is the in-memory map of Registry itself, the
+// PostgreSQL one lives in internal/store.
+//
+// Implementations return ErrNotFound for an unknown id and ErrDuplicate when an
+// insert collides with an existing id. Every other failure is reported as-is so
+// the caller can map it onto internal_error.
+type ResourceStore interface {
+	// Upsert validates nothing: the registry has already normalised the entry.
+	// It stores it and returns the stored copy.
+	Upsert(ctx context.Context, e *Entry) (*Entry, error)
+	Get(ctx context.Context, id string) (*Entry, error)
+	// List returns entries of one kind, sorted by id. An empty kind means all.
+	List(ctx context.Context, kind string) ([]*Entry, error)
+	Delete(ctx context.Context, id string) error
+	SetHealth(ctx context.Context, id string, h Health) error
+	// Counts returns per-kind and per-health totals. Both maps are pre-filled
+	// with every known kind / health so absent buckets report zero.
+	Counts(ctx context.Context) (byKind map[string]int, byHealth map[string]int, err error)
+	Size(ctx context.Context) (int, error)
+}
+
 // Entry is one registered resource.
 type Entry struct {
 	ID           string            `json:"id"`
@@ -137,14 +161,26 @@ type Entry struct {
 }
 
 // Registry owns the resource catalogue.
+//
+// It is the in-memory implementation of the catalogue and, at the same time,
+// the facade the rest of agenthub talks to: when a ResourceStore is attached
+// every read and write is delegated to it so the catalogue survives a restart.
+// The public surface is identical in both modes, which keeps the A2A contract,
+// the control plane and the tests unchanged.
 type Registry struct {
 	mu      sync.RWMutex
 	entries map[string]*Entry
+	store   ResourceStore
 }
 
-// New builds an empty registry.
+// New builds an empty, in-memory registry.
 func New() *Registry {
 	return &Registry{entries: map[string]*Entry{}}
+}
+
+// NewWithStore builds a registry backed by a ResourceStore.
+func NewWithStore(store ResourceStore) *Registry {
+	return &Registry{entries: map[string]*Entry{}, store: store}
 }
 
 // Upsert validates and stores an entry, generating an id when absent.
@@ -176,6 +212,17 @@ func (r *Registry) Upsert(in *Entry) (*Entry, error) {
 	}
 	e.UpdatedAt = time.Now().UTC()
 
+	if r.store != nil {
+		if e.ID == "" {
+			e.ID = r.freshID(string(e.Kind))
+		}
+		stored, err := r.store.Upsert(context.Background(), &e)
+		if err != nil {
+			return nil, storeErr("upsert", err)
+		}
+		return stored, nil
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if e.ID == "" {
@@ -192,14 +239,33 @@ func (r *Registry) Upsert(in *Entry) (*Entry, error) {
 	return &stored, nil
 }
 
+// freshID generates an id the store does not know yet.
+func (r *Registry) freshID(kind string) string {
+	for i := 0; i < 8; i++ {
+		id := NewID(kind)
+		if _, err := r.store.Get(context.Background(), id); err != nil {
+			return id
+		}
+	}
+	return NewID(kind)
+}
+
 // Register creates a new resource; reusing an existing id is rejected.
 func (r *Registry) Register(in *Entry) (*Entry, error) {
 	if in != nil && in.ID != "" {
-		r.mu.RLock()
-		_, exists := r.entries[in.ID]
-		r.mu.RUnlock()
-		if exists {
-			return nil, &httputil.Error{Code: CodeDuplicate}
+		if r.store != nil {
+			if _, err := r.store.Get(context.Background(), in.ID); err == nil {
+				return nil, &httputil.Error{Code: CodeDuplicate}
+			} else if !errors.Is(err, ErrNotFound) {
+				return nil, storeErr("register", err)
+			}
+		} else {
+			r.mu.RLock()
+			_, exists := r.entries[in.ID]
+			r.mu.RUnlock()
+			if exists {
+				return nil, &httputil.Error{Code: CodeDuplicate}
+			}
 		}
 	}
 	return r.Upsert(in)
@@ -207,6 +273,16 @@ func (r *Registry) Register(in *Entry) (*Entry, error) {
 
 // Get returns one entry by id.
 func (r *Registry) Get(id string) (*Entry, bool) {
+	if r.store != nil {
+		e, err := r.store.Get(context.Background(), id)
+		if err != nil {
+			if !errors.Is(err, ErrNotFound) {
+				slog.Error("registry: load entry", "id", id, "error", err)
+			}
+			return nil, false
+		}
+		return e, true
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	e, ok := r.entries[id]
@@ -219,6 +295,9 @@ func (r *Registry) Get(id string) (*Entry, bool) {
 
 // Delete removes an entry.
 func (r *Registry) Delete(id string) error {
+	if r.store != nil {
+		return storeErr("delete", r.store.Delete(context.Background(), id))
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.entries[id]; !ok {
@@ -240,13 +319,24 @@ func (r *Registry) List(kind string, query string) []*Entry {
 		filter = parsed
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
-	r.mu.RLock()
-	out := make([]*Entry, 0, len(r.entries))
-	for _, e := range r.entries {
-		cp := *e
-		out = append(out, &cp)
+
+	var out []*Entry
+	if r.store != nil {
+		got, err := r.store.List(context.Background(), string(filter))
+		if err != nil {
+			slog.Error("registry: list entries", "kind", filter, "error", err)
+			return nil
+		}
+		out = got
+	} else {
+		r.mu.RLock()
+		out = make([]*Entry, 0, len(r.entries))
+		for _, e := range r.entries {
+			cp := *e
+			out = append(out, &cp)
+		}
+		r.mu.RUnlock()
 	}
-	r.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	if filter == "" && q == "" {
 		return out
@@ -269,6 +359,9 @@ func (r *Registry) SetHealth(id string, h Health) error {
 	if _, err := ParseHealth(string(h)); err != nil {
 		return err
 	}
+	if r.store != nil {
+		return storeErr("set_health", r.store.SetHealth(context.Background(), id, h))
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.entries[id]
@@ -282,6 +375,14 @@ func (r *Registry) SetHealth(id string, h Health) error {
 
 // CountsByKind returns the number of registered resources per kind.
 func (r *Registry) CountsByKind() map[string]int {
+	if r.store != nil {
+		byKind, _, err := r.store.Counts(context.Background())
+		if err != nil {
+			slog.Error("registry: count resources", "error", err)
+			return zeroCounts(Kinds)
+		}
+		return byKind
+	}
 	out := map[string]int{}
 	for _, k := range Kinds {
 		out[string(k)] = 0
@@ -296,6 +397,14 @@ func (r *Registry) CountsByKind() map[string]int {
 
 // HealthCounts returns the number of resources per health value.
 func (r *Registry) HealthCounts() map[string]int {
+	if r.store != nil {
+		_, byHealth, err := r.store.Counts(context.Background())
+		if err != nil {
+			slog.Error("registry: count health", "error", err)
+			return zeroCounts(Healths)
+		}
+		return byHealth
+	}
 	out := map[string]int{}
 	for _, h := range Healths {
 		out[string(h)] = 0
@@ -310,6 +419,14 @@ func (r *Registry) HealthCounts() map[string]int {
 
 // Size returns the number of registered resources.
 func (r *Registry) Size() int {
+	if r.store != nil {
+		n, err := r.store.Size(context.Background())
+		if err != nil {
+			slog.Error("registry: size", "error", err)
+			return 0
+		}
+		return n
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.entries)
@@ -320,18 +437,32 @@ func (r *Registry) Snapshot() []*Entry {
 	return r.List("", "")
 }
 
-// ReplaceAll reloads the catalogue from a snapshot.
-func (r *Registry) ReplaceAll(entries []*Entry) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.entries = map[string]*Entry{}
-	for _, e := range entries {
-		if e == nil {
-			continue
-		}
-		cp := *e
-		r.entries[cp.ID] = &cp
+// storeErr normalises a persistence failure: the driver text never reaches the
+// caller, only a machine readable code.
+func storeErr(op string, err error) error {
+	if err == nil {
+		return nil
 	}
+	var he *httputil.Error
+	if errors.As(err, &he) {
+		return err
+	}
+	if errors.Is(err, ErrNotFound) {
+		return &httputil.Error{Code: CodeNotFound}
+	}
+	if errors.Is(err, ErrDuplicate) {
+		return &httputil.Error{Code: CodeDuplicate}
+	}
+	slog.Error("registry: persistence failure", "op", op, "error", err)
+	return &httputil.Error{Code: httputil.CodeInternal}
+}
+
+func zeroCounts[T ~string](keys []T) map[string]int {
+	out := make(map[string]int, len(keys))
+	for _, k := range keys {
+		out[string(k)] = 0
+	}
+	return out
 }
 
 func matches(e *Entry, q string) bool {
@@ -363,5 +494,12 @@ func NewID(prefix string) string {
 	return prefix + "-" + hex.EncodeToString(buf)
 }
 
-// ErrNotFound is kept for callers that prefer sentinel comparison.
-var ErrNotFound = errors.New(string(CodeNotFound))
+// Sentinel errors a ResourceStore implementation returns.
+var (
+	// ErrNotFound is kept for callers that prefer sentinel comparison; it is
+	// also the error a ResourceStore must return for an unknown id.
+	ErrNotFound = errors.New(string(CodeNotFound))
+	// ErrDuplicate is returned by a ResourceStore when an insert collides with
+	// an existing id.
+	ErrDuplicate = errors.New(string(CodeDuplicate))
+)

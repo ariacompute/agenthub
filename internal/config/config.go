@@ -22,32 +22,33 @@ const (
 
 // Config is the fully validated runtime configuration.
 type Config struct {
-	HTTPPort       string
-	Env            string
-	StaticDir      string
-	AdminToken     string
-	AuthOpenMode   bool
-	DataFile       string
-	LegacyMethods  bool
-	MaxParallel    int
-	CLITimeout     time.Duration
-	CLIAllowlist   []string
-	MaxOutputBytes int
-	EventBuffer    int
-	PushEnabled    bool
+	HTTPPort        string
+	Env             string
+	StaticDir       string
+	AdminToken      string
+	AuthOpenMode    bool
+	DatabaseURL     string
+	LegacyMethods   bool
+	MaxParallel     int
+	CLITimeout      time.Duration
+	CLIAllowlist    []string
+	MaxOutputBytes  int
+	EventBuffer     int
+	PushEnabled     bool
+	PushRecordLimit int
 }
 
 // Load reads the environment (after LoadDotEnv) and validates the result.
 func Load() (*Config, error) {
 	c := &Config{
-		HTTPPort:       envStr("AGENTHUB_HTTP_PORT", "3500"),
-		Env:            envStr("AGENTHUB_ENV", "dev"),
-		StaticDir:      envStr("AGENTHUB_STATIC_DIR", "./backend/static"),
-		AdminToken:     envStr("AGENTHUB_ADMIN_TOKEN", ""),
+		HTTPPort:   envStr("AGENTHUB_HTTP_PORT", "3500"),
+		Env:        envStr("AGENTHUB_ENV", "dev"),
+		StaticDir:  envStr("AGENTHUB_STATIC_DIR", "./backend/static"),
+		AdminToken: envStr("AGENTHUB_ADMIN_TOKEN", ""),
 		// Local bootstrap convenience: open mode defaults on, but Validate
 		// refuses to run a production deployment without a token.
 		AuthOpenMode:   envBool("AGENTHUB_AUTH_OPEN_MODE", true),
-		DataFile:       envStr("AGENTHUB_DATA_FILE", ""),
+		DatabaseURL:    envStr("DATABASE_URL", ""),
 		LegacyMethods:  envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
 		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
 		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
@@ -55,6 +56,8 @@ func Load() (*Config, error) {
 		MaxOutputBytes: envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
 		EventBuffer:    envInt("AGENTHUB_EVENT_BUFFER", 512),
 		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
+		// Retention cap for the push callback audit trail, per task.
+		PushRecordLimit: envInt("AGENTHUB_PUSH_RECORD_LIMIT", 100),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -86,6 +89,15 @@ func (c *Config) Validate() error {
 	}
 	if c.EventBuffer < 1 {
 		return fmt.Errorf("AGENTHUB_EVENT_BUFFER must be positive")
+	}
+	// Persistence is mandatory: agenthub is a database backed service and a
+	// missing DATABASE_URL must fail fast instead of silently running on a
+	// state that disappears with the process.
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("DATABASE_URL must be set")
+	}
+	if c.PushRecordLimit < 1 {
+		return fmt.Errorf("AGENTHUB_PUSH_RECORD_LIMIT must be positive, got %d", c.PushRecordLimit)
 	}
 	if c.Env == "prod" && c.AdminToken == "" && c.AuthOpenMode {
 		return fmt.Errorf("AGENTHUB_ENV=prod requires AGENTHUB_ADMIN_TOKEN (or AGENTHUB_AUTH_OPEN_MODE=false with another auth layer)")

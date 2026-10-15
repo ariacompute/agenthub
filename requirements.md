@@ -30,12 +30,15 @@
   agent→`aria-agent-cloud` SSE、mcp→stdio / Streamable HTTP JSON-RPC、skill→本地手册加载、
   cli→`exec.Command` + 白名单。CLI 必须实现「白名单前置校验 → 单次超时 → 输出截断 → 结构化 JSON」。
 - **Hub 编排与任务机**：入站消息 → 资源选择 → 适配执行 → 状态机 → artifact 累积 →
-  事件广播（SSE fan-out）→ pushNotification 回调占位（内存记录）。
+  事件广播（SSE fan-out）→ pushNotification 回调（**落 `push_records`，不发真实网络请求**）。
   编排支持 **flow 三原语 `then / branch / parallel`**，用于多资源接力。
 - **可观测**：每任务生成 **span 时间线**（kind、耗时、状态、错误 code），作为「任务追踪」屏数据源；
   首版只埋点，不接外部 exporter。
-- **控制面与运维**：`/api/*` 管理接口 + `/healthz`（版本、适配器、资源计数、当前模式、鉴权模式）；
-  admin token 鉴权，open 模式仅本地可用。
+- **PostgreSQL 持久化（GORM）**：`DATABASE_URL` **必填**，缺失即拒绝启动。资源条目、任务主体、
+  artifact、span、挂起问题、回调配置、事件流与回调留痕全部入库；未注入 GORM 仓库时
+  registry/hub/broker/notifier 退化为**原有内存行为**（公开签名零变更），单测因此零外部依赖。
+- **控制面与运维**：`/api/*` 管理接口 + `/healthz`（版本、适配器、资源计数、当前模式、鉴权模式、
+  **数据库可达性**）；admin token 鉴权，open 模式仅本地可用。
 - **Web 控制台三屏**：注册中心（五类 CRUD + 健康指示 + **单资源「试跑」**）、
   任务追踪（任务列表 + 事件/span 时间线 + artifact 原始内容）、拓扑视图（五列资产 + 调用边）。
 - **多语言 13 种**：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`（`ar` 为 RTL）。
@@ -43,8 +46,8 @@
 
 ### 1.2 范围外（列为后续项）
 
-- 数据库持久化（首版内存 + JSON snapshot；Postgres/pgvector 属后续里程碑）。
-- RAG / 向量检索 / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
+- **pgvector / 向量检索**（属 `memo` 与 `bankmind` 的职责；本仓只需要关系型 PostgreSQL）。
+- RAG / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
 - 语音、浏览器自动化、渠道接入、多语言 SDK、Agent 网络跨实例联邦。
 - LLM-as-judge 评分与评测闭环（eval 仅留钩子，**不产出分数**）。
 - 与 mastra agent 的 A2A 互通验证（形态对齐，首版不实现）。
@@ -115,6 +118,29 @@
 - `Span`：`id`、`taskId`、`resourceId`、`kind`、`label`、`startAt`、`endAt`、`durationMs`、
   `status`（`ok`/`error`/`input-required`/`skipped`）、`code`。
 - `Event`（broker 帧）：`seq`、`taskId`、`kind`（`status`/`artifact`/`message`/`span`）、`at`、载荷。
+- `PushRecord`（回调留痕）：`taskId`、`url`、`state`、`config` 快照。
+
+### 3.3 持久化（PostgreSQL + GORM）
+
+| 表 | 承载 |
+| --- | --- |
+| `resources` | 3.1 条目全字段；`tags`/`capabilities`/`auth_schemes`/`env`/`metadata` 为 `jsonb` |
+| `tasks` | 3.2 的 Task（`status.message`/`history`/`metadata` 为 `jsonb`） |
+| `task_artifacts` | `parts`/`metadata` 为 `jsonb`，按 `id` 保序，随任务级联删除 |
+| `task_spans` | span 时间线，同上级联 |
+| `task_pending` | `input-required` 的提问与提问时间 |
+| `task_push` | `PushNotificationConfig` 快照 |
+| `events` | 每个 broker 帧（`(task_id, seq)` 主键），供 `since=<seq>` 回放 |
+| `push_records` | 每次回调留痕，按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留最近 N 条/任务 |
+| `schema_migrations` | 已执行的迁移文件 |
+
+约束：
+
+- 迁移为 `migrations/*.sql`（`//go:embed` 内嵌），按文件名顺序、每文件单事务执行，SQL 自身幂等。
+- 任务状态迁移必须 **条件更新**（`WHERE id=? AND state=?`），0 行时区分「任务不存在」与「并发冲突」。
+- 事件与回调写入**不得阻塞任务执行**：有界队列 + 异步写入，队列满或写入失败只告警。
+- `jsonb` 载荷通过自实现 `model.JSONField`（`driver.Valuer` / `sql.Scanner`）承载，**不引入**
+  `gorm.io/datatypes`。
 
 ## 4. 接口
 
@@ -145,7 +171,8 @@ POST   /api/resources/{id}/health              → {health}
 GET    /api/tasks                              → {tasks}
 GET    /api/tasks/{id}                         → Task | 404
 GET    /api/tasks/{id}/spans                   → {spans} | 404
-GET    /api/tasks/{id}/events                  → SSE（先回放 span/artifact/status，再订阅直播）
+GET    /api/tasks/{id}/events[?since=<seq>]    → SSE（since>0 时先回放该 seq 之后的持久化帧，
+                                                 无 since 时回放 span/artifact/status，再订阅直播）
 POST   /api/tasks/{id}/cancel                  → Task
 POST   /api/tasks/{id}/resume                  → Task
 GET    /api/export/mcp                         → {servers}
@@ -157,7 +184,8 @@ GET    /healthz                                → 状态与计数（无鉴权�
 ### 4.3 健康检查
 
 `/healthz`：`status`、`version`、`protocolVersion`、`env`、`mode`(mock)、`resources`(按 kind 计数)、
-`health`(按健康计数)、`tasks`、`methods`、`legacyMethods`、`pushEnabled`、`auth`(`token`|`open`)。
+`health`(按健康计数)、`tasks`、`methods`、`legacyMethods`、`pushEnabled`、`auth`(`token`|`open`)、
+`database`(`up`|`down`|`unknown`，注入 DB 句柄时存在)；库不可达时返回 503。
 
 ## 5. 异常
 
@@ -224,7 +252,8 @@ GET    /healthz                                → 状态与计数（无鉴权�
 ## 8. 验收标准（M1）
 
 1. `go vet ./...` 无告警；`go test -race ./...` **全绿**（a2a、config、registry、adapter、hub、
-   handlers、httputil 单测 + `tests/e2e_test.go` 真实 HTTP 端到端），且**零外部依赖**。
+   model、store、handlers、httputil 单测 + `tests/e2e_test.go` 真实 HTTP 端到端），
+   且**纯逻辑用例零外部依赖**（memory 回退保证无 DB 也全绿）。
 2. `bunx vitest run` 全绿：`languages`（恰 13 语 / `matchLang`）、`copy-fallback`
    （英文完整、每语自有译文、未支持语言回落 en）、`enums-copy`（13 语 × 枚举齐全）、
    `api`（错误码透传）、`style`（色彩护栏）。
@@ -235,4 +264,8 @@ GET    /healthz                                → 状态与计数（无鉴权�
    v0.1 别名、flow 分支 + 并行、错误码路径（`-32001`/`-32601`/`resource_not_found` 帧）。
 5. 控制面冒烟全通：注册资源 → 出现在列表/导出/Agent Card → 立即被 A2A 调用 → 删除。
 6. 前端零硬编码自然语言、零有彩色值；13 语切换与 RTL 不破版。
-7. **不产出任何评分/评测分数**；pushNotification 仅在内存记录（可断言），不发真实网络请求。
+7. **不产出任何评分/评测分数**；pushNotification 只留痕（内存或 `push_records`，可断言），
+   不发真实网络请求。
+8. 持久化验收：`DATABASE_URL` 缺失时拒绝启动；迁移可重复执行（第二次为 no-op）；
+   资源/任务/artifact/span/事件/回调重启后仍可回读，事件可按 `since` 回放；
+   **集成用例在未设置 `DATABASE_URL` 时 skip，绝不伪造结果**。

@@ -6,12 +6,20 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/adapter"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
+)
+
+const (
+	// pushWriteTimeout bounds one push record round trip.
+	pushWriteTimeout = 5 * time.Second
+	// pushPruneInterval is how often the retention cap is enforced.
+	pushPruneInterval = 10 * time.Minute
 )
 
 // Emit delivers one streaming frame to a subscriber.
@@ -30,13 +38,19 @@ type PushNotifier interface {
 	Notify(ctx context.Context, cfg a2a.PushNotificationConfig, taskID string, state a2a.TaskState) error
 }
 
-// MockNotifier records callbacks in memory: it never performs network I/O, so
-// push notification behaviour stays assertable in tests.
+// MockNotifier records callbacks: it never performs network I/O, so push
+// notification behaviour stays assertable in tests.
+//
+// When Repo is set the callback is persisted as well, so the history of a task
+// survives a restart; a failing write only degrades to the in-memory record and
+// must never influence the terminal state of a task.
 //
 // TODO(real): POST the A2A task payload to cfg.URL with the configured auth.
 type MockNotifier struct {
 	mu      sync.Mutex
 	records []PushRecord
+	// Repo is the optional push callback store.
+	Repo PushRepository
 }
 
 // Notify records one callback.
@@ -44,15 +58,37 @@ func (n *MockNotifier) Notify(ctx context.Context, cfg a2a.PushNotificationConfi
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	rec := PushRecord{TaskID: taskID, URL: cfg.URL, State: state, Config: cfg}
+	if n.Repo != nil {
+		wctx, cancel := context.WithTimeout(dbCtx(), pushWriteTimeout)
+		err := n.Repo.Append(wctx, rec)
+		cancel()
+		if err == nil {
+			slog.Info("hub: push notification recorded", "task", taskID, "state", state)
+			return nil
+		}
+		slog.Warn("hub: persist push record failed, falling back to memory", "task", taskID, "error", err)
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.records = append(n.records, PushRecord{TaskID: taskID, URL: cfg.URL, State: state, Config: cfg})
+	n.records = append(n.records, rec)
 	slog.Info("hub: push notification recorded", "task", taskID, "state", state)
 	return nil
 }
 
-// Records returns a copy of every recorded callback.
+// Records returns every recorded callback, oldest first. With a repository
+// attached the history is read back from the database so callbacks recorded
+// before a restart are still visible.
 func (n *MockNotifier) Records() []PushRecord {
+	if n.Repo != nil {
+		rctx, cancel := context.WithTimeout(dbCtx(), pushWriteTimeout)
+		got, err := n.Repo.List(rctx, "", 0)
+		cancel()
+		if err == nil {
+			return got
+		}
+		slog.Warn("hub: read push records failed, falling back to memory", "error", err)
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	out := make([]PushRecord, len(n.records))
@@ -68,18 +104,78 @@ type Hub struct {
 	broker *Broker
 	opts   adapter.Options
 	pusher PushNotifier
+
+	pushRepo  PushRepository
+	eventRepo EventRepository
+	stopPrune chan struct{}
+	pruneWG   sync.WaitGroup
+	closeOnce sync.Once
 }
 
-// New wires the hub together.
-func New(cfg *config.Config, reg *registry.Registry, opts adapter.Options, pusher PushNotifier) *Hub {
-	return &Hub{
-		cfg:    cfg,
-		reg:    reg,
-		store:  NewTaskStore(),
-		broker: NewBroker(),
-		opts:   opts,
-		pusher: pusher,
+// New wires the hub together. persist may be zero valued: every nil repository
+// falls back to the in-memory behaviour.
+func New(cfg *config.Config, reg *registry.Registry, opts adapter.Options, pusher PushNotifier, persist Persistence) *Hub {
+	store := NewTaskStore()
+	if persist.Tasks != nil {
+		store = NewTaskStoreWithRepository(persist.Tasks)
 	}
+	broker := NewBroker()
+	if persist.Events != nil {
+		if err := broker.Start(persist.Events, cfg.EventBuffer); err != nil {
+			slog.Error("hub: event persistence disabled", "error", err)
+		}
+	}
+	h := &Hub{
+		cfg:       cfg,
+		reg:       reg,
+		store:     store,
+		broker:    broker,
+		opts:      opts,
+		pusher:    pusher,
+		pushRepo:  persist.Pushes,
+		eventRepo: persist.Events,
+		stopPrune: make(chan struct{}),
+	}
+	h.startPushPrune()
+	return h
+}
+
+// Close releases the background workers: it drains the event writer and stops
+// the push retention ticker.
+func (h *Hub) Close() {
+	h.closeOnce.Do(func() {
+		close(h.stopPrune)
+		h.pruneWG.Wait()
+		h.broker.Close()
+	})
+}
+
+// startPushPrune keeps the callback audit trail bounded: without a cap a
+// long-lived instance would grow push_records without limit.
+func (h *Hub) startPushPrune() {
+	if h.pushRepo == nil || h.cfg.PushRecordLimit <= 0 {
+		return
+	}
+	keep := h.cfg.PushRecordLimit
+	h.pruneWG.Add(1)
+	go func() {
+		defer h.pruneWG.Done()
+		ticker := time.NewTicker(pushPruneInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-h.stopPrune:
+				return
+			case <-ticker.C:
+				ctx, cancel := context.WithTimeout(dbCtx(), pushWriteTimeout)
+				err := h.pushRepo.Prune(ctx, keep)
+				cancel()
+				if err != nil {
+					slog.Warn("hub: prune push records failed", "keep", keep, "error", err)
+				}
+			}
+		}
+	}()
 }
 
 // runner builds a per-request flow runner: the hub itself stays immutable so
@@ -96,6 +192,21 @@ func (h *Hub) Store() *TaskStore { return h.store }
 
 // Broker exposes the event fan-out for SSE endpoints.
 func (h *Hub) Broker() *Broker { return h.broker }
+
+// Events replays the persisted frames of a task newer than since, oldest first.
+// Without an event repository it returns nil: the caller then falls back to
+// replaying the task state only.
+func (h *Hub) Events(taskID string, since uint64, limit int) []Event {
+	if h.eventRepo == nil {
+		return nil
+	}
+	events, err := h.eventRepo.Since(dbCtx(), taskID, since, limit)
+	if err != nil {
+		slog.Error("hub: replay events", "task", taskID, "since", since, "error", err)
+		return nil
+	}
+	return events
+}
 
 // Send runs a task to completion (or to input-required) and returns it.
 func (h *Hub) Send(ctx context.Context, params a2a.MessageSendParams) (*a2a.Task, error) {

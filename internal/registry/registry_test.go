@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"path/filepath"
 	"testing"
 
 	"agenthub/internal/httputil"
@@ -103,38 +102,6 @@ func TestSetHealthAndCounts(t *testing.T) {
 	}
 	if got := reg.CountsByKind()[string(KindSkill)]; got != 1 {
 		t.Fatalf("kind counts = %+v", reg.CountsByKind())
-	}
-}
-
-func TestSnapshotRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "registry.json")
-	reg := New()
-	if _, err := reg.Upsert(sampleEntry(KindMCP, "hr")); err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveSnapshot(path, reg); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
-	}
-
-	restored := New()
-	if err := LoadInto(path, restored); err != nil {
-		t.Fatalf("LoadInto: %v", err)
-	}
-	if restored.Size() != 1 {
-		t.Fatalf("restored size = %d", restored.Size())
-	}
-}
-
-func TestLoadSnapshotMissingFileIsEmpty(t *testing.T) {
-	snap, err := LoadSnapshot(filepath.Join(t.TempDir(), "absent.json"))
-	if err != nil {
-		t.Fatalf("missing file must not error: %v", err)
-	}
-	if len(snap.Entries) != 0 {
-		t.Fatalf("entries = %+v", snap.Entries)
-	}
-	if _, err := LoadSnapshot(""); err != nil {
-		t.Fatalf("empty path must not error: %v", err)
 	}
 }
 

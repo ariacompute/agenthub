@@ -16,6 +16,9 @@ import (
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
+	"agenthub/internal/store"
+
+	"gorm.io/gorm"
 )
 
 // Deps is everything the HTTP layer needs.
@@ -24,6 +27,9 @@ type Deps struct {
 	Hub *hub.Hub
 	Reg *registry.Registry
 	Log *slog.Logger
+	// DB is the optional PostgreSQL handle: it only feeds the readiness state
+	// reported by /healthz. It stays nil in unit tests.
+	DB *gorm.DB
 }
 
 // Register builds the router.
@@ -152,14 +158,33 @@ type healthResponse struct {
 	LegacyMethods   bool           `json:"legacyMethods"`
 	PushEnabled     bool           `json:"pushEnabled"`
 	Auth            string         `json:"auth"`
+	Database        string         `json:"database"`
 }
+
+// Database state enum reported by /healthz.
+const (
+	dbStateUp      = "up"
+	dbStateDown    = "down"
+	dbStateUnknown = "unknown"
+)
 
 func (d Deps) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	auth := "token"
 	if d.Cfg.ControlPlaneOpen() {
 		auth = "open"
 	}
-	httputil.WriteJSON(w, http.StatusOK, healthResponse{
+	status := http.StatusOK
+	db := dbStateUnknown
+	if d.DB != nil {
+		if err := store.Ping(d.DB); err == nil {
+			db = dbStateUp
+		} else {
+			db = dbStateDown
+			status = http.StatusServiceUnavailable
+			slog.Warn("healthz: database ping failed", "error", err)
+		}
+	}
+	httputil.WriteJSON(w, status, healthResponse{
 		Status:          "ok",
 		Version:         config.Version,
 		ProtocolVersion: config.ProtocolVersion,
@@ -172,5 +197,6 @@ func (d Deps) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		LegacyMethods:   d.Cfg.LegacyMethods,
 		PushEnabled:     d.Cfg.PushEnabled,
 		Auth:            auth,
+		Database:        db,
 	})
 }

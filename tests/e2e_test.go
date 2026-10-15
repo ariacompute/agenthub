@@ -23,6 +23,10 @@ import (
 	"agenthub/internal/registry"
 )
 
+// testDatabaseURL is a placeholder: the end-to-end suite never opens a
+// connection, the hub runs on its in-memory stores.
+const testDatabaseURL = "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable"
+
 // ---------------------------------------------------------------------------
 // harness
 // ---------------------------------------------------------------------------
@@ -39,17 +43,19 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 
 	cfg := &config.Config{
-		HTTPPort:       "3500",
-		Env:            "dev",
-		StaticDir:      t.TempDir(),
-		AuthOpenMode:   true,
-		LegacyMethods:  true,
-		MaxParallel:    4,
-		CLITimeout:     time.Second,
-		CLIAllowlist:   []string{"echo", "ls"},
-		MaxOutputBytes: 4096,
-		EventBuffer:    128,
-		PushEnabled:    true,
+		HTTPPort:        "3500",
+		Env:             "dev",
+		StaticDir:       t.TempDir(),
+		AuthOpenMode:    true,
+		LegacyMethods:   true,
+		MaxParallel:     4,
+		CLITimeout:      time.Second,
+		CLIAllowlist:    []string{"echo", "ls"},
+		MaxOutputBytes:  4096,
+		EventBuffer:     128,
+		PushEnabled:     true,
+		DatabaseURL:     testDatabaseURL,
+		PushRecordLimit: 100,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("config: %v", err)
@@ -76,7 +82,7 @@ func newHarness(t *testing.T) *harness {
 		CLITimeout:     cfg.CLITimeout,
 		CLIAllowlist:   cfg.CLIAllowlist,
 		MaxOutputBytes: cfg.MaxOutputBytes,
-	}, pusher)
+	}, pusher, hub.Persistence{})
 
 	server := httptest.NewServer(handlers.Register(handlers.Deps{
 		Cfg: cfg,

@@ -37,7 +37,7 @@ func testDeps(t *testing.T, cfg *config.Config, entries ...*registry.Entry) Deps
 		CLITimeout:     time.Second,
 		CLIAllowlist:   []string{"echo"},
 		MaxOutputBytes: 1024,
-	}, &hub.MockNotifier{})
+	}, &hub.MockNotifier{}, hub.Persistence{})
 	return Deps{
 		Cfg: cfg,
 		Hub: h,

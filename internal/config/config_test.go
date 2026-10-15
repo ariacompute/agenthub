@@ -14,6 +14,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -27,8 +28,22 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.CLITimeout != 15*time.Second {
 		t.Fatalf("cli timeout = %v", cfg.CLITimeout)
 	}
+	if cfg.PushRecordLimit != 100 {
+		t.Fatalf("push record limit = %d, want 100", cfg.PushRecordLimit)
+	}
 	if !cfg.ControlPlaneOpen() {
 		t.Fatal("open mode should be enabled by default with no token")
+	}
+}
+
+// TestLoadRejectsMissingDatabaseURL pins the "database is mandatory" rule: a
+// deployment without DATABASE_URL must fail fast instead of running on state
+// that disappears with the process.
+func TestLoadRejectsMissingDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	os.Unsetenv("DATABASE_URL")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load without DATABASE_URL must fail")
 	}
 }
 
@@ -43,15 +58,20 @@ func TestValidateRejectsBadInput(t *testing.T) {
 		{"negative timeout", func(c *Config) { c.CLITimeout = -time.Second }},
 		{"zero output cap", func(c *Config) { c.MaxOutputBytes = 0 }},
 		{"prod without token", func(c *Config) { c.Env = "prod"; c.AdminToken = ""; c.AuthOpenMode = true }},
+		{"missing database url", func(c *Config) { c.DatabaseURL = "" }},
+		{"blank database url", func(c *Config) { c.DatabaseURL = "   " }},
+		{"zero push record limit", func(c *Config) { c.PushRecordLimit = 0 }},
 	}
 	for _, c := range cases {
 		cfg := &Config{
-			HTTPPort:       "3500",
-			Env:            "dev",
-			MaxParallel:    8,
-			CLITimeout:     time.Second,
-			MaxOutputBytes: 1024,
-			EventBuffer:    64,
+			HTTPPort:        "3500",
+			Env:             "dev",
+			MaxParallel:     8,
+			CLITimeout:      time.Second,
+			MaxOutputBytes:  1024,
+			EventBuffer:     64,
+			DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable",
+			PushRecordLimit: 100,
 		}
 		c.mut(cfg)
 		if err := cfg.Validate(); err == nil {

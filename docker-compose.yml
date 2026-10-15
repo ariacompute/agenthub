@@ -1,4 +1,26 @@
 services:
+  # PostgreSQL is the only stateful component of agenthub: resources, tasks,
+  # artifacts, spans, events and push callback records all live here.
+  # Host port 5434 avoids the ports taken by postgres (5432) and bankmind (5433).
+  postgres:
+    image: postgres:16-alpine
+    container_name: agenthub-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agenthub}
+      POSTGRES_USER: ${POSTGRES_USER:-agenthub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agenthub}
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - agenthub-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agenthub} -d ${POSTGRES_DB:-agenthub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
   # Single binary: A2A data plane (/.well-known/agent.json, POST /a2a),
   # control plane (/api/*), /healthz and the built Vue 3 console.
   agenthub:
@@ -7,11 +29,11 @@ services:
       dockerfile: Dockerfile
     container_name: agenthub-server
     environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5432/${POSTGRES_DB:-agenthub}?sslmode=disable
       AGENTHUB_HTTP_PORT: "3500"
       AGENTHUB_ENV: ${AGENTHUB_ENV:-dev}
       AGENTHUB_ADMIN_TOKEN: ${AGENTHUB_ADMIN_TOKEN:-}
       AGENTHUB_AUTH_OPEN_MODE: ${AGENTHUB_AUTH_OPEN_MODE:-true}
-      AGENTHUB_DATA_FILE: /var/lib/agenthub/registry.json
       AGENTHUB_A2A_LEGACY_METHODS: ${AGENTHUB_A2A_LEGACY_METHODS:-true}
       AGENTHUB_MAX_PARALLEL: ${AGENTHUB_MAX_PARALLEL:-8}
       AGENTHUB_CLI_TIMEOUT: ${AGENTHUB_CLI_TIMEOUT:-15s}
@@ -19,10 +41,13 @@ services:
       AGENTHUB_MAX_OUTPUT_BYTES: ${AGENTHUB_MAX_OUTPUT_BYTES:-65536}
       AGENTHUB_EVENT_BUFFER: ${AGENTHUB_EVENT_BUFFER:-512}
       AGENTHUB_PUSH_ENABLED: ${AGENTHUB_PUSH_ENABLED:-true}
+      AGENTHUB_PUSH_RECORD_LIMIT: ${AGENTHUB_PUSH_RECORD_LIMIT:-100}
     ports:
       - "${AGENTHUB_HTTP_PORT:-3500}:3500"
-    volumes:
-      - agenthub-data:/var/lib/agenthub
+    # Migrations run at boot, so the database must be reachable first.
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3500/healthz >/dev/null || exit 1"]
       interval: 15s
@@ -50,4 +75,4 @@ services:
       - dev
 
 volumes:
-  agenthub-data:
+  agenthub-pgdata:

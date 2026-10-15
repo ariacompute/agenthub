@@ -6,9 +6,10 @@ An interconnection platform built on the **A2A (Agent2Agent) protocol**: it regi
 routes and orchestrates five heterogeneous asset classes — **model / agent / mcp / skill / cli** —
 and exposes them as standard A2A endpoints that any protocol-conforming agent can call.
 
-- Backend: Go 1.27 + `net/http`, **zero third-party dependencies**, single binary
+- Backend: Go 1.27 + `net/http`, single binary (GORM is the only production dependency)
 - Frontend: Vue 3 + Vite (bun), **13 languages**, pure black / white / grey monochrome UI
-- Persistence: in-memory state plus an optional JSON snapshot (no database)
+- Persistence: **PostgreSQL + GORM** — resources, tasks, artifacts, spans, the event stream and
+  push callback records are all durable
 - All five adapters in this release are **deterministic mocks**: no network, no subprocess,
   fully runnable offline
 
@@ -28,25 +29,54 @@ travels back the same path.
 ## Run
 
 ```bash
-make run                  # defaults to :3500
+make db-up                # start PostgreSQL (host port 5434) and wait until it is ready
+make run                  # defaults to :3500 (Open → Migrate → Seed)
 curl localhost:3500/healthz
 curl localhost:3500/.well-known/agent.json
 ```
 
+`DATABASE_URL` is **mandatory**: `config.Validate` refuses to start without it (there is no
+database-less fallback). Local value:
+`postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable` (see `.env.example`).
+
 Console: `make web-dev` (development) or `make web-build && make run` (the bundle is hosted at `/`
 by the Go process).
 
+## Persistence
+
+| Table | Content |
+| --- | --- |
+| `resources` | The five kinds of entries, `tags/capabilities/auth_schemes/env/metadata` stored as `jsonb` |
+| `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | Task body, outputs, span timeline, the parked `input-required` question and the callback config (children cascade with the task) |
+| `events` | Every status / artifact / message / span frame, replayable with `since=<seq>` after a reconnect |
+| `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
+| `schema_migrations` | Migration files already applied, skipped at startup |
+
+- Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
+  transaction per file; the SQL itself is idempotent.
+- Write strategy: tasks / artifacts / spans are **synchronous** (state transitions use a
+  conditional update `WHERE state=?` so concurrent writers cannot lose an update); events and push
+  records are **best effort** (bounded queue + async writer, failures only warn and **never become
+  back pressure on task execution**).
+- Reconnect: `GET /api/tasks/{id}/events?since=<seq>` replays every frame after `seq`, then follows
+  the live stream.
+
 ## Docker deployment
 
-One command brings the service up (the console is baked into the image and served at `/` by the
-Go process):
+One command brings **database + service** up (the console is baked into the image and served at `/`
+by the Go process):
 
 ```bash
-docker compose up -d                 # build and start in the background, :3500
+docker compose up -d                 # build and start postgres + agenthub, :3500 / :5434
 docker compose ps                    # STATUS should be Up (healthy)
 docker compose logs -f agenthub
-docker compose down                  # stop; the registry snapshot survives in the agenthub-data volume
+docker compose down                  # stop; data survives in the agenthub-pgdata volume
 ```
+
+Compose starts `postgres:16-alpine` first and only launches `agenthub` once it reports healthy
+(pgvector is not needed); the server then runs its migrations and seeds itself.
+`DATABASE_URL` is injected by compose; the published host port can be overridden with
+`POSTGRES_PORT`.
 
 Frontend development with hot reload (optional; the dev server proxies through the compose
 service name):
@@ -57,7 +87,9 @@ docker compose --profile dev up -d   # also starts web on :5173
 
 The image is a three-stage build (`oven/bun` builds the console → `golang:1.27-alpine` compiles →
 `alpine:3.21` runtime). It runs as a **non-root user** (uid 10001) and uses `/healthz` as its
-healthcheck.
+healthcheck; the response carries a `"database":"up"` field and returns 503 when the database is
+unreachable. The container is **stateless**: migrations ship inside the binary and every byte of
+state lives in the PostgreSQL volume.
 
 **Required for production:**
 
@@ -143,16 +175,24 @@ localised copy on the client.
 
 ## Configuration
 
-See `.env.example`. Main knobs: `AGENTHUB_HTTP_PORT` (default 3500),
-`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`, `AGENTHUB_DATA_FILE`, `AGENTHUB_MAX_PARALLEL`,
-`AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`, `AGENTHUB_MAX_OUTPUT_BYTES`.
+See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PORT` (default 3500),
+`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`, `AGENTHUB_MAX_PARALLEL`,
+`AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`, `AGENTHUB_MAX_OUTPUT_BYTES`,
+`AGENTHUB_PUSH_RECORD_LIMIT` (default 100).
 
 ## Tests
 
 ```bash
-make test        # go test -race ./...
-make web-test    # cd web && bunx vitest run
+make db-up             # integration cases need a real PostgreSQL
+make test              # go test -race ./... (integration cases skip without DATABASE_URL)
+make test-integration  # only integration_test.go
+make web-test          # cd web && bunx vitest run
 ```
+
+Integration coverage: idempotent migrations, resource CRUD with jsonb round trips, the full task
+lifecycle with cascade deletes, event replay, push record persistence plus the retention cap, and
+reading a complete A2A run back from the database. **They skip without a database and never
+fabricate results.**
 
 ## Relationship to mastra
 

@@ -3,6 +3,8 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"agenthub/internal/a2a"
@@ -194,6 +196,11 @@ func (d Deps) handleExportAgentCard(w http.ResponseWriter, r *http.Request) {
 
 // streamTaskEvents replays what already happened for a task and then follows
 // the live broker feed until the task reaches a terminal state.
+//
+// since=<seq> resumes a broken stream: every persisted frame newer than seq is
+// replayed before the live feed. Without it (or without event persistence) the
+// current state of the task is rebuilt from spans, artifacts and status, which
+// is the behaviour the console relied on before the stream was persisted.
 func (d Deps) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("task")
 	if id == "" {
@@ -213,22 +220,35 @@ func (d Deps) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, span := range d.Hub.Store().Spans(id) {
-		if err := httputil.WriteSSE(w, flusher, a2a.EventTaskSpan, span); err != nil {
+	since := sinceSeq(r.URL.Query().Get("since"))
+	replayed := d.Hub.Events(id, since, 0)
+	if len(replayed) > 0 {
+		for i := range replayed {
+			if err := writeEventFrame(w, flusher, &replayed[i]); err != nil {
+				return
+			}
+		}
+		if isTerminalEvent(&replayed[len(replayed)-1]) {
 			return
 		}
-	}
-	for _, art := range task.Artifacts {
-		frame := a2a.TaskArtifactUpdateEvent{Kind: a2a.KindArtifactUpdate, TaskID: task.ID, ContextID: task.ContextID, Artifact: art, LastChunk: art.LastChunk}
-		if err := httputil.WriteSSE(w, flusher, a2a.EventTaskArtifact, frame); err != nil {
+	} else if since == 0 {
+		for _, span := range d.Hub.Store().Spans(id) {
+			if err := httputil.WriteSSE(w, flusher, a2a.EventTaskSpan, span); err != nil {
+				return
+			}
+		}
+		for _, art := range task.Artifacts {
+			frame := a2a.TaskArtifactUpdateEvent{Kind: a2a.KindArtifactUpdate, TaskID: task.ID, ContextID: task.ContextID, Artifact: art, LastChunk: art.LastChunk}
+			if err := httputil.WriteSSE(w, flusher, a2a.EventTaskArtifact, frame); err != nil {
+				return
+			}
+		}
+		if err := httputil.WriteSSE(w, flusher, a2a.EventTaskStatus, statusFrame(task)); err != nil {
 			return
 		}
-	}
-	if err := httputil.WriteSSE(w, flusher, a2a.EventTaskStatus, statusFrame(task)); err != nil {
-		return
-	}
-	if isFinished(task) {
-		return
+		if isFinished(task) {
+			return
+		}
 	}
 
 	ch, cancel := d.Hub.Broker().Subscribe(id, 64)
@@ -247,27 +267,54 @@ func (d Deps) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
-			var err error
-			switch ev.Kind {
-			case "status":
-				err = httputil.WriteSSE(w, flusher, a2a.EventTaskStatus, ev.Status)
-			case "artifact":
-				err = httputil.WriteSSE(w, flusher, a2a.EventTaskArtifact, ev.Artifact)
-			case "message":
-				err = httputil.WriteSSE(w, flusher, a2a.EventTaskMessage, ev.Message)
-			case "span":
-				err = httputil.WriteSSE(w, flusher, a2a.EventTaskSpan, ev.Span)
-			default:
-				err = httputil.WriteSSE(w, flusher, ev.Kind, ev)
-			}
-			if err != nil {
+			if err := writeEventFrame(w, flusher, &ev); err != nil {
 				return
 			}
-			if ev.Kind == "status" && ev.Status != nil && (ev.Status.Status.State.IsTerminal() || ev.Status.Status.State == a2a.TaskStateInputRequired) {
+			if isTerminalEvent(&ev) {
 				return
 			}
 		}
 	}
+}
+
+// writeEventFrame renders one hub event as the SSE frame its kind maps to.
+func writeEventFrame(w http.ResponseWriter, flusher http.Flusher, ev *hub.Event) error {
+	switch ev.Kind {
+	case hub.EventKindStatus:
+		return httputil.WriteSSE(w, flusher, a2a.EventTaskStatus, ev.Status)
+	case hub.EventKindArtifact:
+		return httputil.WriteSSE(w, flusher, a2a.EventTaskArtifact, ev.Artifact)
+	case hub.EventKindMessage:
+		return httputil.WriteSSE(w, flusher, a2a.EventTaskMessage, ev.Message)
+	case hub.EventKindSpan:
+		return httputil.WriteSSE(w, flusher, a2a.EventTaskSpan, ev.Span)
+	default:
+		return httputil.WriteSSE(w, flusher, ev.Kind, ev)
+	}
+}
+
+// isTerminalEvent reports whether the frame ends the run. A2A streaming has no
+// sentinel frame: the terminal status update is the end of the stream.
+func isTerminalEvent(ev *hub.Event) bool {
+	if ev.Kind != hub.EventKindStatus || ev.Status == nil {
+		return false
+	}
+	state := ev.Status.Status.State
+	return state.IsTerminal() || state == a2a.TaskStateInputRequired
+}
+
+// sinceSeq parses the resume cursor. An absent or invalid value replays from
+// the start, which is the documented cold-start behaviour.
+func sinceSeq(raw string) uint64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func statusFrame(task *a2a.Task) a2a.TaskStatusUpdateEvent {

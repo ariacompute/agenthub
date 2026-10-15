@@ -1,6 +1,6 @@
-// Command agenthub-server is the single agenthub binary: it wires the resource
-// registry, the mock adapters and the A2A hub behind one HTTP listener that also
-// hosts the Vue3 console.
+// Command agenthub-server is the single agenthub binary: it wires PostgreSQL,
+// the resource registry, the mock adapters and the A2A hub behind one HTTP
+// listener that also hosts the Vue3 console.
 package main
 
 import (
@@ -18,6 +18,7 @@ import (
 	"agenthub/internal/handlers"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
+	"agenthub/internal/store"
 )
 
 func main() {
@@ -30,21 +31,41 @@ func main() {
 	}
 	setupLogger(cfg)
 
-	reg := registry.New()
-	if err := registry.LoadInto(cfg.DataFile, reg); err != nil {
-		slog.Error("registry snapshot", "error", err)
+	db, err := store.Open(cfg.DatabaseURL, cfg.Env == "dev")
+	if err != nil {
+		slog.Error("database", "error", err)
 		os.Exit(1)
 	}
-	seedDefaults(reg)
+	defer func() {
+		if err := store.Close(db); err != nil {
+			slog.Error("database close", "error", err)
+		}
+	}()
+	if err := store.Migrate(db); err != nil {
+		slog.Error("migrate", "error", err)
+		os.Exit(1)
+	}
+	if err := store.Seed(db); err != nil {
+		slog.Error("seed", "error", err)
+		os.Exit(1)
+	}
+
+	reg := registry.NewWithStore(store.NewResourceStore(db))
 
 	opts := adapter.Options{
 		CLITimeout:     cfg.CLITimeout,
 		CLIAllowlist:   cfg.CLIAllowlist,
 		MaxOutputBytes: cfg.MaxOutputBytes,
 	}
-	h := hub.New(cfg, reg, opts, &hub.MockNotifier{})
+	pusher := &hub.MockNotifier{Repo: store.NewPushRepository(db)}
+	h := hub.New(cfg, reg, opts, pusher, hub.Persistence{
+		Tasks:  store.NewTaskRepository(db),
+		Events: store.NewEventRepository(db),
+		Pushes: pusher.Repo,
+	})
+	defer h.Close()
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, Log: slog.Default()}
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default()}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Register(deps),
@@ -77,9 +98,6 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown", "error", err)
 	}
-	if err := registry.SaveSnapshot(cfg.DataFile, reg); err != nil {
-		slog.Error("registry snapshot save", "error", err)
-	}
 	slog.Info("agenthub stopped")
 }
 
@@ -89,78 +107,4 @@ func setupLogger(cfg *config.Config) {
 		level = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
-}
-
-// seedDefaults registers one deterministic resource per kind so a fresh
-// instance is immediately usable and the README smoke commands are reproducible.
-func seedDefaults(reg *registry.Registry) {
-	if reg.Size() > 0 {
-		return
-	}
-	seeds := []*registry.Entry{
-		{
-			ID:           "demo-model",
-			Kind:         registry.KindModel,
-			Name:         "afm-system-one",
-			Description:  "AFM foundation model endpoint",
-			Endpoint:     "https://api.ariacompute.com/v1",
-			Version:      "1.0.0",
-			Capabilities: []string{"chat", "stream"},
-			AuthSchemes:  []string{"bearer"},
-			Tags:         []string{"llm"},
-			Health:       registry.HealthHealthy,
-		},
-		{
-			ID:           "demo-agent",
-			Kind:         registry.KindAgent,
-			Name:         "aria-agent-cloud",
-			Description:  "Aria compute cloud agent (OpenAI beta Agents compatible)",
-			Endpoint:     "https://agent.ariacompute.com",
-			Version:      "1.0.0",
-			Capabilities: []string{"sessions", "tools"},
-			AuthSchemes:  []string{"bearer"},
-			Tags:         []string{"agent"},
-			Health:       registry.HealthHealthy,
-		},
-		{
-			ID:           "demo-mcp",
-			Kind:         registry.KindMCP,
-			Name:         "legacy-hr-mcp",
-			Description:  "Thin MCP wrapper over the legacy leave system REST API",
-			Endpoint:     "https://mcp.internal.example/mcp",
-			Transport:    registry.TransportStreamableHTTP,
-			Version:      "1.0.0",
-			Capabilities: []string{"tools/list", "tools/call"},
-			AuthSchemes:  []string{"oauth2"},
-			Tags:         []string{"hr", "legacy"},
-			Health:       registry.HealthHealthy,
-		},
-		{
-			ID:           "demo-skill",
-			Kind:         registry.KindSkill,
-			Name:         "leave-application",
-			Description:  "Standard operating procedure for leave requests",
-			Version:      "1.0.0",
-			Repository:   "https://github.com/ariacompute/agenthub",
-			Capabilities: []string{"check_balance", "submit_request"},
-			Tags:         []string{"hr", "sop"},
-			Health:       registry.HealthHealthy,
-		},
-		{
-			ID:           "demo-cli",
-			Kind:         registry.KindCLI,
-			Name:         "git-cli",
-			Description:  "Structured git wrapper exposed through MCP",
-			Capabilities: []string{"status", "log"},
-			Tags:         []string{"cli"},
-			Metadata:     map[string]string{"command": "git"},
-			Health:       registry.HealthHealthy,
-		},
-	}
-	for _, e := range seeds {
-		if _, err := reg.Upsert(e); err != nil {
-			slog.Error("seed resource", "id", e.ID, "error", err)
-		}
-	}
-	slog.Info("registry: seeded default resources", "count", len(seeds))
 }

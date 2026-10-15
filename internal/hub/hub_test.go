@@ -19,18 +19,26 @@ import (
 // helpers
 // ---------------------------------------------------------------------------
 
+// testConfig builds a configuration for the in-memory hub. DatabaseURL is
+// filled in so the struct is valid, but no repository is ever opened: the hub
+// falls back to its in-memory stores when Persistence is zero valued.
 func testConfig() *config.Config {
 	return &config.Config{
-		HTTPPort:       "3500",
-		Env:            "dev",
-		MaxParallel:    4,
-		CLITimeout:     time.Second,
-		CLIAllowlist:   []string{"echo", "ls"},
-		MaxOutputBytes: 1024,
-		EventBuffer:    64,
-		PushEnabled:    true,
+		HTTPPort:        "3500",
+		Env:             "dev",
+		MaxParallel:     4,
+		CLITimeout:      time.Second,
+		CLIAllowlist:    []string{"echo", "ls"},
+		MaxOutputBytes:  1024,
+		EventBuffer:     64,
+		PushEnabled:     true,
+		DatabaseURL:     testDatabaseURL,
+		PushRecordLimit: 100,
 	}
 }
+
+// testDatabaseURL is a placeholder: unit tests never connect.
+const testDatabaseURL = "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable"
 
 func testOptions() adapter.Options {
 	return adapter.Options{CLITimeout: time.Second, CLIAllowlist: []string{"echo", "ls"}, MaxOutputBytes: 1024}
@@ -48,7 +56,7 @@ func newTestHub(t *testing.T, entries ...*registry.Entry) (*Hub, *registry.Regis
 		*e = *stored
 	}
 	notifier := &MockNotifier{}
-	return New(testConfig(), reg, testOptions(), notifier), reg, notifier
+	return New(testConfig(), reg, testOptions(), notifier, Persistence{}), reg, notifier
 }
 
 func userMessage(text string) a2a.Message {
@@ -220,7 +228,6 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 		t.Fatalf("list = %d tasks, want 1", len(store.List()))
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // spans

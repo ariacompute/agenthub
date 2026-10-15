@@ -4,9 +4,9 @@
 
 基于 **A2A（Agent2Agent）协议**的互连平台：把 **model / agent / mcp / skill / CLI** 五类异构资产统一注册、发现、路由与编排，对外以标准 A2A 端点被任何遵循协议的 Agent 调用。
 
-- 后端：Go 1.27 + `net/http`，**零第三方依赖**，单二进制
+- 后端：Go 1.27 + `net/http`，单二进制（唯一生产依赖为 GORM）
 - 前端：Vue 3 + Vite（bun），**13 种语言**，纯黑/白/灰单色视觉
-- 持久化：内存态 + 可选 JSON snapshot（不引数据库）
+- 持久化：**PostgreSQL + GORM**（资源、任务、artifact、span、事件流、回调留痕全部落库）
 - 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通
 
 ## 概念地图
@@ -24,23 +24,45 @@
 ## 运行
 
 ```bash
-make run                  # 默认 :3500
+make db-up                # 起 PostgreSQL（宿主 5434）并等待 ready
+make run                  # 默认 :3500（Open → Migrate → Seed）
 curl localhost:3500/healthz
 curl localhost:3500/.well-known/agent.json
 ```
 
+`DATABASE_URL` **必填**：缺失时 `config.Validate` 拒绝启动（不存在无库降级路径）。
+本地地址：`postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable`（见 `.env.example`）。
+
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
+
+## 持久化
+
+| 表 | 内容 |
+| --- | --- |
+| `resources` | 五类资源条目全字段（`tags/capabilities/auth_schemes/env/metadata` 走 `jsonb`） |
+| `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | 任务主体、输出、span 时间线、`input-required` 挂起问题、回调配置（子表随任务级联删除） |
+| `events` | 每次状态/artifact/message/span 帧，支持 SSE 断线重连按 `since=<seq>` 回放 |
+| `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
+| `schema_migrations` | 已执行的迁移文件，启动时跳过 |
+
+- 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
+- 写入策略：任务/artifact/span **同步写**（状态迁移为条件更新 `WHERE state=?`，防并发丢更新）；
+  events 与 push_records **尽力而为**（有界队列 + 异步 writer，失败只告警，**绝不回压任务执行**）。
+- 事件重连：`GET /api/tasks/{id}/events?since=<seq>` 回放该 seq 之后的所有帧，再接实时流。
 
 ## Docker 部署
 
-一条命令起服务（控制台已烘焙进镜像，由 Go 进程托管于 `/`）：
+一条命令起**数据库 + 服务**（控制台已烘焙进镜像，由 Go 进程托管于 `/`）：
 
 ```bash
-docker compose up -d                 # 构建并后台启动，:3500
+docker compose up -d                 # 构建并后台启动 postgresql + agenthub，:3500 / :5434
 docker compose ps                    # STATUS 应为 Up (healthy)
 docker compose logs -f agenthub
-docker compose down                  # 停止；registry 快照保存在 agenthub-data 卷
+docker compose down                  # 停止；数据保留在 agenthub-pgdata 卷
 ```
+
+compose 会先拉起 `postgres:16-alpine`，健康检查通过后（pgvector 不需要）再启动 `agenthub`，
+后者启动时自动执行迁移与种子。`DATABASE_URL` 由 compose 注入，宿主端口可用 `POSTGRES_PORT` 覆盖。
 
 前端热更新开发（可选，控制台 dev server 走 compose 服务名代理）：
 
@@ -49,7 +71,8 @@ docker compose --profile dev up -d   # 额外起 web，:5173
 ```
 
 镜像为三段构建（`oven/bun` 构建控制台 → `golang:1.27-alpine` 编译 → `alpine:3.21` 运行时），
-运行时以**非 root 用户**（uid 10001）启动，`/healthz` 为健康检查端点。
+运行时以**非 root 用户**（uid 10001）启动，`/healthz` 为健康检查端点（响应含 `"database":"up"` 字段，
+库不可达时返回 503）。容器**无状态**：迁移随二进制内嵌，状态全在 PostgreSQL 卷里。
 
 **生产部署必须**：
 
@@ -127,14 +150,21 @@ curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
 
 ## 配置
 
-见 `.env.example`。主要项：`AGENTHUB_HTTP_PORT`（默认 3500）、`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`、`AGENTHUB_DATA_FILE`、`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`。
+见 `.env.example`。主要项：`DATABASE_URL`（**必填**）、`AGENTHUB_HTTP_PORT`（默认 3500）、
+`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`、`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、
+`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）。
 
 ## 测试
 
 ```bash
-make test        # go test -race ./...
-make web-test    # cd web && bunx vitest run
+make db-up             # 集成用例需要真实 PostgreSQL
+make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
+make test-integration  # 只跑 integration_test.go
+make web-test          # cd web && bunx vitest run
 ```
+
+集成用例覆盖：迁移幂等、资源 CRUD 与 jsonb 往返、任务全生命周期与级联删除、事件回放、
+push 回调留痕与保留上限、以及完整 A2A run 的落库回读。**无 DB 时自动 skip，不伪造结果**。
 
 ## 与 mastra 的关系
 

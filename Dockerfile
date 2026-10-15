@@ -1,8 +1,8 @@
 # agenthub — A2A interconnection platform
 #
-# Stage 1 builds the Vue 3 console, stage 2 the Go binary (zero third-party
-# dependencies, so there is no go.sum to copy), stage 3 is the runtime image
-# that hosts both from a single process.
+# Stage 1 builds the Vue 3 console, stage 2 the Go binary, stage 3 is the
+# runtime image that hosts both from a single process. PostgreSQL is the only
+# state: the binary carries its migrations embedded, so no volume is needed.
 
 # ---------- console ----------
 FROM oven/bun:1-alpine AS web-build
@@ -22,11 +22,12 @@ ENV GOTOOLCHAIN=local \
     CGO_ENABLED=0
 
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
+COPY migrations ./migrations
 RUN mkdir -p /out && \
     go build -trimpath -ldflags="-s -w" -o /out/agenthub-server ./cmd/agenthub-server
 
@@ -36,21 +37,21 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata wget && \
     addgroup -g 10001 agenthub && \
     adduser -D -u 10001 -G agenthub agenthub && \
-    mkdir -p /app/backend/static /var/lib/agenthub && \
-    chown -R agenthub:agenthub /var/lib/agenthub
+    mkdir -p /app/backend/static && \
+    chown -R agenthub:agenthub /app
 
 WORKDIR /app
 COPY --from=build /out/agenthub-server /app/agenthub-server
 COPY --from=web-build /backend/static /app/backend/static
 
-# The console bundle is served by the Go process; the snapshot keeps the
-# registry across restarts when AGENTHUB_DATA_FILE points into /var/lib/agenthub.
+# The console bundle is served by the Go process; every byte of state lives in
+# PostgreSQL, so the container stays stateless. DATABASE_URL is mandatory:
+# config.Validate refuses to start without it.
 # dev is the safe default: `AGENTHUB_ENV=prod` additionally requires
 # AGENTHUB_ADMIN_TOKEN (config.Validate refuses an open production deployment).
 ENV AGENTHUB_HTTP_PORT=3500 \
     AGENTHUB_ENV=dev \
-    AGENTHUB_STATIC_DIR=/app/backend/static \
-    AGENTHUB_DATA_FILE=/var/lib/agenthub/registry.json
+    AGENTHUB_STATIC_DIR=/app/backend/static
 
 USER agenthub
 EXPOSE 3500
