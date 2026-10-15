@@ -50,7 +50,6 @@
 - RAG / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
 - 语音、浏览器自动化、渠道接入、多语言 SDK、Agent 网络跨实例联邦。
 - LLM-as-judge 评分与评测闭环（eval 仅留钩子，**不产出分数**）。
-- 与 mastra agent 的 A2A 互通验证（形态对齐，首版不实现）。
 - 真实 MCP stdio 子进程、真实 CLI `exec`、真实模型端点（统一留 `TODO(real)`）。
 
 ## 2. 协议契约

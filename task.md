@@ -21,7 +21,7 @@
    registry/hub → handlers → `http.Server`（`ReadHeaderTimeout: 30s`）→
    信号优雅退出（15s）→ `Hub.Close()` → `store.Close`；全程 `slog` JSON
 6. [x] `README_cn.md` / `README.md`：概念地图、持久化表清单、Docker 部署、A2A 端点、冒烟 curl、
-   flow 原语、错误码、mastra 关系与边界
+   flow 原语、错误码与范围边界
 
 ### 2. 协议层（`internal/a2a`，冻结契约）
 
@@ -132,5 +132,4 @@
 52. [ ] pushNotification 真实回调（HTTP POST + 鉴权 + 重试；留痕表已就位）
 53. [ ] 多实例联邦：Agent Network（跨 agenthub 的 Agent Card 聚合与路由）
 54. [ ] eval 钩子接评测编排（**仍不产出分数**；缺凭据 skip 并写 reason）
-55. [ ] 与 mastra agent 的 A2A 互通验证（形态已对齐，仅验证）
-56. [ ] 控制台增强：拓扑时间窗口持久化、任务筛选与分页、artifact 下载
+55. [ ] 控制台增强：拓扑时间窗口持久化、任务筛选与分页、artifact 下载

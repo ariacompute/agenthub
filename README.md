@@ -205,8 +205,6 @@ everything on the Go side is implemented here.
 Out of scope: RAG, voice, browser automation, channel integrations, multi-language SDKs and
 LLM-as-judge scoring (eval only keeps a hook and produces no scores).
 
-Follow-up: A2A interoperation with mastra agents (not implemented in this release).
-
 ## License
 
 MIT.
