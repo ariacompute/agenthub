@@ -1,0 +1,17 @@
+# Go
+/agenthub-server
+/bin/
+*.test
+*.out
+
+# Local env
+.env
+
+# Runtime snapshot
+*.snapshot.json
+
+# Frontend
+node_modules/
+web/dist/
+backend/static/
+*.local

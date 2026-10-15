@@ -1,0 +1,21 @@
+# agenthub build context: keep the image build fast and reproducible.
+
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Build outputs (the Dockerfile rebuilds both inside the image).
+bin/
+backend/static/
+web/dist/
+web/node_modules/
+web/.vite/
+
+# Local run artefacts and docs that the runtime image does not need.
+*.md
+!README.md
+Dockerfile
+docker-compose.yml
+.dockerignore
