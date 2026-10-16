@@ -1,0 +1,286 @@
+# AgentHub 发布说明
+
+> 本文档以 A2A 互连平台（agenthub）产品的视角，汇总 `agenthub` 仓库截至 **2026-10-16**
+> 的全部特性更新，覆盖 **v0.1.0**（M1 首版：A2A 协议层 / 资源注册 / 适配层 / Hub 编排 /
+> 控制台）与 **v0.2.0**（PostgreSQL 全量持久化）。服务端为 Go 单二进制，控制台为 Vue 3
+> 单色界面，对外只暴露一套标准 A2A 端点。
+
+## 组件版本参考
+
+| 组件 | 仓库 | 版本参考 |
+| --- | --- | --- |
+| A2A 服务端 + 控制台 | `agenthub`（agenthub-server / Vue 3 console） | v0.2.0 |
+| A2A 协议实现 | `agenthub` / `internal/a2a` | 0.2.0 |
+| 持久化 | PostgreSQL 16 + GORM（`gorm.io/gorm` v1.25.12） | — |
+
+---
+
+## 一、平台总览
+
+`agenthub` 把 model（大脑）/ agent（数字员工）/ mcp（万能转接头）/ skill（岗位手册）/
+cli（对讲机）五类异构资产统一注册、发现、路由与编排，对外以标准 A2A 端点被任何遵循协议的
+Agent 调用。
+
+### 五层单向依赖
+
+- **分层依赖**：`a2a`（协议）→ `registry`（资源）→ `adapter`（适配）→ `hub`（编排）→
+  `handlers`（接入），依赖方向严格单向。
+- **持久层依赖倒置**：`ResourceStore` / `TaskRepository` / `EventRepository` /
+  `PushRepository` 四个端口由消费方包定义，实现落在 `internal/store`，
+  因此 `hub`、`registry` 不 import `store`。
+- **单二进制**：Go 1.27 + 标准库 `net/http`，无框架；GORM 是唯一生产依赖。
+- **默认端口 3500**，compose 数据库宿主端口 **5434**（避开 5432 / 5433）。
+
+### 五类资产概念地图
+
+- **model**：provider 注册表 + 回退链，输出 completion。
+- **agent**：目标驱动、可挂起待输入，步骤规划产物 `agent.plan`。
+- **mcp**：`tools/list` + `tools/call` 协议转换；`transport` 仅为描述字段。
+- **skill**：触发 → 手册 → 步骤 → 报告。
+- **cli**：白名单 → 超时 → 截断 → 结构化 JSON 回执。
+
+---
+
+## 二、A2A 协议层
+
+对外只暴露一套标准 A2A 端点：任何遵循协议的 Agent 都能发现、调用并接管任务编排。
+
+### 端点与方法
+
+- **服务发现**：`GET /.well-known/agent.json`（兼容 `GET /a2a/agent-card`），
+  一资源渲染为一个 skill。
+- **单入口调用**：`POST /a2a`，JSON-RPC 2.0 信封，`Content-Type: application/json`。
+- **七种方法**：`message/send`、`message/stream`、`tasks/get`、`tasks/cancel`、
+  `tasks/resume`、`tasks/pushNotification/set`、`tasks/pushNotification/get`。
+- **v0.1 别名**：`tasks/send` / `tasks/sendSubscribe`，由 `AGENTHUB_A2A_LEGACY_METHODS`
+  控制开关。
+- **资源选择**：`metadata.resourceId|resource_id|resource`（精确 id → 名称 → kind）→
+  `metadata.kind` 兜底 → 无选择器时优先 agent，否则按 id 字典序首个。
+
+### 任务状态机
+
+- **生命周期**：`submitted → working → input-required → completed / failed / canceled`，
+  终态不可再迁出，`unknown` 不可作为起点或终点。
+- **挂起恢复**：`input-required` 可**无限期挂起**，凭 `taskId` 通过 `tasks/resume` 续接恢复；
+  未挂起任务恢复返回 `task_not_resumable`（-32008）。
+
+### SSE 流式契约
+
+- **帧名**：`task_status_update` / `task_artifact_update` / `message`，错误帧名 `error`。
+- **无 `[DONE]` 哨兵**：终止由 `completed` / `failed` / `canceled` / `input-required`
+  状态事件表达，客户端不得依赖任何哨兵帧。
+- **控制台旁路**：`GET /a2a/stream?task=<id>` 提供无 JSON-RPC 封装的 SSE。
+
+### 统一错误模型
+
+- **机器可读 code**：`bad_request`(400) / `unauthorized`(401) / `not_found`(404) /
+  `method_not_allowed`(405) / `payload_too_large`(413) / `internal_error`(500)。
+- **JSON-RPC 码**：标准 `-32700` / `-32600` / `-32601` / `-32602` / `-32603`；
+  自定义 `-32001 task_not_found` … `-32008 task_not_resumable`。
+- **error.message 即 code 字符串**：不含空格与自然语言，多语言 100% 由前端 copy 层承担。
+- **适配器码**：`unknown_kind` / `cli_command_not_allowed` / `adapter_timeout` /
+  `resource_unreachable`。
+
+---
+
+## 三、资源注册层
+
+`registry` 以 MCP Registry 风格的条目模型登记五类资产，并提供发现、导出与聚合。
+
+### 五类条目
+
+- **Registry 级元数据**：`version` / `repository` / `tags` / `env` / `auth_schemes`，
+  以及 `endpoint` / `transport`（仅描述，适配器不得按它分支）。
+- **能力与健康**：`capabilities`（MCP 为工具名、skill 为步骤工具）；
+  `health` 取 `healthy` / `degraded` / `unhealthy` / `unknown`。
+- **id 规则**：形如 `<kind>-<hex>`，缺省自动生成；重复 id 注册返回 400。
+
+### 控制面与导出
+
+- **CRUD 与发现**：`GET/POST /api/resources`、`GET/PUT/DELETE /api/resources/{id}`、
+  `POST /api/resources/{id}/health`，支持 `?kind=` 与 `?q=` 过滤和计数。
+- **MCP 导出**：`GET /api/export/mcp` 输出 MCP server 描述。
+- **聚合 Agent Card**：`GET /api/export/agent-card`，每资源渲染为一个 skill。
+
+---
+
+## 四、适配层
+
+`adapter` 以同一个 `Connector` 接口收敛五类资产的调用面，首版**全部为确定性 mock**：
+无网络、无子进程、离线可跑通，真实对接以 `TODO(real)` 标注边界。
+
+### 五类连接器
+
+- **model**：provider 注册表 + 回退链，产物 `model.completion`。
+- **agent**：步骤规划；prompt 含 `approve` / `confirm` / `approval`（**词级匹配**）→
+  挂起并置 `RequiresInput`。
+- **mcp**：`tools/list` + `tools/call` 协议转换，产物 `mcp.tools` / `mcp.call`。
+- **skill**：触发 → 手册 → 步骤 → 报告，产物 `skill.manual`。
+- **cli**：白名单 → 超时 → 截断 → JSON 回执，产物 `cli.receipt`（含 `truncated`）。
+
+### 安全与可靠性
+
+- **确定性约束**：同输入同输出（按输入哈希派生）、不触网、不起进程，健康检查返回
+  确定性 `mockHealth`。
+- **CLI 四步底线**：白名单前置校验 → 单次超时（默认 15s）→ 输出截断 → 结构化 JSON 回执，
+  四步缺一不可。
+- **artifact 累积**：支持 `append` / `lastChunk`，任务结束时按累积列表返回。
+
+---
+
+## 五、Hub 编排层
+
+`hub` 把一次入站消息编排成可追踪、可挂起、可恢复的任务。
+
+### 状态机与挂起恢复
+
+- **合法迁移校验**：`CanTransition` 显式校验，非法迁移返回
+  `invalid_state_transition`（-32005），绝不静默降级。
+- **挂起态持久化**：`input-required` 的提问与提问时间随任务落 `task_pending`，恢复后清空。
+
+### flow 三原语
+
+- **`then`**：顺序执行一个资源，输出接下一步。
+- **`branch`**：按 `when` 选**首个匹配臂**，无匹配则整臂跳过（span 记 `skipped`）。
+- **`parallel`**：并发执行成员，成员只读各自上下文副本；分支数受
+  `AGENTHUB_MAX_PARALLEL`（默认 8）截断；任一成员失败则整个 `parallel` 失败。
+- **`when` 语法**：`""` / `always` / `true`（默认臂）、`contains:<text>`、`kind:<kind>`、
+  `has:<key>`；任一节点要求输入 → 流程**提前停止**并挂起。
+
+### span 时间线与事件扇出
+
+- **span 时间线**：每步一个 span，含耗时、状态（`ok`/`error`/`input-required`/`skipped`）
+  与错误 code，是「任务追踪」屏数据源。
+- **事件扇出**：每任务订阅 channel，慢消费者**丢弃最旧帧**而非阻塞运行，
+  缓冲上限 `AGENTHUB_EVENT_BUFFER`（默认 512）。
+- **错误码透传**：编排失败把错误 code 带到对应 span，前端可直接呈现。
+
+---
+
+## 六、持久化（PostgreSQL + GORM，v0.2.0）
+
+资源、任务、产物、span、挂起问题、回调配置、事件流与回调留痕全部落库；服务重启后
+可回读与回放，容器本身无状态。
+
+### 数据表
+
+- **`resources`**：五类条目全字段，`tags` / `capabilities` / `auth_schemes` / `env` /
+  `metadata` 为 `jsonb`。
+- **`tasks` + 子表**：任务主体与状态；`task_artifacts`、`task_spans`、`task_pending`、
+  `task_push` 随任务级联删除。
+- **`events`**：每个 broker 帧，`(task_id, seq)` 主键，供 `since=<seq>` 回放。
+- **`push_records`**：每次回调留痕（url / state / config 快照），
+  按 `AGENTHUB_PUSH_RECORD_LIMIT`（默认每任务 100 条）保留。
+- **`schema_migrations`**：已执行的迁移文件，启动时跳过。
+- **jsonb 载荷**：由自实现 `model.JSONField`（`driver.Valuer` / `sql.Scanner`）承载，
+  **不引入** `gorm.io/datatypes`。
+
+### 迁移与写入策略
+
+- **内嵌幂等迁移**：`migrations/*.sql` 经 `//go:embed` 内嵌，按文件名顺序、每文件单事务
+  执行；SQL 自身幂等，可重复执行、可审计、可回滚。
+- **条件更新防丢更新**：任务状态迁移走 `UPDATE ... WHERE id=? AND state=?` 并校验
+  `RowsAffected`，0 行时区分「任务不存在」与「并发冲突」。
+- **持久化不阻塞运行**：状态 / artifact / span 同步写；`events` 与 `push_records`
+  **尽力而为**（有界队列 + 异步 writer，队列满或失败只告警，**绝不回压任务执行**）。
+- **客户端断连不丢状态**：所有持久层调用统一走 `context.Background()`。
+- **移除 JSON snapshot**：`DATABASE_URL` 必填，缺失即 `config.Validate` 拒绝启动，
+  不存在无库降级路径。
+
+### 事件回放与回调留痕
+
+- **断线重连回放**：`GET /api/tasks/{id}/events?since=<seq>` 先回放该 seq 之后的持久化帧，
+  再接实时流；无 `since` 时回放 span / artifact / status 后订阅直播。
+- **seq 续接**：事件序号在启动后从库内最大 seq 续起，回放帧与实时帧不会撞号。
+- **回调留痕**：`MockNotifier` 每次回调落 `push_records`，失败只告警并回退内存，
+  **不得影响任务终态**；真实 HTTP 投递仍属 M2。
+
+---
+
+## 七、控制台
+
+Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面，也是 A2A 契约的可视化
+检查器。
+
+### 三屏
+
+- **注册中心**：五类筛选 + 搜索、健康指示与统计条、单资源「试跑」。
+- **任务追踪**：任务列表 + 状态过滤、span 时间线回放、artifact 原文可复制。
+- **拓扑视图**：五泳道资产与调用边，线型区分活跃与失败。
+
+### 多语言与单色体系
+
+- **13 种语言**：en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi，
+  全量母语翻译，英文兜底，`ar` 为 RTL；运行时切换同步 `<html lang>` 与 `dir`。
+- **零硬编码自然语言**：组件内一律 `t()`，后端枚举由 `copy/enums-copy.js` 映射。
+- **纯黑/白/灰单色**：所有 hex 满足 **R=G=B**，禁止任何有彩色相；状态靠
+  填充 / 描边 / 动效编码，五类资产以「灰阶明度 + 专属图标 + 文字标签」三重冗余区分。
+- **自动护栏**：`web/tests/style.spec.js` 校验色彩；`prefers-contrast` 与
+  `prefers-reduced-motion` 均有降级。
+
+---
+
+## 八、部署与运维
+
+### 交付形态
+
+- **Go 单二进制**：`bin/agenthub-server` + 构建期生成的 `backend/static`。
+- **三段构建镜像**：`oven/bun` 构建控制台 → `golang:1.27-alpine` 编译 →
+  `alpine:3.21` 运行时；以**非 root 用户**（uid 10001）启动，`/healthz` 为健康检查端点。
+- **docker compose**：一条 `docker compose up -d` 起 `postgres:16-alpine`（宿主 5434）+
+  `agenthub`，数据库 healthy 后服务才启动，启动时自动执行迁移与种子；
+  `--profile dev` 另起 bun 开发服务器（5173）。
+- **健康检查**：`/healthz` 返回版本、协议版本、资源与任务计数、模式、鉴权模式与
+  **`database`（up / down / unknown）**；库不可达返回 503。
+
+### 配置与安全治理
+
+- **必填项**：`DATABASE_URL`（缺失即拒绝启动）。
+- **端口与环境**：`AGENTHUB_HTTP_PORT`（默认 3500）、`AGENTHUB_ENV`
+  （dev / staging / prod）。
+- **鉴权**：`AGENTHUB_ADMIN_TOKEN` 护 `/api/*`，`AGENTHUB_AUTH_OPEN_MODE` 仅本地可用；
+  **生产红线**：`AGENTHUB_ENV=prod` 未配 token 时拒绝启动。
+- **限额**：`AGENTHUB_MAX_PARALLEL`（8）、`AGENTHUB_CLI_TIMEOUT`（15s）、
+  `AGENTHUB_CLI_ALLOWLIST`（git / ls / cat / echo / date / aria-memo）、
+  `AGENTHUB_MAX_OUTPUT_BYTES`（65536）、`AGENTHUB_EVENT_BUFFER`（512）、
+  `AGENTHUB_PUSH_RECORD_LIMIT`（100）。
+- **日志**：`slog` JSON，不打正文、密钥与向量；DSN 经 `store.RedactDSN` 脱敏后再记录。
+
+---
+
+## 九、测试与验收
+
+- **`go vet ./...` 无告警**：`go test -race ./...` 全绿，覆盖 a2a、config、registry、
+  adapter、hub、model、store、handlers、httputil。
+- **纯逻辑用例零外部依赖**：未注入仓库时 registry / TaskStore / Broker / MockNotifier
+  退化为内存语义，无 DB 也能全绿。
+- **DB 门控集成用例**：`tests/integration_test.go` 覆盖迁移幂等、资源 CRUD 与 jsonb 往返、
+  任务全生命周期与级联删除、事件回放、push 留痕与保留上限、完整 A2A run 落库回读；
+  **未设置 `DATABASE_URL` 则 skip，绝不伪造结果**。
+- **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
+  （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
+- **前端**：`bunx vitest run` 22 项通过（languages / copy-fallback / enums-copy / api /
+  style 护栏）。
+- **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
+  `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
+  错误码路径、注册 → 调用 → 删除闭环。
+
+---
+
+## 架构总览
+
+```
+调用方 ──POST /a2a（JSON-RPC 2.0 单入口）──> handlers → hub → adapter → 资源执行
+调用方 ──GET /.well-known/agent.json──────> Agent Card（一资源渲染为一个 skill）
+控制台 ──GET /api/tasks/{id}/events?since=seq──> SSE 回放 + 实时流
+hub ────store（GORM，四个端口接口）────────> PostgreSQL 16（内嵌幂等迁移）
+控制台 ──GET /api/*─────────────────────> 注册中心 / 任务追踪 / 拓扑视图
+```
+
+- **冻结契约**：A2A 帧形状只能在 `internal/a2a` 定义，任何层不得改写；SSE 无 `[DONE]`
+  哨兵。
+- **后端语言无关**：HTTP 与 JSON-RPC 响应只含字段、枚举与 code，多语言 100% 由前端
+  copy 层承担。
+- **传输无关**：MCP 的 `transport`（stdio / streamable-http / sse-legacy）是记录字段，
+  适配器不得按它分支。
+- **不做评分**：eval 仅留钩子，不接 LLM judge、不产出任何分数。
