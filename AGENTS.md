@@ -122,11 +122,25 @@ make db-down          # docker compose down
 make db-psql          # psql 进 compose 数据库
 make run              # db-up + go run（默认 :3500）
 make build            # web-build + go build → bin/agenthub-server
+make version          # 打印本次构建将写入的 version（git describe）
+make docker-build     # docker build --build-arg VERSION=$(make version)
 make test             # go test -race ./...（含DB 门控用例）
 make test-integration # 只跑 Integration 用例
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 ```
+
+## 版本打标
+
+- `config.Version` 必须是 **`var` 而不是 `const`**：`go build -ldflags "-X agenthub/internal/config.Version=..."`
+  只能覆盖包级 string 变量，改成 const 会让构建静默丢标、所有二进制都上报哨兵值。
+- 打标来源：`make build` / `make run` 取 `git describe --tags --always --dirty`
+  （最近 tag → 短 commit → `dev`），经 `Makefile` 的 `LDFLAGS` 注入；
+  `ProtocolVersion`（A2A 协议版本）跟构建无关，**保持 const、不打标**。
+- 容器镜像：`.dockerignore` 排除 `.git`，故由 `Dockerfile` 的 `ARG VERSION=dev` 承接，
+  `make docker-build` 或 compose 的 `VERSION: ${VERSION:-dev}` 传入。
+- 兜底哨兵 `"dev"`：未打标的构建在 `/healthz` 与 Agent Card 上报 `dev`，一眼可辨，
+  绝不冒充某个发布号。
 
 冒烟：`curl localhost:3500/healthz`；`curl localhost:3500/.well-known/agent.json`；
 `POST /a2a` 的 `message/send` 与 `message/stream`（详见 `README_cn.md`）。

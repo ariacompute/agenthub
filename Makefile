@@ -2,18 +2,27 @@ BINARY := agenthub-server
 WEB := web
 STATIC := backend/static
 
+# Version stamping: /healthz and the Agent Card report config.Version, which is
+# a var so the linker can overwrite it. `git describe` yields the most recent
+# tag (v0.2.0), then the short commit when the tag is unreachable, and appends
+# "-dirty" for a modified tree; "dev" is the last resort without git metadata.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X agenthub/internal/config.Version=$(VERSION)
+export VERSION
+
 # Local compose database (host port 5434 avoids postgres 5432 / bankmind 5433).
 DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable
 export DATABASE_URL
 
-.PHONY: run build test test-integration vet fmt db-up db-down db-psql \
+.PHONY: run build test test-integration vet fmt version docker-build \
+        db-up db-down db-psql \
         web-install web-dev web-build web-test web-test-watch clean
 
 run: db-up
-	go run ./cmd/$(BINARY)
+	go run -ldflags="$(LDFLAGS)" ./cmd/$(BINARY)
 
 build: web-build
-	go build -o bin/$(BINARY) ./cmd/$(BINARY)
+	go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
 
 # Unit + integration: integration cases skip themselves when DATABASE_URL is unset.
 test:
@@ -28,6 +37,14 @@ vet:
 
 fmt:
 	gofmt -w ./cmd ./internal ./tests
+
+# Show the version the next build will carry.
+version:
+	@echo $(VERSION)
+
+# Build the image with the same version stamp (see the VERSION ARG in Dockerfile).
+docker-build:
+	docker build --build-arg VERSION=$(VERSION) -t agenthub:$(VERSION) .
 
 db-up:
 	docker compose up -d postgres

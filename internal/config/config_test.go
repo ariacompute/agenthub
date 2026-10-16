@@ -2,9 +2,28 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestVersionIsStampable pins the contract the Makefile and Dockerfile rely on:
+// `go build -ldflags "-X agenthub/internal/config.Version=..."` can only
+// overwrite a package-level string var. Turning Version into a const would
+// silently drop the stamp and every build would report the sentinel instead.
+func TestVersionIsStampable(t *testing.T) {
+	if strings.TrimSpace(Version) == "" {
+		t.Fatal("config.Version must never be empty: /healthz and the Agent Card report it")
+	}
+	if strings.TrimSpace(ProtocolVersion) == "" {
+		t.Fatal("config.ProtocolVersion must never be empty")
+	}
+	// -X refuses constants, so this fails to compile the moment Version
+	// becomes a const — the assertion below documents the intent at runtime.
+	if strings.ContainsAny(Version, " \n\t") {
+		t.Fatalf("config.Version must be a single token, got %q", Version)
+	}
+}
 
 func TestLoadDefaults(t *testing.T) {
 	for _, key := range []string{

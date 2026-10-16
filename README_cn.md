@@ -35,6 +35,13 @@ curl localhost:3500/.well-known/agent.json
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
+### 版本打标
+
+`make build` 与 `make run` 通过 `-ldflags -X` 把 `git describe --tags --always --dirty`
+写入 `config.Version`，因此 `/healthz` 与 Agent Card 上报真实发布号（如 `v0.2.0`）；
+未打标的构建上报哨兵值 `dev`，不冒充发布号。镜像经 `VERSION` 构建参数传入同一取值
+（`make docker-build`）。
+
 ## 持久化
 
 | 表 | 内容 |

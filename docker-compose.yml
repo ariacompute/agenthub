@@ -27,6 +27,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # /healthz and the Agent Card report this. Stamp it with
+        #   VERSION=$(git describe --tags --always --dirty) docker compose build
+        VERSION: ${VERSION:-dev}
     container_name: agenthub-server
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5432/${POSTGRES_DB:-agenthub}?sslmode=disable

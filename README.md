@@ -42,6 +42,14 @@ database-less fallback). Local value:
 Console: `make web-dev` (development) or `make web-build && make run` (the bundle is hosted at `/`
 by the Go process).
 
+### Version stamping
+
+`make build` and `make run` stamp `config.Version` from
+`git describe --tags --always --dirty` via `-ldflags -X`, so `/healthz` and the Agent Card
+report the real release (for example `v0.2.0`). An unstamped build reports the `dev`
+sentinel instead of pretending to be a release. Images take the same value through the
+`VERSION` build arg (`make docker-build`).
+
 ## Persistence
 
 | Table | Content |

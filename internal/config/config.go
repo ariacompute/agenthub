@@ -13,12 +13,19 @@ import (
 	"time"
 )
 
-const (
-	// Version is the agenthub release reported by /healthz and the Agent Card.
-	Version = "0.1.0"
-	// ProtocolVersion is the A2A revision implemented by internal/a2a.
-	ProtocolVersion = "0.2.0"
-)
+// Version is the agenthub release reported by /healthz and the Agent Card.
+//
+// It is a var, not a const, so the build can stamp the real release from git:
+//
+//	go build -ldflags "-X agenthub/internal/config.Version=$(git describe --tags --always --dirty)"
+//
+// The fallback is a dev sentinel on purpose: an unstamped build must be obvious
+// in /healthz rather than silently claiming a release number it never was.
+var Version = "dev"
+
+// ProtocolVersion is the A2A revision implemented by internal/a2a. It tracks the
+// protocol, not the build, so it is never stamped and stays a const.
+const ProtocolVersion = "0.2.0"
 
 // Config is the fully validated runtime configuration.
 type Config struct {
