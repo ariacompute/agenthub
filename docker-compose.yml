@@ -28,9 +28,13 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # /healthz and the Agent Card report this. Stamp it with
-        #   VERSION=$(git describe --tags --always --dirty) docker compose build
+        # Reported as "version@commit" in the console and /healthz. Stamp with
+        #   VERSION=$(git describe --tags --abbrev=0 --always) \
+        #   COMMIT=$(git rev-parse --short=7 HEAD) docker compose build
         VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        DISTANCE: ${DISTANCE:-0}
+        DIRTY: ${DIRTY:-false}
     container_name: agenthub-server
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5432/${POSTGRES_DB:-agenthub}?sslmode=disable

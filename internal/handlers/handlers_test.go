@@ -142,6 +142,13 @@ func TestHealthz(t *testing.T) {
 	if body.Status != "ok" || body.Version == "" || body.ProtocolVersion == "" {
 		t.Fatalf("healthz = %+v", body)
 	}
+	// The console renders "version@commit" plus the tag divergence note.
+	if body.Commit != config.Commit {
+		t.Fatalf("commit = %q, want %q", body.Commit, config.Commit)
+	}
+	if body.BuildNote != config.BuildNote() {
+		t.Fatalf("buildNote = %q, want %q", body.BuildNote, config.BuildNote())
+	}
 	if len(body.Methods) != len(a2a.Methods) {
 		t.Fatalf("methods = %v, want %v", body.Methods, a2a.Methods)
 	}

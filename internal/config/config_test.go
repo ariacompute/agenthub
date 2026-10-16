@@ -23,6 +23,61 @@ func TestVersionIsStampable(t *testing.T) {
 	if strings.ContainsAny(Version, " \n\t") {
 		t.Fatalf("config.Version must be a single token, got %q", Version)
 	}
+	if strings.ContainsAny(Commit, " \n\t") {
+		t.Fatalf("config.Commit must be a single token, got %q", Commit)
+	}
+}
+
+func TestBuildString(t *testing.T) {
+	defer func(v, c string) { Version, Commit = v, c }(Version, Commit)
+
+	cases := []struct {
+		version, commit, want string
+	}{
+		{"v0.2.0", "1a2b3c4", "v0.2.0@1a2b3c4"},
+		{"v0.2.0", "", "v0.2.0"},        // no commit stamped: never render "@unknown"
+		{"v0.2.0", "unknown", "v0.2.0"}, // sentinel commit is treated as absent
+		{"dev", "unknown", "dev"},       // unstamped build stays obvious
+	}
+	for _, c := range cases {
+		Version, Commit = c.version, c.commit
+		if got := Build(); got != c.want {
+			t.Fatalf("Build(%q, %q) = %q, want %q", c.version, c.commit, got, c.want)
+		}
+	}
+}
+
+// TestBuildCommitIsSevenChars guards the console contract: the foot renders
+// "version@commit" and a longer hash would overflow the sidebar.
+func TestBuildCommitIsSevenChars(t *testing.T) {
+	defer func(c string) { Commit = c }(Commit)
+	Commit = "1a2b3c4d5e6f"
+	if got := Build(); got != Version+"@1a2b3c4d5e6f" {
+		t.Fatalf("Build must not truncate, got %q", got)
+	}
+	// Truncation is the console's job (Sidebar.vue slices to 7).
+}
+
+func TestBuildNote(t *testing.T) {
+	defer func(d, dirty string) { Distance, Dirty = d, dirty }(Distance, Dirty)
+
+	cases := []struct {
+		distance, dirty, want string
+	}{
+		{"0", "false", ""},          // exactly on a clean tag: nothing to caveat
+		{"2", "false", "+2"},        // unreleased commits since the tag
+		{"0", "true", "dirty"},      // local modification of a tagged build
+		{"2", "true", "+2 dirty"},   // both
+		{"", "false", ""},           // unstamped distance is treated as "at tag"
+		{"0", "", ""},               // unstamped dirty is treated as clean
+		{"12", "true", "+12 dirty"}, // multi-digit distance keeps its place
+	}
+	for _, c := range cases {
+		Distance, Dirty = c.distance, c.dirty
+		if got := BuildNote(); got != c.want {
+			t.Fatalf("BuildNote(%q, %q) = %q, want %q", c.distance, c.dirty, got, c.want)
+		}
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {

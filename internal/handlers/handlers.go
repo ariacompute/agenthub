@@ -148,6 +148,8 @@ func (d Deps) staticOrIndex() http.Handler {
 type healthResponse struct {
 	Status          string         `json:"status"`
 	Version         string         `json:"version"`
+	Commit          string         `json:"commit"`
+	BuildNote       string         `json:"buildNote"`
 	ProtocolVersion string         `json:"protocolVersion"`
 	Env             string         `json:"env"`
 	Mode            string         `json:"mode"`
@@ -187,6 +189,8 @@ func (d Deps) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, status, healthResponse{
 		Status:          "ok",
 		Version:         config.Version,
+		Commit:          config.Commit,
+		BuildNote:       config.BuildNote(),
 		ProtocolVersion: config.ProtocolVersion,
 		Env:             d.Cfg.Env,
 		Mode:            "mock",

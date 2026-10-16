@@ -13,19 +13,59 @@ import (
 	"time"
 )
 
-// Version is the agenthub release reported by /healthz and the Agent Card.
+// Version is the agenthub release reported by /healthz and the Agent Card. It
+// carries the git tag verbatim, prefix included ("v0.2.0").
 //
 // It is a var, not a const, so the build can stamp the real release from git:
 //
-//	go build -ldflags "-X agenthub/internal/config.Version=$(git describe --tags --always --dirty)"
+//	go build -ldflags "-X agenthub/internal/config.Version=$(git describe --tags --abbrev=0 --always)"
 //
 // The fallback is a dev sentinel on purpose: an unstamped build must be obvious
 // in /healthz rather than silently claiming a release number it never was.
 var Version = "dev"
 
+// Commit is the seven character git revision the binary was built from; the
+// console renders it next to Version as "v0.2.0@1a2b3c4". Stamped the same way
+// as Version, and likewise a var so the linker can overwrite it.
+var Commit = "unknown"
+
+// Distance is how many commits the build sits after the tag in Version: "0"
+// means the build is exactly at the tag. Combined with Version and Commit it
+// tells you whether a binary is a release or an unreleased point in history.
+var Distance = "0"
+
+// Dirty is "true" when the working tree had uncommitted changes at build time,
+// so a binary can never be mistaken for a reproducible release.
+var Dirty = "false"
+
 // ProtocolVersion is the A2A revision implemented by internal/a2a. It tracks the
 // protocol, not the build, so it is never stamped and stays a const.
 const ProtocolVersion = "0.2.0"
+
+// Build returns the "version@commit" string the console and logs show, e.g.
+// "v0.2.0@1a2b3c4". It degrades to the version alone when the build carried no
+// commit, so an unstamped binary never renders a misleading "…@unknown".
+func Build() string {
+	if Commit == "" || Commit == "unknown" {
+		return Version
+	}
+	return Version + "@" + Commit
+}
+
+// BuildNote summarises how far a build diverges from its tag: "" when the build
+// sits exactly on a clean tag, otherwise "+<n>" for the commits since the tag
+// and/or "dirty", e.g. "+2 dirty". The console appends it to Build() so an
+// unreleased or locally modified build is visible at a glance.
+func BuildNote() string {
+	parts := make([]string, 0, 2)
+	if Distance != "" && Distance != "0" {
+		parts = append(parts, "+"+Distance)
+	}
+	if Dirty == "true" {
+		parts = append(parts, "dirty")
+	}
+	return strings.Join(parts, " ")
+}
 
 // Config is the fully validated runtime configuration.
 type Config struct {

@@ -17,6 +17,20 @@ const items = computed(() => [
 ])
 
 const online = computed(() => Boolean(store.health))
+
+// "version@commit", e.g. v0.2.0@1a2b3c4. The server stamps both at build time;
+// the commit is trimmed here so a longer hash can never overflow the foot.
+const build = computed(() => {
+  const version = store.health?.version ?? ''
+  const commit = String(store.health?.commit ?? '').slice(0, 7)
+  return commit ? `${version}@${commit}` : version
+})
+
+// Divergence from the tag, e.g. "+2" and/or "dirty". Empty when the build sits
+// exactly on a clean tag. Both halves are server-side enum-ish data, so they
+// are rendered verbatim and never translated.
+const buildNote = computed(() => store.health?.buildNote ?? '')
+const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildNote.value}` : build.value))
 </script>
 
 <template>
@@ -43,8 +57,14 @@ const online = computed(() => Boolean(store.health))
     </nav>
 
     <div class="sidebar-foot">
-      <StateDot :state="online ? 'healthy' : 'unknown'" :show-label="false" />
-      <span>{{ t(online ? 'online' : 'offline') }}</span>
+      <div class="sidebar-status">
+        <StateDot :state="online ? 'healthy' : 'unknown'" :show-label="false" />
+        <span>{{ t(online ? 'online' : 'offline') }}</span>
+      </div>
+      <!-- The note sits on its own line: appending it inline would be
+           ellipsized away at the default sidebar width. -->
+      <span v-if="build" class="sidebar-build" :title="buildLabel">{{ build }}</span>
+      <span v-if="buildNote" class="sidebar-build sidebar-build-note" :title="buildLabel">{{ buildNote }}</span>
     </div>
   </aside>
 </template>

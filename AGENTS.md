@@ -132,14 +132,25 @@ make web-install / make web-dev / make web-build / make web-test
 
 ## 版本打标
 
-- `config.Version` 必须是 **`var` 而不是 `const`**：`go build -ldflags "-X agenthub/internal/config.Version=..."`
+- `config.Version` / `config.Commit` / `config.Distance` / `config.Dirty` 必须是
+  **`var` 而不是 `const`**：`go build -ldflags "-X agenthub/internal/config.Version=…"`
   只能覆盖包级 string 变量，改成 const 会让构建静默丢标、所有二进制都上报哨兵值。
-- 打标来源：`make build` / `make run` 取 `git describe --tags --always --dirty`
-  （最近 tag → 短 commit → `dev`），经 `Makefile` 的 `LDFLAGS` 注入；
+- 打标来源（`make build` / `make run` 经 `LDFLAGS` 注入）：
+  `Version` = `git describe --tags --abbrev=0 --always`（**tag 原样保留 `v` 前缀**，
+  未达 tag 时回落短 hash，兜底 `dev`）；`Commit` = `git rev-parse HEAD | cut -c1-7`
+  （兜底 `unknown`）；`Distance` = `git rev-list --count <tag>..HEAD`（`0` 表示构建
+  恰好落在 tag 上）；`Dirty` = `git status --porcelain` 非空则为 `true`。
   `ProtocolVersion`（A2A 协议版本）跟构建无关，**保持 const、不打标**。
-- 容器镜像：`.dockerignore` 排除 `.git`，故由 `Dockerfile` 的 `ARG VERSION=dev` 承接，
-  `make docker-build` 或 compose 的 `VERSION: ${VERSION:-dev}` 传入。
-- 兜底哨兵 `"dev"`：未打标的构建在 `/healthz` 与 Agent Card 上报 `dev`，一眼可辨，
+- 控制台展示：侧边栏左下角渲染 **`version@commit`**（如 `v0.2.0@1a2b3c4`，commit 截
+  7 位），数据来自 `/healthz` 的 `version` + `commit` 字段（`config.Build()` 负责拼串，
+  commit 缺席时退化为仅 version）；`buildNote`（`config.BuildNote()`，形如 `+3 dirty`）
+  是对 tag 的偏离说明，**另起一行**渲染（内联追加会被省略号裁掉），恰在干净 tag 上时为
+  空且不渲染；顶栏 chip 只显示 version。这些全是数据字段，**不进 copy 层、不翻译**。
+- 容器镜像：`.dockerignore` 排除 `.git`，故由 `Dockerfile` 的 `ARG VERSION=dev` /
+  `ARG COMMIT=unknown` / `ARG DISTANCE=0` / `ARG DIRTY=false` 承接，
+  `make docker-build` 或 compose 的 `VERSION` / `COMMIT` / `DISTANCE` / `DIRTY` 传入
+  （CI 从干净 checkout 构建时后两者用默认值）。
+- 兜底哨兵 `"dev"` / `"unknown"`：未打标的构建在 `/healthz` 上报 `dev`，一眼可辨，
   绝不冒充某个发布号。
 
 冒烟：`curl localhost:3500/healthz`；`curl localhost:3500/.well-known/agent.json`；

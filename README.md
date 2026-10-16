@@ -44,11 +44,14 @@ by the Go process).
 
 ### Version stamping
 
-`make build` and `make run` stamp `config.Version` from
-`git describe --tags --always --dirty` via `-ldflags -X`, so `/healthz` and the Agent Card
-report the real release (for example `v0.2.0`). An unstamped build reports the `dev`
-sentinel instead of pretending to be a release. Images take the same value through the
-`VERSION` build arg (`make docker-build`).
+`make build` and `make run` stamp `config.Version` (the git tag, e.g. `v0.2.0`),
+`config.Commit` (the seven character revision), `config.Distance` (commits since the tag)
+and `config.Dirty` via `-ldflags -X`. `/healthz` returns them, the Agent Card carries the
+version, and the console shows **`version@commit`** (for example `v0.2.0@1a2b3c4`) in the
+bottom-left corner of the sidebar, with a second line such as `+3 dirty` whenever the
+build is not exactly a clean tag. An unstamped build reports the `dev` sentinel instead
+of pretending to be a release. Images take the same values through the `VERSION` /
+`COMMIT` / `DISTANCE` / `DIRTY` build args (`make docker-build`).
 
 ## Persistence
 

@@ -16,7 +16,9 @@ const auth = computed(() => store.health?.auth ?? '')
 <template>
   <header class="topbar">
     <span class="chip"><strong>{{ mode }}</strong></span>
-    <span class="chip">v{{ version }}</span>
+    <!-- config.Version carries the tag verbatim, prefix included; the sidebar
+         foot shows the fuller "version@commit". -->
+    <span class="chip">{{ version }}</span>
     <span class="chip">auth: <strong>{{ auth }}</strong></span>
     <div class="spacer"></div>
     <LanguageSwitcher />

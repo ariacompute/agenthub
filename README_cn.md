@@ -37,10 +37,12 @@ curl localhost:3500/.well-known/agent.json
 
 ### 版本打标
 
-`make build` 与 `make run` 通过 `-ldflags -X` 把 `git describe --tags --always --dirty`
-写入 `config.Version`，因此 `/healthz` 与 Agent Card 上报真实发布号（如 `v0.2.0`）；
-未打标的构建上报哨兵值 `dev`，不冒充发布号。镜像经 `VERSION` 构建参数传入同一取值
-（`make docker-build`）。
+`make build` 与 `make run` 通过 `-ldflags -X` 把 `config.Version`（git tag，如 `v0.2.0`）、
+`config.Commit`（7 位 commit）、`config.Distance`（tag 之后的提交数）与 `config.Dirty`
+写进二进制。`/healthz` 同时返回，Agent Card 带版本；控制台在**侧边栏左下角**渲染
+**`version@commit`**（如 `v0.2.0@1a2b3c4`），构建偏离干净 tag 时另起一行显示 `+3 dirty`
+之类的偏离说明。未打标的构建上报哨兵值 `dev`，不冒充发布号；镜像经 `VERSION` / `COMMIT` /
+`DISTANCE` / `DIRTY` 构建参数传入同一取值（`make docker-build`）。
 
 ## 持久化
 

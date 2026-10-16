@@ -18,10 +18,14 @@ RUN bun run build && test -f /backend/static/index.html
 # ---------- server ----------
 FROM golang:1.27-alpine AS build
 
-# .git is excluded by .dockerignore, so the release version has to be passed in:
-#   docker build --build-arg VERSION=$(git describe --tags --always --dirty)
-# `make docker-build` does this; compose forwards $VERSION the same way.
+# .git is excluded by .dockerignore, so the build stamp has to be passed in:
+#   docker build --build-arg VERSION=$(git describe --tags --abbrev=0 --always) \
+#                --build-arg COMMIT=$(git rev-parse --short=7 HEAD)
+# `make docker-build` does this; compose forwards $VERSION / $COMMIT the same way.
 ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DISTANCE=0
+ARG DIRTY=false
 
 ENV GOTOOLCHAIN=local \
     CGO_ENABLED=0
@@ -34,7 +38,8 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY migrations ./migrations
 RUN mkdir -p /out && \
-    go build -trimpath -ldflags="-s -w -X agenthub/internal/config.Version=${VERSION}" \
+    go build -trimpath \
+    -ldflags="-s -w -X agenthub/internal/config.Version=${VERSION} -X agenthub/internal/config.Commit=${COMMIT} -X agenthub/internal/config.Distance=${DISTANCE} -X agenthub/internal/config.Dirty=${DIRTY}" \
     -o /out/agenthub-server ./cmd/agenthub-server
 
 # ---------- runtime ----------

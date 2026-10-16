@@ -212,12 +212,39 @@ textarea:focus {
 .sidebar-foot {
   margin-block-start: auto;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-3);
   padding-block-start: 12px;
   border-block-start: 1px solid var(--stroke-1);
+}
+
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* version@commit, e.g. v0.2.0@1a2b3c4 — data, never translated. */
+.sidebar-build {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+/* "+2" / "dirty" divergence from the tag — its own line so it survives the
+   ellipsis, and quieter than the release string itself. */
+.sidebar-build-note {
+  font-size: 10px;
+  color: var(--text-2);
+  opacity: 0.7;
 }
 
 .main {

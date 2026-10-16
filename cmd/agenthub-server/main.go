@@ -77,7 +77,11 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("agenthub listening", "port", cfg.HTTPPort, "env", cfg.Env, "version", config.Version)
+		attrs := []any{"port", cfg.HTTPPort, "env", cfg.Env, "build", config.Build()}
+		if note := config.BuildNote(); note != "" {
+			attrs = append(attrs, "note", note)
+		}
+		slog.Info("agenthub listening", attrs...)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
