@@ -61,6 +61,24 @@ func Migrate(db *gorm.DB) error {
 	return nil
 }
 
+// Applied reports the migration filenames this database has run, oldest first.
+//
+// The backup layer records the same list inside every archive, which is how a
+// restore can tell an archive taken at a newer schema from one that is merely
+// older than this build.
+func Applied(db *gorm.DB) ([]string, error) {
+	applied, err := appliedMigrations(db)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(applied))
+	for name := range applied {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 func appliedMigrations(db *gorm.DB) (map[string]bool, error) {
 	var rows []model.SchemaMigration
 	if err := db.Find(&rows).Error; err != nil {

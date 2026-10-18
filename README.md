@@ -32,7 +32,8 @@ See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PO
 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` + `AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD`, `AGENTHUB_SESSION_TTL`,
 `AGENTHUB_MAX_PARALLEL`, `AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`,
 `AGENTHUB_MAX_OUTPUT_BYTES`, `AGENTHUB_PUSH_RECORD_LIMIT` (default 100),
-`AGENTHUB_SEED_DEMO` (default **false**).
+`AGENTHUB_SEED_DEMO` (default **false**), `AGENTHUB_BACKUP_DIR` (default empty = checkpoints off),
+`AGENTHUB_BACKUP_KEEP_LAST` / `AGENTHUB_BACKUP_MAX_AGE_DAYS` (retention).
 
 ### Users, sessions and RBAC
 
@@ -46,7 +47,8 @@ The console and the `/api/*` control plane are behind a **session**, not a share
   boot and becomes the **owner**. With neither that nor an existing account, the first registered
   account becomes the owner, so a fresh instance is never unreachable.
 - **RBAC**: users → groups → roles → permissions (`resources:read`, `resources:write`, `tasks:read`,
-  `tasks:write`, `users:manage`, `roles:manage`, `grants:manage`, `sessions:manage`). The owner holds
+  `tasks:write`, `users:manage`, `roles:manage`, `grants:manage`, `sessions:manage`,
+  `backups:manage`). The owner holds
   all of them, which is what keeps a misconfigured instance recoverable.
 - **Resource grants**: `POST /api/grants` restricts one resource to a user or group (`read` / `write`).
   A resource **without** a grant stays visible to everyone; the first grant restricts it everywhere —
@@ -58,7 +60,8 @@ The console and the `/api/*` control plane are behind a **session**, not a share
 Deleting a user **disables** it: tasks, spans and grants stay for the audit trail.
 
 All of this is available in the console: `/login` for registration and login, `/admin` (visible with
-`users:manage`, `roles:manage` or `grants:manage`) for users, the permission matrix and grants.
+`users:manage`, `roles:manage`, `grants:manage` or `backups:manage`) for users, the permission
+matrix, grants and database checkpoints.
 
 No demo data is inserted unless you ask for it: `AGENTHUB_SEED_DEMO=true` registers the five
 `demo-*` resources (`demo-model`, `demo-agent`, `demo-mcp`, `demo-skill`, `demo-cli`) at startup,
@@ -293,6 +296,7 @@ localised copy on the client.
 | `events` | Every status / artifact / message / span frame, replayable with `since=<seq>` after a reconnect |
 | `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
 | `schema_migrations` | Migration files already applied, skipped at startup |
+| `backup_checkpoints` / `backup_schedules` | The checkpoint catalogue and the schedule — **excluded** from every dump and restore, so an operator can still see the archive they restored from |
 
 - Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
   transaction per file; the SQL itself is idempotent.
@@ -307,6 +311,34 @@ Integration coverage: idempotent migrations, resource CRUD with jsonb round trip
 lifecycle with cascade deletes, event replay, push record persistence plus the retention cap, and
 reading a complete A2A run back from the database. **They skip without a database and never
 fabricate results.**
+
+## Database checkpoints
+
+The console's **Backups** tab (`/admin`, `backups:manage`) takes a complete dump of the agenthub
+schema into one `tar.gz` on disk and can rewind the database to any of them.
+
+- **Archive**: `manifest.json` (tables, row counts, engine, the migration set it was taken at) plus
+  the payload, in one file. The file's sha256 is stored on the catalogue row and re-checked before a
+  download and before a restore, so an archive that rotted on its volume is refused rather than
+  handed over.
+- **Engines**: `pg_dump -Fc` when the PostgreSQL client is installed in the runtime image, otherwise
+  a pure-Go engine that streams `COPY … TO STDOUT` / `COPY … FROM STDIN`. The engine travels with the
+  archive; an archive can only be loaded by the engine that wrote it.
+- **Schedule** (edited in the console, persisted): off, every N minutes, daily at a fixed time in a
+  timezone, or a five-field cron expression. The scheduler catches up once after a restart, and rows
+  left `running` by a process that died are closed at the next boot.
+- **Retention**: keep the newest *N* checkpoints and delete anything older than *M* days. The newest
+  checkpoint is never swept, and the automatic checkpoint a restore takes first is exempt for 24
+  hours — the way back must survive a cleanup run.
+- **Restore guardrails**, in order: the operator retypes the checkpoint id → the checksum is verified
+  → the archive's migration set is compared against the running build (an archive from a *newer*
+  schema is refused; an older one is loaded and then migrated) → a checkpoint of the current
+  database is taken → the hub stops accepting new tasks and waits for the running ones to finish →
+  the tables are rewritten → in-memory state is reloaded. No restart, and every failure leaves the
+  database as it was.
+- **Configuration**: `AGENTHUB_BACKUP_DIR` is the switch. Without it the tab reports the feature as
+  disabled and nothing else changes — the default in `docker-compose.yml`, where the
+  `agenthub-backups` volume is mounted but left unused until you set the variable.
 
 ## Relationship to mastra
 

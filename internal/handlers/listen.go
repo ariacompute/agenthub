@@ -32,6 +32,7 @@ func Listeners() []Listener {
 		{"GET /api/users", "admin: list, create, update and disable users"},
 		{"GET /api/roles", "admin: roles, groups and the permission matrix"},
 		{"GET /api/grants", "admin: per-resource read/write grants"},
+		{"GET /api/backups", "admin: database checkpoints, schedule and restores"},
 		{"GET /healthz", "health probe, also the container healthcheck"},
 	}
 }

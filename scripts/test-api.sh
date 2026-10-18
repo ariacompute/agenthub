@@ -260,8 +260,11 @@ http_anon GET /api/resources
 expect 'the control plane is closed without a session' 401 "$STATUS"
 expect 'the code on the wire is unauthenticated' unauthenticated "$(jget code)"
 
+# Kept in a variable because the checkpoint section logs in a second time: a
+# restore puts the database back, which drops the session it created.
+LOGIN_BODY=$(printf '{"email":"%s","password":"%s"}' "$TEST_EMAIL" "$TEST_PASSWORD")
 if [ -z "$SESSION_TOKEN" ]; then
-	http POST /api/auth/login "$(printf '{"email":"%s","password":"%s"}' "$TEST_EMAIL" "$TEST_PASSWORD")"
+	http POST /api/auth/login "$LOGIN_BODY"
 	if [ "$STATUS" != "200" ]; then
 		# A fresh instance has no account yet: register the first one, which
 		# becomes the owner and therefore holds every permission.
@@ -269,7 +272,7 @@ if [ -z "$SESSION_TOKEN" ]; then
 		case "$STATUS" in
 		201)
 			pass "registered the first account ($TEST_EMAIL)"
-			http POST /api/auth/login "$(printf '{"email":"%s","password":"%s"}' "$TEST_EMAIL" "$TEST_PASSWORD")"
+			http POST /api/auth/login "$LOGIN_BODY"
 			;;
 		409) skip 'register' 'the account already exists' ;;
 		esac
@@ -651,6 +654,65 @@ http DELETE "/api/resources/$GRANT_RESOURCE"
 expect 'the granted resource is cleaned up' 204 "$STATUS"
 http DELETE "/api/users/$MEMBER_ID"
 expect 'a user can be disabled' 204 "$STATUS"
+
+# ---------------------------------------------------------------------------
+# database checkpoints
+#
+# Only asserted when the instance has a backup directory: without one the
+# feature is off by design, which is a supported configuration rather than a
+# failure. A real restore is behind an opt-in of its own — it rewrites every
+# table, which would invalidate the session the sections above (and the cleanup
+# below) rely on.
+# ---------------------------------------------------------------------------
+
+section 'database checkpoints'
+http GET /api/backups
+if [ "$(jget enabled)" = "true" ]; then
+	expect 'the checkpoint catalogue is listed' 200 "$STATUS"
+	expect_match 'the overview names the engine' '"engine"' "$(cat "$BODY")"
+
+	http GET /api/backups/schedule
+	expect 'the schedule is readable' 200 "$STATUS"
+	http PUT /api/backups/schedule '{"mode":"hourly"}'
+	expect 'a schedule that cannot run is refused' 400 "$STATUS"
+	expect 'the refusal names the reason' backup_schedule_invalid "$(jget code)"
+
+	http POST /api/backups '{"label":"test-api.sh"}'
+	expect 'a checkpoint can be taken' 201 "$STATUS"
+	CHECKPOINT_ID=$(jget checkpoint.id)
+	expect 'the checkpoint completed' ok "$(jget checkpoint.status)"
+	if [ -n "$CHECKPOINT_ID" ]; then
+		http GET "/api/backups/$CHECKPOINT_ID"
+		expect 'the checkpoint can be read back' 200 "$STATUS"
+		http GET "/api/backups/$CHECKPOINT_ID/download"
+		expect 'the archive can be downloaded' 200 "$STATUS"
+		# The last guardrail before every table is rewritten.
+		http POST "/api/backups/$CHECKPOINT_ID/restore" '{}'
+		expect 'a restore nobody confirmed is refused' 400 "$STATUS"
+		expect 'the refusal asks for the id' restore_confirm_required "$(jget code)"
+
+		if [ "${AGENTHUB_TEST_BACKUP_RESTORE:-}" = "true" ]; then
+			http POST "/api/backups/$CHECKPOINT_ID/restore" "$(printf '{"confirm":"%s"}' "$CHECKPOINT_ID")"
+			expect 'a confirmed restore runs' 200 "$STATUS"
+			http GET /api/backups
+			expect_match 'the restore left a rollback checkpoint' 'pre-restore' "$(cat "$BODY")"
+			# The session was just replaced by an older one: log back in so the
+			# cleanup below still talks to a live session.
+			http POST /api/auth/login "$LOGIN_BODY"
+		else
+			skip 'restore' 'set AGENTHUB_TEST_BACKUP_RESTORE=true: it rewrites every table and invalidates the session the other sections use'
+		fi
+
+		http DELETE "/api/backups/$CHECKPOINT_ID"
+		expect 'a checkpoint can be deleted' 204 "$STATUS"
+		http GET "/api/backups/$CHECKPOINT_ID"
+		expect 'the deleted checkpoint is gone' 404 "$STATUS"
+	else
+		fail 'a checkpoint can be taken' "no checkpoint id in the response ($(cat "$BODY"))"
+	fi
+else
+	skip 'database checkpoints' "$(jget reason): set AGENTHUB_BACKUP_DIR and restart to exercise them"
+fi
 
 # ---------------------------------------------------------------------------
 # cleanup + console bundle

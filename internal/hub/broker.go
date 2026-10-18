@@ -100,6 +100,17 @@ func (b *Broker) Start(events EventRepository, queueSize int) error {
 	return nil
 }
 
+// SetNext moves the sequence counter, i.e. the value the next frame will get.
+//
+// It is only for a restore: the frames in the database are the truth afterwards,
+// so the counter follows them even when that means moving backwards. Start only
+// ever moves it forwards.
+func (b *Broker) SetNext(next uint64) {
+	b.mu.Lock()
+	b.next = next
+	b.mu.Unlock()
+}
+
 // Close stops the writer after draining whatever is still queued.
 func (b *Broker) Close() {
 	b.mu.Lock()

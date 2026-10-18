@@ -66,6 +66,7 @@ const (
 	PermRolesManage    = "roles:manage"
 	PermGrantsManage   = "grants:manage"
 	PermSessionsManage = "sessions:manage"
+	PermBackupsManage  = "backups:manage"
 )
 
 // AllPermissions is the full grantable set, in the order the admin matrix shows
@@ -79,6 +80,7 @@ var AllPermissions = []string{
 	PermRolesManage,
 	PermGrantsManage,
 	PermSessionsManage,
+	PermBackupsManage,
 }
 
 // Principal kinds and grant levels of a ResourceGrant.

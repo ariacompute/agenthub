@@ -4,7 +4,8 @@ import { useAuthStore, PERMISSIONS } from '../lib/auth-store.js'
 import { useHubStore } from '../lib/store.js'
 import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { errorMessage } from '../lib/errors.js'
-import { KeyRound, Plus, Shield, Trash2, UserPlus, Users } from 'lucide-vue-next'
+import { KeyRound, Plus, Shield, Trash2, UserPlus, Users, DatabaseBackup } from 'lucide-vue-next'
+import BackupsPanel from './admin/BackupsPanel.vue'
 
 const auth = useAuthStore()
 const hub = useHubStore()
@@ -38,10 +39,15 @@ const matrixColumns = computed(
   () => `minmax(200px, 1.6fr) repeat(${auth.rolesCatalogue.length || 1}, minmax(90px, 1fr))`,
 )
 
+// The backups tab lives in its own component: it carries its own data, its own
+// schedule form and a drawer, which is more than an inline section should own.
+const backup = useCopy('backup')
+
 const tabs = computed(() => [
   { key: 'users', label: t('tabUsers'), icon: Users },
   { key: 'roles', label: t('tabRoles'), icon: Shield },
   { key: 'grants', label: t('tabGrants'), icon: KeyRound },
+  { key: 'backups', label: backup.t('tabBackups'), icon: DatabaseBackup },
 ])
 
 const statusLabel = (value) => enumLabel('userStatus', value)
@@ -380,6 +386,9 @@ watch(query, (value) => {
         </div>
       </div>
     </section>
+
+    <!-- ---------- database checkpoints ---------- -->
+    <BackupsPanel v-if="tab === 'backups'" />
 
     <!-- ---------- user drawer ---------- -->
     <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">

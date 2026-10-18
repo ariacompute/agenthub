@@ -11,6 +11,7 @@ import { traceCopy } from './copy/trace-copy.js'
 import { topologyCopy } from './copy/topology-copy.js'
 import { authCopy } from './copy/auth-copy.js'
 import { adminCopy } from './copy/admin-copy.js'
+import { backupCopy } from './copy/backup-copy.js'
 import { enumsCopy } from './copy/enums-copy.js'
 import { errorsCopy } from './copy/errors-copy.js'
 
@@ -23,6 +24,7 @@ const COPIES = {
   topology: topologyCopy,
   auth: authCopy,
   admin: adminCopy,
+  backup: backupCopy,
   errors: errorsCopy,
 }
 

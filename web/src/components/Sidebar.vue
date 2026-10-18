@@ -20,7 +20,7 @@ const items = computed(() => {
   ]
   // The administration screen is only offered to accounts that can use it:
   // a link that answers 403 is worse than no link.
-  if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage')) {
+  if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage') || auth.can('backups:manage')) {
     base.push({ to: '/admin', label: t('navAdmin'), icon: Shield })
   }
   return base

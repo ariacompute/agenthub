@@ -274,3 +274,71 @@ export function createGrant(payload) {
 export function deleteGrant(id) {
   return request(`/api/grants/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
+
+// --- database checkpoints -------------------------------------------------
+
+export function listBackups() {
+  return request('/api/backups')
+}
+
+export function createBackup(label = '') {
+  return request('/api/backups', { method: 'POST', ...body({ label }) })
+}
+
+export function getBackupSchedule() {
+  return request('/api/backups/schedule')
+}
+
+export function saveBackupSchedule(payload) {
+  return request('/api/backups/schedule', { method: 'PUT', ...body(payload) })
+}
+
+export function deleteBackup(id) {
+  return request(`/api/backups/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// restoreBackup needs the checkpoint id echoed back: it is the last chance to
+// notice the wrong row before every table is rewritten.
+export function restoreBackup(id, confirm) {
+  return request(`/api/backups/${encodeURIComponent(id)}/restore`, { method: 'POST', ...body({ confirm }) })
+}
+
+// downloadBackup is the only endpoint that answers with a file instead of JSON,
+// so it cannot go through `request`: the name comes from the header the server
+// sends, and the bytes stay a blob until the browser saves them.
+export async function downloadBackup(id) {
+  const res = await fetch(`${BASE}/api/backups/${encodeURIComponent(id)}/download`, {
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    let failure = 'internal_error'
+    try {
+      failure = (await res.json())?.code || failure
+    } catch (parseError) {
+      console.error('agenthub: error body is not JSON', parseError)
+    }
+    const error = new Error(failure)
+    error.code = failure
+    error.status = res.status
+    throw error
+  }
+  return { blob: await res.blob(), filename: filenameFrom(res.headers.get('Content-Disposition')) }
+}
+
+function filenameFrom(header) {
+  const match = /filename="?([^";]+)"?/.exec(header || '')
+  return match ? match[1].trim() : 'checkpoint.tar.gz'
+}
+
+// saveBlob hands a downloaded archive to the browser. The object URL is revoked
+// straight after the click so a large checkpoint does not stay pinned in memory.
+export function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}

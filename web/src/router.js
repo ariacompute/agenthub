@@ -14,7 +14,15 @@ const router = createRouter({
     { path: '/registry', name: 'registry', component: RegistryView },
     { path: '/trace', name: 'trace', component: TaskTraceView },
     { path: '/topology', name: 'topology', component: TopologyView },
-    { path: '/admin', name: 'admin', component: AdminView, meta: { permission: 'users:manage' } },
+    // The administration screen carries several tabs, each with its own
+    // permission: an operator who may only manage database checkpoints must
+    // still be able to reach it.
+    {
+      path: '/admin',
+      name: 'admin',
+      component: AdminView,
+      meta: { permissions: ['users:manage', 'backups:manage'] },
+    },
   ],
 })
 
@@ -30,8 +38,9 @@ router.beforeEach(async (to) => {
   if (!auth.signedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  const permission = to.meta.permission
-  if (permission && !auth.can(permission)) {
+  // A route may name one permission or a list; any of them is enough.
+  const permissions = to.meta.permissions ?? (to.meta.permission ? [to.meta.permission] : [])
+  if (permissions.length && !permissions.some((permission) => auth.can(permission))) {
     return { name: 'registry' }
   }
   return true

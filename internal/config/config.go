@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agenthub/internal/auth"
+	"agenthub/internal/backup"
 )
 
 // Version is the agenthub release reported by /healthz and the Agent Card. It
@@ -100,9 +101,41 @@ type Config struct {
 	EventBuffer     int
 	PushEnabled     bool
 	PushRecordLimit int
+	// Database checkpoints. BackupDir empty means the feature is off: no
+	// directory, no files, and the console says so. The rest are only the
+	// initial policy — the console edits the schedule afterwards and it is
+	// persisted, so a restart does not reset an operator's choice.
+	BackupDir       string
+	BackupMode      string
+	BackupInterval  time.Duration
+	BackupDailyTime string
+	BackupTimezone  string
+	BackupCron      string
+	BackupKeepLast  int
+	BackupMaxAge    int
 	// OAuth providers. A provider without credentials is simply absent from the
 	// login page, so an instance without any of them stays self contained.
 	OAuth auth.OAuthConfig
+}
+
+// BackupEnabled reports whether checkpointing is configured at all. Everything
+// else about backups is gated on this one answer, so an instance without a
+// directory behaves exactly as it did before the feature existed.
+func (c *Config) BackupEnabled() bool { return strings.TrimSpace(c.BackupDir) != "" }
+
+// BackupSchedule is the policy a fresh schedule row is seeded from. It is only
+// consulted when the console has never saved one.
+func (c *Config) BackupSchedule() backup.Schedule {
+	s := backup.DefaultSchedule()
+	s.Mode = c.BackupMode
+	s.Enabled = c.BackupMode != backup.ModeOff
+	s.Interval = c.BackupInterval
+	s.DailyTime = c.BackupDailyTime
+	s.Timezone = c.BackupTimezone
+	s.CronExpr = c.BackupCron
+	s.KeepLast = c.BackupKeepLast
+	s.MaxAgeDays = c.BackupMaxAge
+	return s
 }
 
 // Load reads the environment (after LoadDotEnv) and validates the result.
@@ -130,6 +163,16 @@ func Load() (*Config, error) {
 		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
 		// Retention cap for the push callback audit trail, per task.
 		PushRecordLimit: envInt("AGENTHUB_PUSH_RECORD_LIMIT", 100),
+		// Checkpoints are off until a directory is configured: a container with
+		// no volume must not quietly fill its own writable layer.
+		BackupDir:       envStr("AGENTHUB_BACKUP_DIR", ""),
+		BackupMode:      envStr("AGENTHUB_BACKUP_MODE", backup.ModeOff),
+		BackupInterval:  envDur("AGENTHUB_BACKUP_INTERVAL", 24*time.Hour),
+		BackupDailyTime: envStr("AGENTHUB_BACKUP_DAILY_TIME", "03:00"),
+		BackupTimezone:  envStr("AGENTHUB_BACKUP_TIMEZONE", "UTC"),
+		BackupCron:      envStr("AGENTHUB_BACKUP_CRON", ""),
+		BackupKeepLast:  envInt("AGENTHUB_BACKUP_KEEP_LAST", 7),
+		BackupMaxAge:    envInt("AGENTHUB_BACKUP_MAX_AGE_DAYS", 30),
 		OAuth: auth.OAuthConfig{
 			Enabled: envBool("AGENTHUB_OAUTH_ENABLED", true),
 			Google: auth.ProviderConfig{
@@ -204,6 +247,14 @@ func (c *Config) Validate() error {
 	// Demo resources in production would be indistinguishable from real ones.
 	if c.Env == "prod" && c.SeedDemo {
 		return fmt.Errorf("AGENTHUB_SEED_DEMO must stay off when AGENTHUB_ENV=prod")
+	}
+	// Backup settings are only checked when checkpointing is switched on: an
+	// instance without a directory stays valid exactly as it was, and one with
+	// a directory must never start with a policy that silently does nothing.
+	if c.BackupEnabled() {
+		if err := c.BackupSchedule().Validate(); err != nil {
+			return fmt.Errorf("backup schedule is invalid: %w", err)
+		}
 	}
 	return nil
 }

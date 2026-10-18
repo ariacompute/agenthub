@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   'roles:manage',
   'grants:manage',
   'sessions:manage',
+  'backups:manage',
 ]
 
 function code(error) {

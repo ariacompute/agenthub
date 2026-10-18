@@ -27,7 +27,8 @@
 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` + `AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD`、`AGENTHUB_SESSION_TTL`、
 `AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、`AGENTHUB_CLI_TIMEOUT`、
 `AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）、
-`AGENTHUB_SEED_DEMO`（默认 **false**）。
+`AGENTHUB_SEED_DEMO`（默认 **false**）、`AGENTHUB_BACKUP_DIR`（默认为空 = 关闭检查点）、
+`AGENTHUB_BACKUP_KEEP_LAST` / `AGENTHUB_BACKUP_MAX_AGE_DAYS`（保留策略）。
 
 ### 用户、会话与 RBAC
 
@@ -40,7 +41,7 @@
 - **引导管理员**：`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` / `..._PASSWORD` 每次启动幂等 upsert，并成为
   **owner**。若两者都未配置且库中无账号，第一个注册的账号即成为 owner，实例因此不会无人可用。
 - **RBAC**：用户 → 组 → 角色 → 权限（`resources:read`、`resources:write`、`tasks:read`、`tasks:write`、
-  `users:manage`、`roles:manage`、`grants:manage`、`sessions:manage`）。owner 持有全部权限，
+  `users:manage`、`roles:manage`、`grants:manage`、`sessions:manage`、`backups:manage`）。owner 持有全部权限，
   这是配置出错时仍可挽回的兜底。
 - **资源级授权**：`POST /api/grants` 把某条资源限定给某个用户或组（`read` / `write`）。
   **没有**授权的资源对所有人可见；一旦产生授权，它在列表、导出与 Agent Card 中都被隐藏，
@@ -51,8 +52,8 @@
 
 删除用户是**停用**：任务、span 与授权都会保留以备审计。
 
-以上能力在控制台中均可使用：`/login` 注册与登录；`/admin`（需 `users:manage`、`roles:manage`
-或 `grants:manage`）管理用户、权限矩阵与资源授权。
+以上能力在控制台中均可使用：`/login` 注册与登录；`/admin`（需 `users:manage`、`roles:manage`、
+`grants:manage` 或 `backups:manage`）管理用户、权限矩阵、资源授权与数据库检查点。
 
 默认不灌任何演示数据：只有显式 `AGENTHUB_SEED_DEMO=true`，启动时才会幂等地写入五条 `demo-*` 资源
 （`demo-model`、`demo-agent`、`demo-mcp`、`demo-skill`、`demo-cli`），下面的示例正是面向它们。
@@ -263,6 +264,7 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | `events` | 每次状态/artifact/message/span 帧，支持 SSE 断线重连按 `since=<seq>` 回放 |
 | `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
 | `schema_migrations` | 已执行的迁移文件，启动时跳过 |
+| `backup_checkpoints` / `backup_schedules` | 检查点目录与定时策略——两者**不参与**任何导出与恢复，因此操作员在恢复之后仍能看到自己所用的那个归档 |
 
 - 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
 - 写入策略：任务/artifact/span **同步写**（状态迁移为条件更新 `WHERE state=?`，防并发丢更新）；
@@ -271,6 +273,25 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 集成用例覆盖：迁移幂等、资源 CRUD 与 jsonb 往返、任务全生命周期与级联删除、事件回放、
 push 回调留痕与保留上限、以及完整 A2A run 的落库回读。**无 DB 时自动 skip，不伪造结果**。
+
+## 数据库检查点
+
+控制台的**备份**标签页（`backups:manage`）把整个 agenthub schema 导出为一个 `tar.gz` 归档，
+并能把数据库回退到其中任意一个检查点。
+
+- **归档**：单个文件内含 `manifest.json`（表清单、行数、引擎、当时的迁移集合）与数据载荷。
+  文件的 sha256 记在目录行里，下载与恢复前都会重新校验——卷上损坏的归档会被拒绝，而不是被交出去。
+- **引擎**：运行时镜像里装了 PostgreSQL 客户端就用 `pg_dump -Fc`；否则回落到纯 Go 引擎，直接流式
+  `COPY … TO STDOUT` / `COPY … FROM STDIN`。引擎名随归档一起保存；归档只能由写出它的引擎读回。
+- **定时**（控制台内编辑并落库）：关闭 / 每 N 分钟 / 每日固定时刻（带时区）/ 五段 cron 表达式。
+  调度器重启后会补跑一次；进程死掉留下的 `running` 行在下一次启动时被结清。
+- **保留策略**：保留最近 N 个、删除超过 M 天的归档。最新那份永不被清理；恢复前自动打的回滚点
+  有 24 小时豁免期——退路不能被清理任务删掉。
+- **恢复护栏**，按顺序：操作员重输检查点 id → 校验和核对 → 比对归档迁移集合与当前构建（归档来自
+  **更新**的 schema 一律拒绝，更旧则先载入再迁移）→ 先给当前数据库打一个检查点 → 停止接收新任务
+  并等待在途任务结束 → 重写各表 → 重新载入内存状态。全程无需重启，任何失败都让数据库保持原状。
+- **开关**：`AGENTHUB_BACKUP_DIR` 就是开关。不配置时标签页显示「未启用」并说明原因，其余功能不受
+  影响；`docker-compose.yml` 默认如此——`agenthub-backups` 卷已挂载，但留到你配置该变量时才启用。
 
 ## 与 mastra 的关系
 

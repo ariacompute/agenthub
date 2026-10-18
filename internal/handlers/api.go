@@ -43,6 +43,11 @@ func writeDomainErr(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case hub.CodeInvalidStateTransition, hub.CodeTaskNotResumable, hub.CodeNoResource, hub.CodeInvalidFlow:
 		status = http.StatusBadRequest
+	case hub.CodeRestoring:
+		// The hub refuses work while a restore rewrites the database: it is a
+		// temporary condition, so the caller is told to come back, not to fix
+		// its request.
+		status = http.StatusServiceUnavailable
 	}
 	httputil.WriteError(w, status, code)
 }

@@ -22,6 +22,9 @@ const (
 	CodeNoResource             = httputil.Code("no_resource_available")
 	CodeTaskNotResumable       = httputil.Code("task_not_resumable")
 	CodeInvalidFlow            = httputil.Code("invalid_flow")
+	// CodeRestoring is answered while a checkpoint is being restored: the
+	// database is mid-rewrite, so no new task may start.
+	CodeRestoring = httputil.Code("restore_in_progress")
 )
 
 // PendingInput records why a task was parked in input-required.

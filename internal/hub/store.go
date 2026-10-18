@@ -15,6 +15,9 @@ var (
 	// ErrStateConflict is returned when a conditional state update matched no
 	// row, i.e. another writer already advanced the task.
 	ErrStateConflict = errors.New(string(CodeInvalidStateTransition))
+	// ErrRestoring is returned while a checkpoint is being restored. It is not
+	// the caller's failure: the same request a moment later is accepted.
+	ErrRestoring = errors.New(string(CodeRestoring))
 )
 
 // TaskRepository persists tasks and everything a run accumulates: artifacts,

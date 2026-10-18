@@ -110,6 +110,13 @@ type Hub struct {
 	stopPrune chan struct{}
 	pruneWG   sync.WaitGroup
 	closeOnce sync.Once
+
+	// The quiesce gate: qMu guards draining and active, qCond wakes a drain
+	// waiting for the last running task. See quiesce.go.
+	qMu      sync.Mutex
+	qCond    *sync.Cond
+	draining bool
+	active   int
 }
 
 // New wires the hub together. persist may be zero valued: every nil repository
@@ -136,6 +143,7 @@ func New(cfg *config.Config, reg *registry.Registry, opts adapter.Options, pushe
 		eventRepo: persist.Events,
 		stopPrune: make(chan struct{}),
 	}
+	h.qCond = sync.NewCond(&h.qMu)
 	h.startPushPrune()
 	return h
 }
@@ -250,6 +258,12 @@ func (h *Hub) Cancel(id string) (*a2a.Task, error) {
 
 // Resume continues a task parked in input-required with the caller's answer.
 func (h *Hub) Resume(ctx context.Context, params a2a.TaskResumeParams) (*a2a.Task, error) {
+	// Resuming runs a flow, so it is work like any other: refused while a
+	// restore is rewriting the database underneath it.
+	if !h.enterTask() {
+		return nil, ErrRestoring
+	}
+	defer h.leaveTask()
 	task := h.store.Get(params.ID)
 	if task == nil {
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
@@ -314,6 +328,12 @@ func (h *Hub) GetPush(taskID string) (*a2a.PushNotificationConfig, error) {
 
 // run is the shared implementation of message/send and message/stream.
 func (h *Hub) run(ctx context.Context, params a2a.MessageSendParams, emit Emit) (*a2a.Task, error) {
+	// The gate is checked before anything is created: a restore must not find a
+	// half-created task in a table it is about to truncate.
+	if !h.enterTask() {
+		return nil, ErrRestoring
+	}
+	defer h.leaveTask()
 	if len(params.Message.Parts) == 0 {
 		return nil, a2a.NewError(a2a.CodeInvalidParams, a2a.MsgInvalidParams)
 	}

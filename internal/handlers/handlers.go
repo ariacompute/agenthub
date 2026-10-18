@@ -13,6 +13,7 @@ import (
 	"agenthub/internal/a2a"
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
+	"agenthub/internal/backup"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
@@ -36,6 +37,10 @@ type Deps struct {
 	// pre-identity behaviour: every caller is the dev principal.
 	Auth  *auth.Service
 	Authz *authz.Service
+	// Backups is the checkpoint service. Without one the /api/backups/*
+	// endpoints report the feature as disabled rather than failing: an
+	// instance with no backup volume is a supported configuration.
+	Backups *backup.Service
 }
 
 // Register builds the router.
@@ -104,6 +109,18 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/grants", d.requirePermission(authz.PermGrantsManage, d.handleListGrants))
 	mux.HandleFunc("POST /api/grants", d.requirePermission(authz.PermGrantsManage, d.handleCreateGrant))
 	mux.HandleFunc("DELETE /api/grants/{id}", d.requirePermission(authz.PermGrantsManage, d.handleDeleteGrant))
+
+	// Database checkpoints. One permission covers all of them: taking a
+	// checkpoint, downloading one, deleting one and restoring the database are
+	// the same level of trust in the same operator.
+	mux.HandleFunc("GET /api/backups", d.requirePermission(authz.PermBackupsManage, d.handleListBackups))
+	mux.HandleFunc("POST /api/backups", d.requirePermission(authz.PermBackupsManage, d.handleCreateBackup))
+	mux.HandleFunc("GET /api/backups/schedule", d.requirePermission(authz.PermBackupsManage, d.handleGetBackupSchedule))
+	mux.HandleFunc("PUT /api/backups/schedule", d.requirePermission(authz.PermBackupsManage, d.handleSaveBackupSchedule))
+	mux.HandleFunc("GET /api/backups/{id}", d.requirePermission(authz.PermBackupsManage, d.handleGetBackup))
+	mux.HandleFunc("DELETE /api/backups/{id}", d.requirePermission(authz.PermBackupsManage, d.handleDeleteBackup))
+	mux.HandleFunc("GET /api/backups/{id}/download", d.requirePermission(authz.PermBackupsManage, d.handleDownloadBackup))
+	mux.HandleFunc("POST /api/backups/{id}/restore", d.requirePermission(authz.PermBackupsManage, d.handleRestoreBackup))
 
 	// Operations.
 	mux.HandleFunc("GET /healthz", d.identify(d.handleHealthz))

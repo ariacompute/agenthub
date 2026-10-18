@@ -50,6 +50,24 @@ const (
 	CodeBuiltinRole       Code = "builtin_role"
 	CodeUnknownPermission Code = "unknown_permission"
 	CodeInvalidGrant      Code = "invalid_grant"
+	// Backups: database checkpoints and restores. A restore rewrites every
+	// table, so each of these says which guardrail stopped it rather than
+	// "something went wrong".
+	CodeBackupsDisabled       Code = "backups_disabled"
+	CodeBackupNotFound        Code = "backup_not_found"
+	CodeBackupInProgress      Code = "backup_in_progress"
+	CodeBackupInterrupted     Code = "backup_interrupted"
+	CodeBackupEngineUnavail   Code = "backup_engine_unavailable"
+	CodeBackupEngineFailed    Code = "backup_engine_failed"
+	CodeBackupChecksum        Code = "backup_checksum_mismatch"
+	CodeBackupSchemaMismatch  Code = "backup_schema_mismatch"
+	CodeBackupScheduleInvalid Code = "backup_schedule_invalid"
+	CodeBackupInvalidArchive  Code = "backup_invalid_archive"
+	CodeBackupFailed          Code = "backup_failed"
+	CodeRestoreConfirm        Code = "restore_confirm_required"
+	CodeRestoreBusy           Code = "restore_busy"
+	CodeRestoreInProgress     Code = "restore_in_progress"
+	CodeRestoreFailed         Code = "restore_failed"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -108,6 +126,19 @@ func WriteErr(w http.ResponseWriter, err error) {
 		// The provider's own failure text never reaches the caller: an operator
 		// debugs that from the logs, the console only needs the class.
 		WriteError(w, http.StatusBadGateway, e.Code)
+	// Backups. "backups_disabled" is a 409 rather than a 404: the endpoint
+	// exists, it is the instance that has no backup volume mounted.
+	case CodeBackupsDisabled, CodeBackupInProgress, CodeBackupChecksum,
+		CodeBackupSchemaMismatch, CodeBackupInvalidArchive:
+		WriteError(w, http.StatusConflict, e.Code)
+	case CodeBackupNotFound:
+		WriteError(w, http.StatusNotFound, e.Code)
+	case CodeBackupScheduleInvalid, CodeRestoreConfirm:
+		WriteError(w, http.StatusBadRequest, e.Code)
+	case CodeBackupEngineUnavail, CodeRestoreBusy, CodeRestoreInProgress:
+		WriteError(w, http.StatusServiceUnavailable, e.Code)
+	case CodeBackupEngineFailed, CodeBackupFailed, CodeBackupInterrupted, CodeRestoreFailed:
+		WriteError(w, http.StatusInternalServerError, e.Code)
 	default:
 		WriteError(w, http.StatusInternalServerError, e.Code)
 	}

@@ -8,6 +8,7 @@ import { topologyCopy } from '../src/lib/copy/topology-copy.js'
 import { errorsCopy } from '../src/lib/copy/errors-copy.js'
 import { authCopy } from '../src/lib/copy/auth-copy.js'
 import { adminCopy } from '../src/lib/copy/admin-copy.js'
+import { backupCopy } from '../src/lib/copy/backup-copy.js'
 
 const PROSE = {
   shell: shellCopy,
@@ -16,6 +17,7 @@ const PROSE = {
   topology: topologyCopy,
   auth: authCopy,
   admin: adminCopy,
+  backup: backupCopy,
   errors: errorsCopy,
 }
 

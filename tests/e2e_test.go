@@ -649,3 +649,69 @@ func TestE2EControlPlaneRejectsBadInput(t *testing.T) {
 		t.Fatalf("error message must be a machine readable token: %q", resp.Error.Message)
 	}
 }
+
+// TestE2EBackupEndpointsReportTheFeatureDisabled boots the server the way the
+// binary does when no backup directory is configured, then drives every
+// checkpoint route over real HTTP.
+//
+// What this proves is the wiring: the console asks for these paths on every
+// visit to the administration page, so a route that 404s — or one that answers
+// 500 because a code was never registered — breaks the tab for every operator,
+// including the ones who never configured a backup volume.
+func TestE2EBackupEndpointsReportTheFeatureDisabled(t *testing.T) {
+	h := newHarness(t)
+
+	res, raw := h.do(http.MethodGet, "/api/backups", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/backups: status = %d, want 200", res.StatusCode)
+	}
+	var overview struct {
+		Enabled     bool          `json:"enabled"`
+		Reason      string        `json:"reason"`
+		Checkpoints []interface{} `json:"checkpoints"`
+	}
+	if err := json.Unmarshal(raw, &overview); err != nil {
+		t.Fatalf("decode overview: %v (%s)", err, raw)
+	}
+	if overview.Enabled {
+		t.Fatal("enabled = true, want false with no backup directory configured")
+	}
+	if overview.Reason != "backups_disabled" {
+		t.Fatalf("reason = %q, want backups_disabled", overview.Reason)
+	}
+	if len(overview.Checkpoints) != 0 {
+		t.Fatalf("checkpoints = %d, want an empty list", len(overview.Checkpoints))
+	}
+
+	// Every other route says the same thing on the wire, including the ones
+	// with a wildcard id the console only asks for after a click.
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/backups", `{"label":"x"}`},
+		{http.MethodGet, "/api/backups/schedule", ""},
+		{http.MethodPut, "/api/backups/schedule", `{"mode":"off"}`},
+		{http.MethodGet, "/api/backups/bkp-none", ""},
+		{http.MethodDelete, "/api/backups/bkp-none", ""},
+		{http.MethodGet, "/api/backups/bkp-none/download", ""},
+		{http.MethodPost, "/api/backups/bkp-none/restore", `{"confirm":"bkp-none"}`},
+	}
+	for _, c := range cases {
+		res, raw := h.do(c.method, c.path, c.body)
+		if res.StatusCode != http.StatusConflict {
+			t.Errorf("%s %s: status = %d, want 409", c.method, c.path, res.StatusCode)
+			continue
+		}
+		var body struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("%s %s: decode %s: %v", c.method, c.path, raw, err)
+		}
+		if body.Code != "backups_disabled" {
+			t.Errorf("%s %s: code = %q, want backups_disabled", c.method, c.path, body.Code)
+		}
+	}
+}

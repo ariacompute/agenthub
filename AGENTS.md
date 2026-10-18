@@ -77,29 +77,40 @@ persistence ← internal/store（GORM 实现）
 - `internal/store`：`db.go`（`Open`/`Ping`/`Close`/`RedactDSN`，连接池 25/10/30min、`PrepareStmt`）、
   `migrate.go`（`go:embed` + `schema_migrations` 按序单事务执行）、`seed.go`（demo 五类资源）、
   `resource_store.go` / `task_store.go` / `event_store.go` / `push_store.go` /
-  `auth_store.go` / `authz_store.go`（六个仓库实现）
+  `auth_store.go` / `authz_store.go` / `backup_store.go`（七个仓库实现）
 - `internal/registry`：`registry.go`（`Kind`/`Health`/`Transport`/`Entry` + CRUD + 发现 +
   `ResourceStore` 端口 + 委托）、`export.go`（聚合 Agent Card + MCP server 描述）
+- `internal/backup`：**数据库检查点内核**（端口在此定义，GORM 实现在 `internal/store`）。
+  `engine.go`（`Engine` 接口 + `Manifest`/`Checkpoint` + `SelectEngine` 自动选择）、
+  `pgdump.go`（`pg_dump -Fc` / `pg_restore --clean --if-exists --single-transaction`）、
+  `copy.go`（纯 Go `COPY` 导出写回 + 表发现 + 拓扑排序 + 序列修正）、
+  `archive.go`（tar.gz 打包解包 + manifest + sha256）、
+  `service.go`（单飞打点/恢复编排/保留清理/回滚点）、`schedule.go`（三种模式 + 手写 5 段 cron）、
+  `store.go`（`BackupStore`/`Quiesce`/`Reloader` 端口）
 - `internal/adapter`：`connector.go`（`Connector` 接口 + `Options` + `For` 工厂）、
   `mock.go`（确定性基元）、`model.go`（provider 注册表 + 回退链）、`agent.go`、`mcp.go`、`skill.go`、`cli.go`
 - `internal/hub`：`store.go`（`TaskRepository`/`EventRepository`/`PushRepository` 端口 + `Persistence`）、
   `task.go`（TaskStore + 合法迁移校验 + 挂起状态 + 条件更新委托）、`trace.go`（span 时间线）、
   `broker.go`（事件扇出 + 有界队列异步落库）、`flow.go`（`then/branch/parallel`）、
-  `orchestrator.go`（send/stream/get/cancel/resume/push + MockNotifier 落库 + Prune ticker）
+  `orchestrator.go`（send/stream/get/cancel/resume/push + MockNotifier 落库 + Prune ticker）、
+  `quiesce.go`（`Drain`/`Allow`/`ActiveTaskCount` 闸门 + `ResetEventSeq`，恢复期间拒新任务并等待在途任务）
 - `internal/handlers`：`handlers.go`（路由注册中心 + 静态回退 + `/healthz` 的 `database` 字段）、
   `principal.go`（`identify`/`requireAuth`/`requirePermission` + 可见性过滤 + 计数重算）、
   `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放）、
   `api_auth.go`（注册/登录/登出/me/会话/OAuth 回调）、
-  `api_admin.go`（users/groups/roles/permissions/grants 管理）
+  `api_admin.go`（users/groups/roles/permissions/grants 管理）、
+  `api_backups.go`（检查点列表/打点/下载/删除/恢复 + 定时读写，全部 `backups:manage`）
 - `migrations/`：`001_resources.sql` … `004_push_records.sql`、`005_auth.sql`（users/sessions/
   oauth_accounts）、`006_rbac.sql`（groups/roles/permissions/各种关联表/resource_grants + 内置
-  角色权限种子），经 `embed.go` 内嵌
+  角色权限种子）、`007_backups.sql`（`backup_checkpoints` / `backup_schedules` + `backups:manage`
+  权限与 admin 角色关联，全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`），经 `embed.go` 内嵌
 - `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go`：`DATABASE_URL` 门控集成
 - `docker-compose.yml`：`postgres:16-alpine`（宿主 **5434**）+ `agenthub`（依赖 `service_healthy`）
   + `web`（`profiles: [dev]`）
 - `web/`：Vue 3 控制台（`src/lib/copy/*-copy.js` ×13 语、`languages.js`、`use-copy.js`、`api.js`、
   `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 五屏
-  （registry / trace / topology / **login** / **admin**）；`tests/` vitest）
+  （registry / trace / topology / **login** / **admin**，admin 第四屏 backups 拆为
+  `views/admin/{BackupsPanel,BackupScheduleCard,BackupList,RestoreDrawer}.vue`）；`tests/` vitest）
 - `backend/static/`：Vue 构建产物（Go 进程托管，gitignore）
 
 ## 开发规范
@@ -129,6 +140,13 @@ persistence ← internal/store（GORM 实现）
   `web/tests/style.spec.js` 自动校验（hex 三通道相等 + 色相词黑名单）。
 - **i18n 单向来源**：`languages.js`（13 语，与 ariacompute.cn 一致）+ 按语言分块的 copy 表，
   浅合并英文兜底；组件内禁止硬编码自然语言。
+- **破坏性操作需显式确认**：恢复（restore）是 agenthub 唯一会摧毁数据的操作——接口要求
+  `{"confirm":"<checkpoint id>"}` 二次确认，执行前自动打回滚点、静默等待在途任务、失败时保持原状；
+  真实恢复的集成用例与 `scripts/test-api.sh` 段落都以 `AGENTHUB_TEST_BACKUP_RESTORE=true` 门控。
+- **新错误码必须登记**：`internal/httputil` 的 `Code*` 常量 + `WriteErr` 状态码映射，
+  否则一律退化为 500；前端同步登记 `errors.js` 的 `CODE_KEYS` 与 `errors-copy.js` 的 13 语。
+- **新权限需同步四处**：`authz.Perm*` 常量 → `AllPermissions` → 迁移里的权限种子与 admin 角色关联 →
+  前端 `auth-store.js` 的 `PERMISSIONS` 与 `enums-copy.js` 的 `permission` 分组（13 语）。
 - **测试**：`go test -race ./...`（纯逻辑单测零外部依赖 —— memory 回退保证无 DB 也全绿）；
   集成用例以 `DATABASE_URL` 门控（**未设置则 `t.Skip`，绝不伪造结果**）；前端 `bunx vitest run`。
   新增功能须补**正常 + 异常**双路径用例。
@@ -152,6 +170,8 @@ make test-integration # 只跑 Integration 用例
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 ./scripts/test-api.sh        # 对运行中实例的完整 HTTP 接口自测（PASS/FAIL 逐条，失败非 0 退出）
+                             # 备份段落：AGENTHUB_BACKUP_DIR 未配置则 SKIP；
+                             # 真实恢复需 AGENTHUB_TEST_BACKUP_RESTORE=true（否则会清空会话）
 ```
 
 ## 镜像发布

@@ -16,11 +16,14 @@ import (
 	"agenthub/internal/adapter"
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
+	"agenthub/internal/backup"
 	"agenthub/internal/config"
 	"agenthub/internal/handlers"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
 	"agenthub/internal/store"
+
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -107,7 +110,26 @@ func main() {
 	})
 	defer h.Close()
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az}
+	// Database checkpoints. The directory is the switch: without one the
+	// service stays disabled and the console says so, which is what an
+	// instance with no backup volume mounted should look like.
+	backupSvc := newBackupService(cfg, db, h, pusher)
+	if backupSvc.Enabled() {
+		// The environment seeds the policy once; afterwards the row the
+		// console saved is the operator's and survives every restart.
+		if err := backupSvc.SeedSchedule(context.Background(), cfg.BackupSchedule(), "boot"); err != nil {
+			slog.Warn("backup: could not seed the schedule", "error", err)
+		}
+		backupCtx, stopBackups := context.WithCancel(context.Background())
+		defer stopBackups()
+		go func() {
+			if err := backupSvc.Run(backupCtx); err != nil {
+				slog.Error("backup: scheduler stopped", "error", err)
+			}
+		}()
+	}
+
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Register(deps),
@@ -154,6 +176,56 @@ func main() {
 		slog.Error("shutdown", "error", err)
 	}
 	slog.Info("agenthub stopped")
+}
+
+// newBackupService assembles the checkpoint service.
+//
+// It never fails the boot: an unusable backup directory is logged and the
+// feature comes up disabled, because losing the console over a missing volume
+// would be a worse outcome than not taking backups for one boot.
+func newBackupService(cfg *config.Config, db *gorm.DB, h *hub.Hub, pusher *hub.MockNotifier) *backup.Service {
+	log := slog.Default()
+	if !cfg.BackupEnabled() {
+		log.Info("backup: disabled", "hint", "set AGENTHUB_BACKUP_DIR to enable database checkpoints")
+		return backup.New(backup.Options{Log: log})
+	}
+	// The directory is usually a mounted volume that appears with the
+	// container; creating it keeps a fresh deployment from failing on a path
+	// nobody has written to yet.
+	if err := os.MkdirAll(cfg.BackupDir, 0o750); err != nil {
+		log.Error("backup: directory is not usable", "dir", cfg.BackupDir, "error", err)
+		return backup.New(backup.Options{Log: log})
+	}
+	// "" means auto: pg_dump when the runtime image has the client, the
+	// built-in COPY engine otherwise. The engine name travels with every
+	// archive, so the two never have to agree.
+	engine, err := backup.SelectEngine(cfg.DatabaseURL, "")
+	if err != nil {
+		log.Error("backup: no dump engine available", "error", err)
+		return backup.New(backup.Options{Dir: cfg.BackupDir, Log: log})
+	}
+	log.Info("backup: enabled", "dir", cfg.BackupDir, "engine", engine.Name())
+
+	// After a restore the in-memory state still describes the database that
+	// was replaced. The registry and the task store read PostgreSQL on every
+	// call, so only two things here do hold state: the event sequence
+	// counter, and the push log the console reads back.
+	reload := backup.Reloaders(
+		backup.ReloaderFunc(func(ctx context.Context) error { return h.ResetEventSeq() }),
+		backup.ReloaderFunc(func(ctx context.Context) error { pusher.Reset(); return nil }),
+	)
+	return backup.New(backup.Options{
+		Dir:     cfg.BackupDir,
+		Engine:  engine,
+		Store:   store.NewBackupStore(db),
+		Quiesce: h,
+		Reload:  reload,
+		// Applied is how a restore compares the archive's schema against this
+		// build; Migrate catches the database up when the archive is older.
+		Applied: func(ctx context.Context) ([]string, error) { return store.Applied(db) },
+		Migrate: func() error { return store.Migrate(db) },
+		Log:     log,
+	})
 }
 
 // sweepSessions deletes sessions that expired a while ago. Revoked sessions are

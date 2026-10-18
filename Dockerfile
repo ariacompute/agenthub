@@ -102,11 +102,15 @@ RUN mkdir -p /out && \
 # ---------- runtime ----------
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata wget && \
+# postgresql17-client is only for pg_dump: when it is present a checkpoint is
+# a pg_dump custom-format archive, and pg_restore loads it back. Without it the
+# built-in COPY engine produces the archive instead — no error, no missing
+# feature, just a different engine name in the console.
+RUN apk add --no-cache ca-certificates tzdata wget postgresql17-client && \
     addgroup -g 10001 agenthub && \
     adduser -D -u 10001 -G agenthub agenthub && \
-    mkdir -p /app/backend/static && \
-    chown -R agenthub:agenthub /app
+    mkdir -p /app/backend/static /var/lib/agenthub/backups && \
+    chown -R agenthub:agenthub /app /var/lib/agenthub
 
 WORKDIR /app
 COPY --from=build /out/agenthub-server /app/agenthub-server
@@ -119,7 +123,8 @@ COPY --from=web-build /backend/static /app/backend/static
 # AGENTHUB_ADMIN_TOKEN (config.Validate refuses an open production deployment).
 ENV AGENTHUB_HTTP_PORT=3500 \
     AGENTHUB_ENV=dev \
-    AGENTHUB_STATIC_DIR=/app/backend/static
+    AGENTHUB_STATIC_DIR=/app/backend/static \
+    AGENTHUB_BACKUP_DIR=
 
 USER agenthub
 EXPOSE 3500
