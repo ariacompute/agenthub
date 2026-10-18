@@ -82,6 +82,15 @@ func main() {
 			attrs = append(attrs, "note", note)
 		}
 		slog.Info("agenthub listening", attrs...)
+		// What the single listener answers, so `docker compose logs -f agenthub`
+		// (or an attached `docker compose up`) spells out the endpoints behind
+		// the port. Host-side port mappings are not visible in here — compose
+		// owns those, see `make ports`.
+		endpoints := make([]string, 0, len(handlers.Listeners()))
+		for _, l := range handlers.Listeners() {
+			endpoints = append(endpoints, l.Endpoint+" - "+l.Use)
+		}
+		slog.Info("agenthub endpoints", "listen", ":"+cfg.HTTPPort, "endpoints", endpoints)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return

@@ -117,9 +117,12 @@ artifact 累积 → 事件扇出（SSE + **异步落 `events`**）→ pushNotifi
 ## 常用命令
 
 ```bash
-make db-up            # docker compose up -d postgres（宿主 5434）+ 等待 ready
-make db-down          # docker compose down
-make db-psql          # psql 进 compose 数据库
+make up                # docker compose up -d，完成后打印监听端口与用途
+make down              # docker compose down（数据在 agenthub-pgdata 卷）
+make ports             # 重打印运行栈的端口表（宿主端口 + 用途 + 健康态）
+make db-up             # 只起 postgres（宿主 5434）+ 等待 ready
+make db-down           # docker compose down
+make db-psql           # psql 进 compose 数据库
 make run              # db-up + go run（默认 :3500）
 make build            # web-build + go build → bin/agenthub-server
 make version          # 打印本次构建将写入的 version（git describe）
@@ -130,6 +133,18 @@ make test-integration # 只跑 Integration 用例
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 ```
+
+## 端口清单
+
+- 容器内**只有一个监听端口**（恒为 `3500`），宿主侧映射由 compose 决定；因此「哪个端口在应答、
+  答的是什么」必须落在 compose 层，而不是二进制里。
+- `scripts/compose-ports.sh` 是唯一出口：`make up`（`docker compose up -d` 之后立即打印）与
+  `make ports`（对运行中的栈重打）都调它。宿主端口优先读 `docker compose port <svc> <port>`
+  的真实映射，取不到才回落 `AGENTHUB_HTTP_PORT` / `POSTGRES_PORT` 默认值。
+- 端点用途的单一事实来源是 `handlers.Listeners()`（`internal/handlers/listen.go`）：
+  启动时由 `cmd/agenthub-server` 打成一条 `agenthub endpoints` 日志（前台 `docker compose up`
+  与 `docker compose logs -f agenthub` 可见），脚本里的同名列表须与之同步，
+  `TestListenersCoverRoutes` 负责兜住的漂移。
 
 ## 版本打标
 

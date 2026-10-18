@@ -21,6 +21,12 @@
 
 一次调用：用户 → Agent → Model 规划 → 加载 Skill → 经 MCP 调用老系统 → 结果沿原路返回。
 
+## 配置
+
+见 `.env.example`。主要项：`DATABASE_URL`（**必填**）、`AGENTHUB_HTTP_PORT`（默认 3500）、
+`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`、`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、
+`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）。
+
 ## 运行
 
 ```bash
@@ -44,51 +50,83 @@ curl localhost:3500/.well-known/agent.json
 之类的偏离说明。未打标的构建上报哨兵值 `dev`，不冒充发布号；镜像经 `VERSION` / `COMMIT` /
 `DISTANCE` / `DIRTY` 构建参数传入同一取值（`make docker-build`）。
 
-## 持久化
+## 部署
 
-| 表 | 内容 |
-| --- | --- |
-| `resources` | 五类资源条目全字段（`tags/capabilities/auth_schemes/env/metadata` 走 `jsonb`） |
-| `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | 任务主体、输出、span 时间线、`input-required` 挂起问题、回调配置（子表随任务级联删除） |
-| `events` | 每次状态/artifact/message/span 帧，支持 SSE 断线重连按 `since=<seq>` 回放 |
-| `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
-| `schema_migrations` | 已执行的迁移文件，启动时跳过 |
+下面两条路径都能起**数据库 + 服务**——控制台已烘焙进镜像、由 Go 进程托管于 `/`。
+想要起完之后的那份端口表，就用 `make`；只要 Docker 本身，用原生 compose 即可。
 
-- 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
-- 写入策略：任务/artifact/span **同步写**（状态迁移为条件更新 `WHERE state=?`，防并发丢更新）；
-  events 与 push_records **尽力而为**（有界队列 + 异步 writer，失败只告警，**绝不回压任务执行**）。
-- 事件重连：`GET /api/tasks/{id}/events?since=<seq>` 回放该 seq 之后的所有帧，再接实时流。
-
-## Docker 部署
-
-一条命令起**数据库 + 服务**（控制台已烘焙进镜像，由 Go 进程托管于 `/`）：
+### Make
 
 ```bash
-docker compose up -d                 # 构建并后台启动 postgresql + agenthub，:3500 / :5434
+make up                              # docker compose up -d，完成后打印端口清单
+make ports                           # 对已运行的栈重打端口清单
+make down                            # 停止；数据保留在 agenthub-pgdata 卷
+```
+
+compose 没有 after-up 钩子，所以 `make up` 在栈健康后立刻打印端口清单，`make ports` 之后可随时重打：
+哪个宿主端口在应答、分别是做什么的：
+
+```text
+$ make ports
+
+agenthub listening ports
+
+  SERVICE            HOST -> CTR      STATE      PURPOSE
+  agenthub-server    3500 -> 3500     healthy    the only HTTP listener: console + A2A + control plane + healthz
+  postgres           5434 -> 5432     healthy    the only state: resources, tasks, spans, events, push records
+
+  ENDPOINT                                            USE
+  http://127.0.0.1:3500/                              Vue 3 console (bundle baked into the image)
+  http://127.0.0.1:3500/.well-known/agent.json        A2A Agent Card (discovery)
+  POST http://127.0.0.1:3500/a2a                      A2A JSON-RPC: message/send, message/stream, tasks/*
+  http://127.0.0.1:3500/api/*                         control plane: resources, tasks, events, push records
+  http://127.0.0.1:3500/healthz                       health probe, also the container healthcheck
+  postgres://agenthub@localhost:5434/agenthub         host DSN (inside compose it is postgres:5432)
+```
+
+上面这些端点在容器内同属**一个监听端口**（恒为 3500），宿主侧映射只有 compose 知道，所以要这张表。
+服务自身启动时也会在日志里逐条打印同样的端点清单，因此 `docker compose up`（前台）或
+`docker compose logs -f agenthub` 也能看到用途说明。
+
+### Docker compose
+
+```bash
+docker compose up -d                 # 需要时先构建，再起 postgres + agenthub，:3500 / :5434
 docker compose ps                    # STATUS 应为 Up (healthy)
 docker compose logs -f agenthub
+docker compose --profile dev up -d   # 额外起控制台 dev server，:5173
 docker compose down                  # 停止；数据保留在 agenthub-pgdata 卷
 ```
 
-compose 会先拉起 `postgres:16-alpine`，健康检查通过后（pgvector 不需要）再启动 `agenthub`，
-后者启动时自动执行迁移与种子。`DATABASE_URL` 由 compose 注入，宿主端口可用 `POSTGRES_PORT` 覆盖。
+与 `make` 路径有两点不同：
 
-前端热更新开发（可选，控制台 dev server 走 compose 服务名代理）：
+* **没有端口清单。** 栈起来后不会打印任何东西。`make ports` 在这里照样能用——它只读运行中的容器，
+  所以想看上面的表随时调它。
+* **没有构建戳。** `.git` 被 `.dockerignore` 排除，这样构建的镜像在 `/healthz` 里上报的是 `dev` /
+  `unknown` 哨兵而不是发布号。要打标就自己传参数（或用 `make compose-build`）：
 
 ```bash
-docker compose --profile dev up -d   # 额外起 web，:5173
+VERSION=$(git describe --tags --abbrev=0 --always) \
+COMMIT=$(git rev-parse --short=7 HEAD) \
+DISTANCE=$(git rev-list --count "$(git describe --tags --abbrev=0)"..HEAD) \
+  docker compose build agenthub
 ```
+
+以下内容对两条路径都适用。
+
+compose 会先拉起 `postgres:16-alpine`，健康检查通过后（pgvector 不需要）再启动 `agenthub`，
+后者启动时自动执行迁移与种子。`DATABASE_URL` 由 compose 注入，宿主端口可用 `POSTGRES_PORT` 覆盖。
 
 镜像为三段构建（`oven/bun` 构建控制台 → `golang:1.27-alpine` 编译 → `alpine:3.21` 运行时），
 运行时以**非 root 用户**（uid 10001）启动，`/healthz` 为健康检查端点（响应含 `"database":"up"` 字段，
 库不可达时返回 503）。容器**无状态**：迁移随二进制内嵌，状态全在 PostgreSQL 卷里。
 
-构建需要拉 npm 包与 Go 模块，即需要出网。走代理时用 `BUILD_PROXY` 传入——`make docker-build`
-从 `$HTTP_PROXY` 取值并追加 `--network=host`，容器内的 `127.0.0.1:<port>` 才会指向宿主机代理。
-compose 构建跑在 bridge 网络上，该地址不存在，因此 `Dockerfile` 对 `bun install` 与
-`go mod download` 各做一次「清掉代理变量」的重试，并回落默认 `GOPROXY` 镜像
-（`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；两次都失败才带提示报错退出，
-不会静默装作成功。
+构建要拉 npm 包与 Go 模块，因此需要出网（`make docker-build`、`make compose-build`，或原生
+`docker compose build`）。走代理时用 `BUILD_PROXY` 传入——`make docker-build` 从 `$HTTP_PROXY` 取值
+并追加 `--network=host`，容器内的 `127.0.0.1:<port>` 才会指向宿主机代理。compose 构建跑在 bridge
+网络上，该地址不存在，因此 `Dockerfile` 对 `bun install` 与 `go mod download` 各做一次「清掉代理变量」
+的重试，并回落默认 `GOPROXY` 镜像（`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；
+两次都失败才带提示报错退出，不会静默装作成功。
 
 **生产部署必须**：
 
@@ -101,20 +139,19 @@ AGENTHUB_ADMIN_TOKEN=<强随机串>
 （不允许开放控制面）；配置后 `/api/*` 需携带 `Authorization: Bearer <token>`。
 配置通过 compose 的 `.env` 或环境变量传入，`AGENTHUB_HTTP_PORT` 可改宿主端口。
 
-## A2A 端点
+## 测试
 
-| 端点 | 说明 |
-| --- | --- |
-| `GET /.well-known/agent.json` | Agent Card（`GET /a2a/agent-card` 为兼容路径） |
-| `POST /a2a` | JSON-RPC 2.0 单入口 |
-| `GET /api/resources` 等 | 控制台控制面（`/api/*`） |
-| `GET /healthz` | 健康与模式 |
+单元与集成套件：
 
-支持方法：`message/send`、`message/stream`（SSE）、`tasks/get`、`tasks/cancel`、`tasks/resume`、`tasks/pushNotification/set`、`tasks/pushNotification/get`；`AGENTHUB_A2A_LEGACY_METHODS=true` 时额外接受 v0.1 别名 `tasks/send`、`tasks/sendSubscribe`。
+```bash
+make db-up             # 集成用例需要真实 PostgreSQL
+make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
+make test-integration  # 只跑 integration_test.go
+make web-test          # cd web && bunx vitest run
+```
 
-流式**没有 `[DONE]` 哨兵**：运行以 `completed / failed / canceled / input-required` 状态事件结束。
-
-### 冒烟
+对着已起的栈（`make up`，访问 `localhost:3500`）跑端到端冒烟：发现、发一个任务、流式、
+以及挂起并恢复一个等待审批的任务。
 
 ```bash
 # 1) 发现
@@ -142,7 +179,20 @@ curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
   "params":{"id":"<taskId>","message":{"role":"user","parts":[{"type":"text","text":"approved"}]}}}'
 ```
 
-## 编排原语（flow）
+## A2A 端点
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /.well-known/agent.json` | Agent Card（`GET /a2a/agent-card` 为兼容路径） |
+| `POST /a2a` | JSON-RPC 2.0 单入口 |
+| `GET /api/resources` 等 | 控制台控制面（`/api/*`） |
+| `GET /healthz` | 健康与模式 |
+
+支持方法：`message/send`、`message/stream`（SSE）、`tasks/get`、`tasks/cancel`、`tasks/resume`、`tasks/pushNotification/set`、`tasks/pushNotification/get`；`AGENTHUB_A2A_LEGACY_METHODS=true` 时额外接受 v0.1 别名 `tasks/send`、`tasks/sendSubscribe`。
+
+流式**没有 `[DONE]` 哨兵**：运行以 `completed / failed / canceled / input-required` 状态事件结束。
+
+## 编排原语
 
 `metadata.flow` 接受三种原语，用于多资源接力：
 
@@ -164,20 +214,20 @@ curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
 - HTTP：`{"code":"..."}`（`bad_request` / `unauthorized` / `not_found` / ...）
 - JSON-RPC：标准码 + A2A 自定义 `-32001 task_not_found`、`-32002 task_not_cancelable`、`-32003 push_notification_not_supported`、`-32004 unsupported_operation`、`-32005 invalid_state_transition`、`-32006 resource_not_found`、`-32007 resource_unreachable`、`-32008 task_not_resumable`
 
-## 配置
+## 持久化
 
-见 `.env.example`。主要项：`DATABASE_URL`（**必填**）、`AGENTHUB_HTTP_PORT`（默认 3500）、
-`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`、`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、
-`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）。
+| 表 | 内容 |
+| --- | --- |
+| `resources` | 五类资源条目全字段（`tags/capabilities/auth_schemes/env/metadata` 走 `jsonb`） |
+| `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | 任务主体、输出、span 时间线、`input-required` 挂起问题、回调配置（子表随任务级联删除） |
+| `events` | 每次状态/artifact/message/span 帧，支持 SSE 断线重连按 `since=<seq>` 回放 |
+| `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
+| `schema_migrations` | 已执行的迁移文件，启动时跳过 |
 
-## 测试
-
-```bash
-make db-up             # 集成用例需要真实 PostgreSQL
-make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
-make test-integration  # 只跑 integration_test.go
-make web-test          # cd web && bunx vitest run
-```
+- 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
+- 写入策略：任务/artifact/span **同步写**（状态迁移为条件更新 `WHERE state=?`，防并发丢更新）；
+  events 与 push_records **尽力而为**（有界队列 + 异步 writer，失败只告警，**绝不回压任务执行**）。
+- 事件重连：`GET /api/tasks/{id}/events?since=<seq>` 回放该 seq 之后的所有帧，再接实时流。
 
 集成用例覆盖：迁移幂等、资源 CRUD 与 jsonb 往返、任务全生命周期与级联删除、事件回放、
 push 回调留痕与保留上限、以及完整 A2A run 的落库回读。**无 DB 时自动 skip，不伪造结果**。

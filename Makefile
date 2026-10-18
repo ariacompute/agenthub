@@ -41,7 +41,8 @@ GOPROXY ?= https://goproxy.cn,direct
 DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable
 export DATABASE_URL
 
-.PHONY: run build test test-integration vet fmt version docker-build compose-build \
+.PHONY: run build test test-integration vet fmt version up down ports \
+        docker-build compose-build \
         db-up db-down db-psql \
         web-install web-dev web-build web-test web-test-watch clean
 
@@ -91,6 +92,22 @@ compose-build:
 	VERSION=$(VERSION) COMMIT=$(COMMIT) DISTANCE=$(DISTANCE) DIRTY=$(DIRTY) \
 	BUILD_PROXY=$(BUILD_PROXY) GOPROXY=$(GOPROXY) \
 	docker compose build agenthub
+
+# Start the composed stack and report what each published port answers. Compose
+# has no post-up hook, so the summary is printed right after `up -d`
+# (scripts/compose-ports.sh); `make ports` prints the same table later, and
+# `docker compose up` (attached) shows it in the server log instead.
+up:
+	docker compose up -d
+	@scripts/compose-ports.sh
+
+# Port map of an already running stack: service → host → container → purpose.
+ports:
+	@scripts/compose-ports.sh
+
+# Stop without losing data: everything lives in the agenthub-pgdata volume.
+down:
+	docker compose down
 
 db-up:
 	docker compose up -d postgres

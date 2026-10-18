@@ -26,6 +26,13 @@ and exposes them as standard A2A endpoints that any protocol-conforming agent ca
 One call: user → Agent → Model plans → Skill loaded → MCP reaches the legacy system → the result
 travels back the same path.
 
+## Configuration
+
+See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PORT` (default 3500),
+`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`, `AGENTHUB_MAX_PARALLEL`,
+`AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`, `AGENTHUB_MAX_OUTPUT_BYTES`,
+`AGENTHUB_PUSH_RECORD_LIMIT` (default 100).
+
 ## Run
 
 ```bash
@@ -53,48 +60,76 @@ build is not exactly a clean tag. An unstamped build reports the `dev` sentinel 
 of pretending to be a release. Images take the same values through the `VERSION` /
 `COMMIT` / `DISTANCE` / `DIRTY` build args (`make docker-build`).
 
-## Persistence
+## Deployment
 
-| Table | Content |
-| --- | --- |
-| `resources` | The five kinds of entries, `tags/capabilities/auth_schemes/env/metadata` stored as `jsonb` |
-| `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | Task body, outputs, span timeline, the parked `input-required` question and the callback config (children cascade with the task) |
-| `events` | Every status / artifact / message / span frame, replayable with `since=<seq>` after a reconnect |
-| `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
-| `schema_migrations` | Migration files already applied, skipped at startup |
+Both flows below bring **database + service** up — the console is baked into the image and served
+at `/` by the Go process. Use `make` when you want the port map afterwards; plain compose needs
+nothing but Docker and Compose.
 
-- Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
-  transaction per file; the SQL itself is idempotent.
-- Write strategy: tasks / artifacts / spans are **synchronous** (state transitions use a
-  conditional update `WHERE state=?` so concurrent writers cannot lose an update); events and push
-  records are **best effort** (bounded queue + async writer, failures only warn and **never become
-  back pressure on task execution**).
-- Reconnect: `GET /api/tasks/{id}/events?since=<seq>` replays every frame after `seq`, then follows
-  the live stream.
-
-## Docker deployment
-
-One command brings **database + service** up (the console is baked into the image and served at `/`
-by the Go process):
+### Make
 
 ```bash
-docker compose up -d                 # build and start postgres + agenthub, :3500 / :5434
+make up                              # docker compose up -d, then prints the port map
+make ports                           # re-print the port map of a running stack
+make down                            # stop; data survives in the agenthub-pgdata volume
+```
+
+Compose has no post-up hook, so `make up` prints the map once the stack is healthy, and
+`make ports` prints it again later — which host port answers, and what it serves:
+
+```text
+$ make ports
+
+agenthub listening ports
+
+  SERVICE            HOST -> CTR      STATE      PURPOSE
+  agenthub-server    3500 -> 3500     healthy    the only HTTP listener: console + A2A + control plane + healthz
+  postgres           5434 -> 5432     healthy    the only state: resources, tasks, spans, events, push records
+
+  ENDPOINT                                            USE
+  http://127.0.0.1:3500/                              Vue 3 console (bundle baked into the image)
+  http://127.0.0.1:3500/.well-known/agent.json        A2A Agent Card (discovery)
+  POST http://127.0.0.1:3500/a2a                      A2A JSON-RPC: message/send, message/stream, tasks/*
+  http://127.0.0.1:3500/api/*                         control plane: resources, tasks, events, push records
+  http://127.0.0.1:3500/healthz                       health probe, also the container healthcheck
+  postgres://agenthub@localhost:5434/agenthub         host DSN (inside compose it is postgres:5432)
+```
+
+Everything above is one listener inside the container (always 3500); the published host port is
+compose-only knowledge, hence the table. The server itself logs the same endpoint list on boot, so
+an attached `docker compose up` or `docker compose logs -f agenthub` spells it out too.
+
+### Docker compose
+
+```bash
+docker compose up -d                 # build if needed, then start postgres + agenthub, :3500 / :5434
 docker compose ps                    # STATUS should be Up (healthy)
 docker compose logs -f agenthub
+docker compose --profile dev up -d   # also starts the web dev server on :5173
 docker compose down                  # stop; data survives in the agenthub-pgdata volume
 ```
+
+Two differences from the `make` flow:
+
+* **No port map.** Nothing is printed once the stack is up. `make ports` still works here — it only
+  reads the running containers — so use it whenever you want the table shown above.
+* **No build stamp.** `.git` is excluded by `.dockerignore`, so an image built this way reports the
+  `dev` / `unknown` sentinels in `/healthz` instead of a release. Pass the args yourself (or use
+  `make compose-build`) to stamp it:
+
+```bash
+VERSION=$(git describe --tags --abbrev=0 --always) \
+COMMIT=$(git rev-parse --short=7 HEAD) \
+DISTANCE=$(git rev-list --count "$(git describe --tags --abbrev=0)"..HEAD) \
+  docker compose build agenthub
+```
+
+Everything below applies to both flows.
 
 Compose starts `postgres:16-alpine` first and only launches `agenthub` once it reports healthy
 (pgvector is not needed); the server then runs its migrations and seeds itself.
 `DATABASE_URL` is injected by compose; the published host port can be overridden with
 `POSTGRES_PORT`.
-
-Frontend development with hot reload (optional; the dev server proxies through the compose
-service name):
-
-```bash
-docker compose --profile dev up -d   # also starts web on :5173
-```
 
 The image is a three-stage build (`oven/bun` builds the console → `golang:1.27-alpine` compiles →
 `alpine:3.21` runtime). It runs as a **non-root user** (uid 10001) and uses `/healthz` as its
@@ -102,10 +137,11 @@ healthcheck; the response carries a `"database":"up"` field and returns 503 when
 unreachable. The container is **stateless**: migrations ship inside the binary and every byte of
 state lives in the PostgreSQL volume.
 
-The build pulls npm packages and Go modules, so it needs outbound network. Behind a proxy, pass it
-as `BUILD_PROXY` — `make docker-build` takes it from `$HTTP_PROXY` and adds `--network=host`, which
-is what makes a host-side `127.0.0.1:<port>` resolve inside the build container. A compose build
-runs on the bridge network where that address does not exist, so the Dockerfile retries
+The build pulls npm packages and Go modules, so it needs outbound network (`make docker-build`,
+`make compose-build`, or a plain `docker compose build`). Behind a proxy, pass it as `BUILD_PROXY` —
+`make docker-build` takes it from `$HTTP_PROXY` and adds `--network=host`, which is what makes a
+host-side `127.0.0.1:<port>` resolve inside the build container. Compose builds on the bridge
+network where that address does not exist, so the Dockerfile retries
 `bun install` and `go mod download` with the proxy variables cleared and falls back to the default
 `GOPROXY` mirror (`https://goproxy.cn,direct`; override with `--build-arg GOPROXY=...`); only when
 both attempts fail does the build stop with an explicit hint.
@@ -122,23 +158,19 @@ With `AGENTHUB_ENV=prod` and no `AGENTHUB_ADMIN_TOKEN`, `config.Validate` **refu
 `Authorization: Bearer <token>`. Configuration is passed through the compose `.env` file or
 environment variables; `AGENTHUB_HTTP_PORT` changes the published host port.
 
-## A2A endpoints
+## Tests
 
-| Endpoint | Description |
-| --- | --- |
-| `GET /.well-known/agent.json` | Agent Card (`GET /a2a/agent-card` is a compatibility path) |
-| `POST /a2a` | JSON-RPC 2.0 single entry point |
-| `GET /api/resources` etc. | Console control plane (`/api/*`) |
-| `GET /healthz` | Health and mode |
+Unit and integration suites:
 
-Methods: `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel`, `tasks/resume`,
-`tasks/pushNotification/set`, `tasks/pushNotification/get`; with `AGENTHUB_A2A_LEGACY_METHODS=true`
-the v0.1 aliases `tasks/send` and `tasks/sendSubscribe` are accepted as well.
+```bash
+make db-up             # integration cases need a real PostgreSQL
+make test              # go test -race ./... (integration cases skip without DATABASE_URL)
+make test-integration  # only integration_test.go
+make web-test          # cd web && bunx vitest run
+```
 
-Streaming has **no `[DONE]` sentinel**: a run ends with the
-`completed / failed / canceled / input-required` status event.
-
-### Smoke test
+End-to-end smoke test against a running stack (`make up`, then talk to `localhost:3500`): discovery,
+sending a task, streaming, and parking + resuming a task that asks for approval.
 
 ```bash
 # 1) discovery
@@ -166,6 +198,22 @@ curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
   "params":{"id":"<taskId>","message":{"role":"user","parts":[{"type":"text","text":"approved"}]}}}'
 ```
 
+## A2A endpoints
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /.well-known/agent.json` | Agent Card (`GET /a2a/agent-card` is a compatibility path) |
+| `POST /a2a` | JSON-RPC 2.0 single entry point |
+| `GET /api/resources` etc. | Console control plane (`/api/*`) |
+| `GET /healthz` | Health and mode |
+
+Methods: `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel`, `tasks/resume`,
+`tasks/pushNotification/set`, `tasks/pushNotification/get`; with `AGENTHUB_A2A_LEGACY_METHODS=true`
+the v0.1 aliases `tasks/send` and `tasks/sendSubscribe` are accepted as well.
+
+Streaming has **no `[DONE]` sentinel**: a run ends with the
+`completed / failed / canceled / input-required` status event.
+
 ## Flow primitives
 
 `metadata.flow` accepts three primitives for relaying a task across resources:
@@ -192,21 +240,24 @@ localised copy on the client.
   `-32004 unsupported_operation`, `-32005 invalid_state_transition`,
   `-32006 resource_not_found`, `-32007 resource_unreachable`, `-32008 task_not_resumable`
 
-## Configuration
+## Persistence
 
-See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PORT` (default 3500),
-`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`, `AGENTHUB_MAX_PARALLEL`,
-`AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`, `AGENTHUB_MAX_OUTPUT_BYTES`,
-`AGENTHUB_PUSH_RECORD_LIMIT` (default 100).
+| Table | Content |
+| --- | --- |
+| `resources` | The five kinds of entries, `tags/capabilities/auth_schemes/env/metadata` stored as `jsonb` |
+| `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | Task body, outputs, span timeline, the parked `input-required` question and the callback config (children cascade with the task) |
+| `events` | Every status / artifact / message / span frame, replayable with `since=<seq>` after a reconnect |
+| `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
+| `schema_migrations` | Migration files already applied, skipped at startup |
 
-## Tests
-
-```bash
-make db-up             # integration cases need a real PostgreSQL
-make test              # go test -race ./... (integration cases skip without DATABASE_URL)
-make test-integration  # only integration_test.go
-make web-test          # cd web && bunx vitest run
-```
+- Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
+  transaction per file; the SQL itself is idempotent.
+- Write strategy: tasks / artifacts / spans are **synchronous** (state transitions use a
+  conditional update `WHERE state=?` so concurrent writers cannot lose an update); events and push
+  records are **best effort** (bounded queue + async writer, failures only warn and **never become
+  back pressure on task execution**).
+- Reconnect: `GET /api/tasks/{id}/events?since=<seq>` replays every frame after `seq`, then follows
+  the live stream.
 
 Integration coverage: idempotent migrations, resource CRUD with jsonb round trips, the full task
 lifecycle with cascade deletes, event replay, push record persistence plus the retention cap, and
