@@ -157,10 +157,15 @@ textarea:focus {
 .brand-mark {
   width: 30px;
   height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
   border-radius: 9px;
   background: var(--sheen);
   border: 1px solid var(--stroke-3);
   box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.12);
+  /* The glyph paints in currentColor, so the badge itself stays colourless. */
+  color: var(--text-1);
 }
 
 .brand-name {

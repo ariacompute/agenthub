@@ -5,6 +5,7 @@ import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
 import { Boxes, Network, PanelLeftClose, PanelLeftOpen, Shield, Workflow } from 'lucide-vue-next'
+import BrandMark from './BrandMark.vue'
 import StateDot from './StateDot.vue'
 
 const route = useRoute()
@@ -68,7 +69,9 @@ const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildN
 <template>
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-mark" aria-hidden="true">
+        <BrandMark :size="18" />
+      </div>
       <div>
         <div class="brand-name">agenthub</div>
         <div class="brand-tagline">{{ t('brandTagline') }}</div>

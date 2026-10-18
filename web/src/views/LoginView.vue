@@ -5,6 +5,7 @@ import { useAuthStore } from '../lib/auth-store.js'
 import { useHubStore } from '../lib/store.js'
 import { useCopy } from '../lib/use-copy.js'
 import { errorMessage } from '../lib/errors.js'
+import BrandMark from '../components/BrandMark.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { Github, KeyRound, LogIn, Mail } from 'lucide-vue-next'
@@ -66,7 +67,9 @@ async function submit() {
   <div class="login">
     <header class="login-head">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true"></div>
+        <div class="brand-mark" aria-hidden="true">
+          <BrandMark :size="18" />
+        </div>
         <div>
           <div class="brand-name">agenthub</div>
           <div class="brand-tagline">{{ shell.t('brandTagline') }}</div>
