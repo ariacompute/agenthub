@@ -1,17 +1,20 @@
 # AgentHub 发布说明
 
-> 本文档以 A2A 互连平台（agenthub）产品的视角，汇总 `agenthub` 仓库截至 **2026-10-16**
+> 本文档以 A2A 互连平台（agenthub）产品的视角，汇总 `agenthub` 仓库截至 **2026-10-18**
 > 的全部特性更新，覆盖 **v0.1.0**（M1 首版：A2A 协议层 / 资源注册 / 适配层 / Hub 编排 /
-> 控制台）与 **v0.2.0**（PostgreSQL 全量持久化）。服务端为 Go 单二进制，控制台为 Vue 3
-> 单色界面，对外只暴露一套标准 A2A 端点。
+> 控制台）、**v0.2.0**（PostgreSQL 全量持久化）、**v0.3.0**（构建打标：控制台与
+> `/healthz` 的 `version@commit`）、**v0.4.0**（Release 发布容器镜像）与 **v0.5.0**
+> （Windows / macOS / Linux 桌面外壳）。服务端为 Go 单二进制，控制台为 Vue 3 单色界面，
+> 对外只暴露一套标准 A2A 端点——同一份控制台同时以桌面应用形态交付。
 
 ## 组件版本参考
 
 | 组件 | 仓库 | 版本参考 |
 | --- | --- | --- |
-| A2A 服务端 + 控制台 | `agenthub`（agenthub-server / Vue 3 console） | v0.2.0 |
+| A2A 服务端 + 控制台 | `agenthub`（agenthub-server / Vue 3 console） | v0.5.0 |
 | A2A 协议实现 | `agenthub` / `internal/a2a` | 0.2.0 |
 | 持久化 | PostgreSQL 16 + GORM（`gorm.io/gorm` v1.25.12） | — |
+| 桌面外壳 | `agenthub` / `desktop`（Tauri v2，Rust） | v0.5.0 |
 
 ---
 
@@ -202,11 +205,14 @@ Agent 调用。
 Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面，也是 A2A 契约的可视化
 检查器。
 
-### 三屏
+### 五屏
 
 - **注册中心**：五类筛选 + 搜索、健康指示与统计条、单资源「试跑」。
 - **任务追踪**：任务列表 + 状态过滤、span 时间线回放、artifact 原文可复制。
 - **拓扑视图**：五泳道资产与调用边，线型区分活跃与失败。
+- **登录注册**：首个账号即 owner，`/api/*` 无会话一律关闭。
+- **管理**：用户、组、角色、权限与资源授权，外加第四个子页「数据库检查点」
+  （打点 / 下载 / 恢复 / 定时）。
 
 ### 多语言与单色体系
 
@@ -232,14 +238,19 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `--profile dev` 另起 bun 开发服务器（5173）。
 - **健康检查**：`/healthz` 返回版本、协议版本、资源与任务计数、模式、鉴权模式与
   **`database`（up / down / unknown）**；库不可达返回 503。
+- **桌面端产物**：每次 Release 同时发布 Windows / macOS / Linux 资产——原生安装包 +
+  便携压缩包 + 覆盖两者的校验和（见第十节）。同一个 workflow 里镜像 job 与桌面矩阵并列，
+  互不影响。
 
 ### 配置与安全治理
 
 - **必填项**：`DATABASE_URL`（缺失即拒绝启动）。
 - **端口与环境**：`AGENTHUB_HTTP_PORT`（默认 3500）、`AGENTHUB_ENV`
   （dev / staging / prod）。
-- **鉴权**：`AGENTHUB_ADMIN_TOKEN` 护 `/api/*`，`AGENTHUB_AUTH_OPEN_MODE` 仅本地可用；
-  **生产红线**：`AGENTHUB_ENV=prod` 未配 token 时拒绝启动。
+- **鉴权**：真实账号 + 会话 + RBAC——首个账号即 owner，`/api/*` 无会话一律关闭，
+  `AGENTHUB_COOKIE_SECURE` 把会话 cookie 钉在 HTTPS 上；**生产红线**：
+  `AGENTHUB_ENV=prod` 未配 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` 时拒绝启动
+  （共享 admin token 已移除）。
 - **限额**：`AGENTHUB_MAX_PARALLEL`（8）、`AGENTHUB_CLI_TIMEOUT`（15s）、
   `AGENTHUB_CLI_ALLOWLIST`（git / ls / cat / echo / date / aria-memo）、
   `AGENTHUB_MAX_OUTPUT_BYTES`（65536）、`AGENTHUB_EVENT_BUFFER`（512）、
@@ -259,17 +270,66 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   **未设置 `DATABASE_URL` 则 skip，绝不伪造结果**。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
-- **前端**：`bunx vitest run` 22 项通过（languages / copy-fallback / enums-copy / api /
-  style 护栏）。
+- **前端**：`bunx vitest run` 57 项通过（languages / copy-fallback / enums-copy / api /
+  format / errors / backup-api / style 护栏）。
+- **桌面端**：`desktop/src-tauri` 下 `cargo test` 34 项通过——URL 与配置校验、13 语契约、
+  转发前缀清单与 cookie 改写，以及**起真实环回代理 + 桩服务端**的端到端用例（断言 SSE
+  不被缓冲、逐帧到达）。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
 
 ---
 
+## 十、桌面外壳（v0.5.0）
+
+`desktop/` 是 **Tauri v2** 外壳（Rust + 系统 WebView），覆盖 Windows、macOS（arm64 与
+x64）与 Linux。它**不带后端、不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着用户
+指定的服务端打开。控制台与 Go 服务端一行都没有为桌面端改动。
+
+### 为什么是环回代理
+
+控制台是 Web 应用：所有请求都是相对 URL（`/api/…` 且 `credentials: 'include'`），
+因此它需要一个「像服务端一样应答」的源。外壳给了它一个——**仅监听 127.0.0.1** 的
+`http://127.0.0.1:<随机端口>`，那里有一个反向代理托管内嵌控制台并向上游转发：
+
+- **转发前缀**：`/api`、`/a2a`、`/healthz`、`/.well-known`；其余一律回退 `index.html`，
+  与服务端静态托管同规则。
+- **会话 cookie**：`Set-Cookie` 在到达 WebView 前被改写——剥掉 `Secure` 与 `Domain`
+  （明文 http 的环回源存不下它们）、`SameSite=None` 改为 `Lax`、路径统一钉到 `/`；
+  `HttpOnly` 原样保留，于是页面读不到的 cookie 照样随行。
+- **流式转发**：响应以字节流转发，**不缓冲、不设整体超时**，因此
+  `/api/tasks/{id}/events`、`message/stream` 与检查点下载与浏览器里完全一致。
+- **重定向**：指向服务端的 `Location` 被改写回环回源，OAuth 往返因此留在应用内。
+
+### 连接、托盘与多语言
+
+- **首次启动**进入连接页，先探 `/healthz` 再落盘；地址存于外壳自有的 `config.json`
+  （0600，仅当前用户），「忽略自签证书」默认关闭。
+- **托盘**四项：打开控制台 / 连接设置… / 关于 / 退出，跟随所选语言；关闭窗口只是收进
+  托盘，不会退出。
+- **13 种语言**——与控制台同一份清单，阿拉伯语镜像——由 `cargo test` 施加与控制台 copy
+  相同的约束：13 语齐备、无空串、任何语言不得与英文原文相同。
+
+### 交付形态
+
+每次 Release 发布四个构建（linux-x86_64 / macos-aarch64 / macos-x64 / windows-x86_64），
+每个都包含**原生安装包**（MSI / DMG / AppImage + deb）、**便携压缩包**（zip / tar.gz）
+与覆盖两者的 **SHA256SUMS.txt**；安装包版本即 Release tag。产物**未做代码签名**，首次
+启动会被系统拦下：
+
+| 平台 | 绕行方式 |
+| --- | --- |
+| macOS | *系统设置 → 隐私与安全性 → 仍要打开*；或解压后 `xattr -d com.apple.quarantine /Applications/agenthub.app` |
+| Windows | SmartScreen 选 *更多信息 → 仍要运行* |
+| Linux | `chmod +x agenthub-*.AppImage`（或安装 `.deb`） |
+
+---
+
 ## 架构总览
 
 ```
+桌面外壳 ──http://127.0.0.1:<port>（环回代理）──> 内嵌控制台 + /api、/a2a、/healthz、/.well-known
 调用方 ──POST /a2a（JSON-RPC 2.0 单入口）──> handlers → hub → adapter → 资源执行
 调用方 ──GET /.well-known/agent.json──────> Agent Card（一资源渲染为一个 skill）
 控制台 ──GET /api/tasks/{id}/events?since=seq──> SSE 回放 + 实时流
@@ -284,3 +344,5 @@ hub ────store（GORM，四个端口接口）────────> Po
 - **传输无关**：MCP 的 `transport`（stdio / streamable-http / sse-legacy）是记录字段，
   适配器不得按它分支。
 - **不做评分**：eval 仅留钩子，不接 LLM judge、不产出任何分数。
+- **一份控制台、两种外壳**：桌面端是同一份构建产物，只是由环回源提供，因此控制台不会
+  长出任何桌面专用分支，Go 服务端也无从感知桌面客户端的存在。

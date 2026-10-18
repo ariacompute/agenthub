@@ -2,18 +2,22 @@
 
 > This document takes the perspective of the A2A interconnection platform (agenthub)
 > and summarizes all feature updates in the `agenthub` repository as of
-> **2026-10-16**, covering **v0.1.0** (the M1 first release: A2A protocol layer /
-> resource registry / adapter layer / Hub orchestration / console) and **v0.2.0**
-> (full PostgreSQL persistence). The server is a single Go binary, the console is a
-> monochrome Vue 3 UI, and exactly one standard set of A2A endpoints is exposed.
+> **2026-10-18**, covering **v0.1.0** (the M1 first release: A2A protocol layer /
+> resource registry / adapter layer / Hub orchestration / console), **v0.2.0** (full
+> PostgreSQL persistence), **v0.3.0** (build stamping — `version@commit` in the
+> console and in `/healthz`), **v0.4.0** (release publishing of the container image)
+> and **v0.5.0** (the desktop shell for Windows, macOS and Linux). The server is a
+> single Go binary, the console is a monochrome Vue 3 UI, and exactly one standard
+> set of A2A endpoints is exposed — that same console also ships as a desktop app.
 
 ## Component Version Reference
 
 | Component | Repository | Version |
 | --- | --- | --- |
-| A2A Server + Console | `agenthub` (agenthub-server / Vue 3 console) | v0.2.0 |
+| A2A Server + Console | `agenthub` (agenthub-server / Vue 3 console) | v0.5.0 |
 | A2A Protocol Implementation | `agenthub` / `internal/a2a` | 0.2.0 |
 | Persistence | PostgreSQL 16 + GORM (`gorm.io/gorm` v1.25.12) | — |
+| Desktop Shell | `agenthub` / `desktop` (Tauri v2, Rust) | v0.5.0 |
 
 ---
 
@@ -243,7 +247,7 @@ while the container itself stays stateless.
 The Vue 3 + Vite (bun) bundle is hosted at `/` by the Go process — both an operations
 screen and a visual inspector for the A2A contract.
 
-### Three Screens
+### Five Screens
 
 - **Registry**: five-kind filtering + search, health indicators and a stats bar, and a
   per-resource "trial run".
@@ -251,6 +255,10 @@ screen and a visual inspector for the A2A contract.
   artifact text.
 - **Topology**: five asset lanes with invocation edges, line style distinguishing active
   from failed.
+- **Login & registration**: the first account becomes the owner; every `/api/*` route
+  is closed without a session.
+- **Administration**: users, groups, roles, permissions and resource grants, plus
+  database checkpoints (dump / download / restore / schedule) as a fourth tab.
 
 ### i18n & Monochrome System
 
@@ -281,15 +289,20 @@ screen and a visual inspector for the A2A contract.
 - **Health check**: `/healthz` reports version, protocol version, resource and task
   counts, mode, auth mode and **`database` (up / down / unknown)**; it returns 503 when
   the database is unreachable.
+- **Desktop builds**: each release also publishes Windows / macOS / Linux assets — a
+  native installer, a portable archive and the checksums covering both (see §10). The
+  same release workflow owns the image job and the desktop matrix, side by side.
 
 ### Configuration & Security
 
 - **Required**: `DATABASE_URL` (startup is refused without it).
 - **Port & environment**: `AGENTHUB_HTTP_PORT` (3500), `AGENTHUB_ENV`
   (dev / staging / prod).
-- **Auth**: `AGENTHUB_ADMIN_TOKEN` guards `/api/*`; `AGENTHUB_AUTH_OPEN_MODE` is
-  local-only. **Production red line**: `AGENTHUB_ENV=prod` without a token refuses to
-  start.
+- **Auth**: real accounts, sessions and RBAC — the first account becomes the owner and
+  every `/api/*` route is closed without a session; `AGENTHUB_COOKIE_SECURE` pins the
+  session cookie to HTTPS. **Production red line**: `AGENTHUB_ENV=prod` without
+  `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` refuses to start (the shared admin token was
+  removed).
 - **Limits**: `AGENTHUB_MAX_PARALLEL` (8), `AGENTHUB_CLI_TIMEOUT` (15s),
   `AGENTHUB_CLI_ALLOWLIST` (git / ls / cat / echo / date / aria-memo),
   `AGENTHUB_MAX_OUTPUT_BYTES` (65536), `AGENTHUB_EVENT_BUFFER` (512),
@@ -314,8 +327,12 @@ screen and a visual inspector for the A2A contract.
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
-- **Frontend**: `bunx vitest run`, 22 tests passing (languages / copy-fallback /
-  enums-copy / api / style guard).
+- **Frontend**: `bunx vitest run`, 57 tests passing (languages / copy-fallback /
+  enums-copy / api / format / errors / backup-api / style guard).
+- **Desktop**: `cargo test` in `desktop/src-tauri`, 34 tests passing — URL and config
+  validation, the 13-language contract, the forwarding prefix list and cookie
+  rewriting, plus end-to-end cases that start a real proxy against a stub server and
+  assert an SSE stream arrives unbuffered.
 - **A2A & control-plane smoke**: send (once per kind), stream (no `[DONE]`, terminal frame
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
@@ -323,9 +340,64 @@ screen and a visual inspector for the A2A contract.
 
 ---
 
+## 10. Desktop Shell (v0.5.0)
+
+`desktop/` is a **Tauri v2** shell (Rust, system WebView) for Windows, macOS (arm64
+and x64) and Linux. It carries **no backend and no database**: it embeds the same
+console the server hosts and opens it against a server the user points it at. Neither
+the console nor the Go server was written for the desktop — not a line of either
+changed.
+
+### Why a Loopback Proxy
+
+The console is a web app: every request it makes is a relative URL (`/api/…` with
+`credentials: 'include'`), so it needs an origin that answers like the server's. The
+shell gives it one — `http://127.0.0.1:<random port>`, bound to loopback only — where
+a reverse proxy serves the embedded console and forwards upstream:
+
+- **Forwarded prefixes**: `/api`, `/a2a`, `/healthz`, `/.well-known`; anything else
+  falls back to `index.html`, the same rule as the server's static hosting.
+- **Session cookies**: `Set-Cookie` is rewritten before it reaches the WebView —
+  `Secure` and `Domain` are dropped (a plain-http loopback origin cannot keep them),
+  `SameSite=None` becomes `Lax`, and the path is pinned to `/`. `HttpOnly` is left as
+  the server sent it, so the cookie the page cannot read still rides along.
+- **Streaming**: responses are forwarded as a byte stream with no buffering and no
+  overall timeout, so `/api/tasks/{id}/events`, `message/stream` and the checkpoint
+  download behave exactly as they do in a browser.
+- **Redirects**: a `Location` pointing back at the server is rewritten to the loopback
+  origin, so an OAuth round trip stays inside the app.
+
+### Connection, Tray and Languages
+
+- **First start** shows the connection page, which probes `/healthz` before it saves
+  anything; the address lives in the shell's own `config.json` (0600, per user) and
+  "ignore self-signed certificates" is off by default.
+- **Tray**: open console / connection settings… / about / quit, in the chosen language;
+  closing the window parks the app in the tray instead of ending it.
+- **13 languages** — the same list as the console, Arabic mirrored — held by
+  `cargo test` to the same contract the console's copy is held to: 13 languages, no
+  empty strings, and no language silently repeating English.
+
+### Distribution
+
+Every release publishes four builds (linux-x86_64, macos-aarch64, macos-x64,
+windows-x86_64), each with a **native installer** (MSI / DMG / AppImage + deb), a
+**portable archive** (zip / tar.gz) and a **SHA256SUMS.txt** covering both. The
+installer version is the release tag. The builds are **not code-signed**, so the first
+launch is stopped by the platform:
+
+| Platform | What to do |
+| --- | --- |
+| macOS | *System Settings → Privacy & Security → Open Anyway*, or `xattr -d com.apple.quarantine /Applications/agenthub.app` |
+| Windows | SmartScreen: *More info → Run anyway* |
+| Linux | `chmod +x agenthub-*.AppImage` (or install the `.deb`) |
+
+---
+
 ## Architecture Overview
 
 ```
+desktop --http://127.0.0.1:<port> (loopback proxy)--> embedded console + /api, /a2a, /healthz, /.well-known
 caller --POST /a2a (single JSON-RPC 2.0 entry)--> handlers -> hub -> adapter -> resource
 caller --GET /.well-known/agent.json-----------> Agent Card (one skill per resource)
 console --GET /api/tasks/{id}/events?since=seq--> SSE replay + live stream
@@ -340,3 +412,6 @@ console --GET /api/*---------------------------> Registry / Task trace / Topolog
 - **Transport-agnostic**: an MCP entry's `transport` (stdio / streamable-http /
   sse-legacy) is a recorded field, and adapters must not branch on it.
 - **No scoring**: eval only keeps a hook — no LLM judge, and no scores are produced.
+- **One console, two shells**: the desktop app is the same bundle served from a
+  loopback origin, so the console never grows a desktop-only code path — and the Go
+  server never learns that a desktop client exists.
