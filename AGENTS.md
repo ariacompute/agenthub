@@ -11,7 +11,7 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 - 后端：**Go 1.27 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
   （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
 - 前端：Vue 3 + Vite（**bun** 包管理/测试），三屏控制台，**13 种语言**，**纯黑/白/灰单色**视觉。
-- 桌面端：`desktop/`，**Rust + Tauri v2** 外壳（Windows / macOS arm64+x64 / Linux）。**不含后端、
+- 桌面端：`desktop/`，**Rust + Tauri v2** 外壳（Windows / macOS arm64 / Linux）。**不含后端、
   不含数据库**，用环回反向代理把同一份控制台对着用户指定的服务端打开；外壳自有文案同样 13 语。
 - 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通；真实对接以 `TODO(real)` 标注边界。
 - 设计参照 `mastra-ai/mastra` 的**协议与交互形态**（MCP Registry 条目模型、workflow 三原语、
@@ -220,11 +220,15 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
   自报 `dev` 哨兵、说不清来源的 `:latest`。
 - 必填 secrets：`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`；`:latest` **只由 CI 推**，禁止本地手工推。
 - 平台仅 `linux/amd64`（与 docker 仓 release.yml 一致）；如需多架构再引 `setup-qemu` + `setup-buildx`。
-- **桌面端**：四格矩阵（linux-x86_64 / macos-aarch64 / macos-x64 / windows-x86_64），每格先
+- **桌面端**：三格矩阵（linux-x86_64 / macos-aarch64 / windows-x86_64），每格先
   `bun run build` 出控制台 → `tauri-action`（`releaseId` 指向触发本次运行的 Release，
   `uploadUpdaterJson: false`）出原生安装包（MSI / DMG / AppImage + deb）并自行附着；随后脚本把
   应用目录打成**便携包**（zip / tar.gz），为安装包与便携包生成 `SHA256SUMS.txt`，最后由
   `softprops/action-gh-release` 附着便携包与校验和 —— **不新建 Release、不改 body**。
+- **macOS 只出 arm64**：原 Intel 一格跑在 `macos-13` 标签上，该 runner 已被 GitHub 退役——作业
+  受理后永远等不到 runner，而 `fail-fast: false` 让整个 Release 一直 in_progress（其余格子产物已上传），
+  既不成功也不失败。不要恢复该标签；要恢复 Intel 产物只能在 `macos-latest` 上交叉编译
+  `x86_64-apple-darwin`。Intel Mac 由 `make desktop-build` 从源码构建。
 - **版本号 === Release tag**：`desktop/scripts/stamp.mjs` 在编译前把 tag（去掉 `v`）写进
   `Cargo.toml` 与 `tauri.conf.json`；`AGENTHUB_COMMIT` 环境变量进入 `option_env!`，供「关于」显示。
 - **产物未签名**（未配置证书 secrets）：文件名与发布说明必须明示，README 给出 macOS Gatekeeper

@@ -283,8 +283,8 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 
 ## 十、桌面外壳（v0.5.0）
 
-`desktop/` 是 **Tauri v2** 外壳（Rust + 系统 WebView），覆盖 Windows、macOS（arm64 与
-x64）与 Linux。它**不带后端、不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着用户
+`desktop/` 是 **Tauri v2** 外壳（Rust + 系统 WebView），覆盖 Windows、macOS（arm64）
+与 Linux。它**不带后端、不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着用户
 指定的服务端打开。控制台与 Go 服务端一行都没有为桌面端改动。
 
 ### 为什么是环回代理
@@ -313,10 +313,12 @@ x64）与 Linux。它**不带后端、不带数据库**：把服务端托管的�
 
 ### 交付形态
 
-每次 Release 发布四个构建（linux-x86_64 / macos-aarch64 / macos-x64 / windows-x86_64），
+每次 Release 发布三个构建（linux-x86_64 / macos-aarch64 / windows-x86_64），
 每个都包含**原生安装包**（MSI / DMG / AppImage + deb）、**便携压缩包**（zip / tar.gz）
-与覆盖两者的 **SHA256SUMS.txt**；安装包版本即 Release tag。产物**未做代码签名**，首次
-启动会被系统拦下：
+与覆盖两者的 **SHA256SUMS.txt**；安装包版本即 Release tag。macOS **仅 arm64**：原先的
+Intel 一格跑在已被 GitHub 退役的 `macos-13` 标签上，作业受理后永远等不到 runner，而矩阵
+是 `fail-fast: false`，于是整个 Release 一直挂着、既不成功也不失败；Intel Mac 请用
+`make desktop-build` 从源码构建。产物**未做代码签名**，首次启动会被系统拦下：
 
 | 平台 | 绕行方式 |
 | --- | --- |

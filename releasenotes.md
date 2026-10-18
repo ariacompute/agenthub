@@ -342,8 +342,8 @@ screen and a visual inspector for the A2A contract.
 
 ## 10. Desktop Shell (v0.5.0)
 
-`desktop/` is a **Tauri v2** shell (Rust, system WebView) for Windows, macOS (arm64
-and x64) and Linux. It carries **no backend and no database**: it embeds the same
+`desktop/` is a **Tauri v2** shell (Rust, system WebView) for Windows, macOS (arm64)
+and Linux. It carries **no backend and no database**: it embeds the same
 console the server hosts and opens it against a server the user points it at. Neither
 the console nor the Go server was written for the desktop — not a line of either
 changed.
@@ -380,11 +380,15 @@ a reverse proxy serves the embedded console and forwards upstream:
 
 ### Distribution
 
-Every release publishes four builds (linux-x86_64, macos-aarch64, macos-x64,
+Every release publishes three builds (linux-x86_64, macos-aarch64,
 windows-x86_64), each with a **native installer** (MSI / DMG / AppImage + deb), a
-**portable archive** (zip / tar.gz) and a **SHA256SUMS.txt** covering both. The
-installer version is the release tag. The builds are **not code-signed**, so the first
-launch is stopped by the platform:
+**portable archive** (zip / tar.gz) and a **SHA256SUMS.txt** covering both. macOS is
+**arm64 only**: the Intel cell built on the `macos-13` label, which GitHub has retired,
+so that job was accepted and then waited for a runner that never comes — and because
+the matrix runs with `fail-fast: false`, the whole release hung instead of failing.
+Intel Macs build from source with `make desktop-build`. The installer version is the
+release tag. The builds are **not code-signed**, so the first launch is stopped by the
+platform:
 
 | Platform | What to do |
 | --- | --- |

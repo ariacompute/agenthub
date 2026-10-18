@@ -191,9 +191,10 @@ AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 
 ## 桌面端
 
-`desktop/` 是 **Tauri v2** 外壳，覆盖 Windows、macOS（arm64 与 x64）与 Linux。它**不带后端、
+`desktop/` 是 **Tauri v2** 外壳，覆盖 Windows、macOS（arm64）与 Linux。它**不带后端、
 不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着你指定的 agenthub 服务端打开。浏览器里能做的
 一切——注册中心、任务追踪、拓扑、管理、SSE 实时流、归档下载——在窗口里同样可用。
+发布的 macOS 产物为 arm64；Intel Mac 请用 `make desktop-build` 从源码构建。
 
 ```bash
 make desktop-install  # cd desktop && bun install

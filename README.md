@@ -213,10 +213,11 @@ restart. Configuration is passed through the compose `.env` file or environment 
 
 ## Desktop
 
-`desktop/` is a **Tauri v2** shell for Windows, macOS (arm64 and x64) and Linux. It carries no
+`desktop/` is a **Tauri v2** shell for Windows, macOS (arm64) and Linux. It carries no
 backend and no database of its own: it embeds the same console the server serves, and opens it
 against an agenthub server you point it at. Everything you can do in a browser — registry, task
 trace, topology, administration, SSE streams, downloads — works the same way inside the window.
+The published macOS binary is arm64; on an Intel Mac build from source with `make desktop-build`.
 
 ```bash
 make desktop-install  # cd desktop && bun install

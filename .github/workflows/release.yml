@@ -132,9 +132,11 @@ jobs:
   #   a portable archive   .zip (Windows) / .tar.gz (macOS, Linux)
   #   SHA256SUMS.txt       covering both, written next to the archive
   #
-  # macOS gets two cells rather than one universal build: arm64 and x64 are
-  # built natively on their own runner, which avoids the SDK pitfalls of
-  # cross-compiling a WKWebView app.
+  # macOS is one cell: arm64, built natively on macos-latest. An x64 cell used
+  # to sit next to it on the macos-13 label, but GitHub retired that runner —
+  # the job was accepted, then waited for a runner that never picks it up, and
+  # the whole release stayed unfinished. Apple Silicon is where the runners
+  # are; Intel Macs build from source with `make desktop-build`.
   desktop:
     name: Desktop ${{ matrix.platform }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
@@ -144,7 +146,7 @@ jobs:
       contents: write
 
     strategy:
-      # One platform failing must not hide the other three from the release.
+      # One platform failing must not hide the other two from the release.
       fail-fast: false
       matrix:
         include:
@@ -161,11 +163,6 @@ jobs:
             arch: aarch64
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles app,dmg
-          - os: macos-13
-            platform: macos
-            arch: x64
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --bundles app,dmg
           - os: windows-latest
             platform: windows
             arch: x86_64
