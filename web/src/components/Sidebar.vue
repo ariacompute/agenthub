@@ -1,16 +1,38 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
-import { Boxes, Network, Shield, Workflow } from 'lucide-vue-next'
+import { Boxes, Network, PanelLeftClose, PanelLeftOpen, Shield, Workflow } from 'lucide-vue-next'
 import StateDot from './StateDot.vue'
 
 const route = useRoute()
 const store = useHubStore()
 const auth = useAuthStore()
 const { t } = useCopy('shell')
+
+// Collapsing is a choice, not a breakpoint: it is remembered the same way the
+// theme is, and the width lives on <html> so the sidebar, the main column and
+// the topbar move together off one token.
+const STORAGE_KEY = 'agenthub.sidebar'
+const collapsed = ref(false)
+
+function apply(next) {
+  collapsed.value = next
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.sidebar = next ? 'collapsed' : 'expanded'
+    window.localStorage.setItem(STORAGE_KEY, next ? 'collapsed' : 'expanded')
+  }
+}
+
+onMounted(() => {
+  const stored = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null
+  apply(stored === 'collapsed')
+})
+
+const toggleLabel = computed(() => t(collapsed.value ? 'sidebarExpand' : 'sidebarCollapse'))
+const toggleIcon = computed(() => (collapsed.value ? PanelLeftOpen : PanelLeftClose))
 
 const items = computed(() => {
   const base = [
@@ -60,6 +82,8 @@ const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildN
         :to="item.to"
         class="nav-item"
         :class="{ active: route.path === item.to }"
+        :aria-label="item.label"
+        :title="item.label"
       >
         <component :is="item.icon" :size="16" />
         <span>{{ item.label }}</span>
@@ -75,6 +99,17 @@ const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildN
            ellipsized away at the default sidebar width. -->
       <span v-if="build" class="sidebar-build" :title="buildLabel">{{ build }}</span>
       <span v-if="buildNote" class="sidebar-build sidebar-build-note" :title="buildLabel">{{ buildNote }}</span>
+      <button
+        class="sidebar-toggle"
+        type="button"
+        :aria-expanded="!collapsed"
+        :aria-label="toggleLabel"
+        :title="toggleLabel"
+        @click="apply(!collapsed)"
+      >
+        <component :is="toggleIcon" :size="16" />
+        <span>{{ toggleLabel }}</span>
+      </button>
     </div>
   </aside>
 </template>

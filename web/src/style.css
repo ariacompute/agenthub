@@ -145,6 +145,7 @@ textarea:focus {
   border-inline-end: 1px solid var(--stroke-1);
   backdrop-filter: blur(18px);
   z-index: 20;
+  transition: width 0.18s ease;
 }
 
 .brand {
@@ -232,6 +233,41 @@ textarea:focus {
   gap: 8px;
 }
 
+/* The collapse control sits with the build string, below the navigation: it
+   changes the chrome, so it must never read as one of the destinations. */
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-block-start: 2px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.sidebar-toggle:hover {
+  background: var(--accent-softer);
+  color: var(--text-1);
+}
+
+.sidebar-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* In RTL the sidebar hangs off the right edge, so the chevron mirrors with it. */
+[dir='rtl'] .sidebar-toggle svg {
+  transform: scaleX(-1);
+}
+
 /* version@commit, e.g. v0.2.0@1a2b3c4 — data, never translated. */
 .sidebar-build {
   max-width: 100%;
@@ -258,6 +294,7 @@ textarea:focus {
   margin-inline-start: var(--sidebar-w);
   display: flex;
   flex-direction: column;
+  transition: margin-inline-start 0.18s ease;
 }
 
 .topbar {
@@ -910,8 +947,10 @@ textarea:focus {
     --sidebar-w: 68px;
   }
   .brand-tagline,
+  .brand-name,
   .nav-item span,
-  .sidebar-foot span {
+  .sidebar-foot span,
+  .sidebar-toggle span {
     display: none;
   }
   .nav-item {
@@ -923,6 +962,33 @@ textarea:focus {
   .lanes {
     grid-template-columns: repeat(5, minmax(150px, 1fr));
   }
+}
+
+/* Collapsed by choice rather than by viewport width: the toggle sets one
+   attribute and the whole chrome — rail, main column, topbar — follows the
+   same --sidebar-w token, ending at the icon-only geometry above. */
+[data-sidebar='collapsed'] {
+  --sidebar-w: 68px;
+}
+
+[data-sidebar='collapsed'] .brand-tagline,
+[data-sidebar='collapsed'] .brand-name,
+[data-sidebar='collapsed'] .nav-item span,
+[data-sidebar='collapsed'] .sidebar-foot span,
+[data-sidebar='collapsed'] .sidebar-toggle span {
+  display: none;
+}
+
+[data-sidebar='collapsed'] .brand,
+[data-sidebar='collapsed'] .sidebar-foot {
+  justify-content: center;
+  align-items: center;
+}
+
+[data-sidebar='collapsed'] .nav-item,
+[data-sidebar='collapsed'] .sidebar-toggle {
+  justify-content: center;
+  padding-inline: 0;
 }
 
 /* Light theme flips the same grey scale; it never introduces a hue. */
