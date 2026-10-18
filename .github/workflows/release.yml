@@ -128,9 +128,13 @@ jobs:
   # talks to whichever agenthub server the user points it at. Every cell of the
   # matrix is one platform/architecture pair and publishes:
   #
-  #   a native installer   .msi (Windows) / .dmg (macOS) / .AppImage + .deb (Linux)
+  #   a native installer   .msi (Windows) / .dmg (macOS) / .deb (Linux)
   #   a portable archive   .zip (Windows) / .tar.gz (macOS, Linux)
   #   SHA256SUMS.txt       covering both, written next to the archive
+  #
+  # Linux builds no AppImage: the portable .tar.gz already covers "unpack and
+  # run", and shipping two ways to do the same thing on top of the .deb just
+  # adds an asset nobody checksums.
   #
   # macOS is one cell: arm64, built natively on macos-latest. An x64 cell used
   # to sit next to it on the macos-13 label, but GitHub retired that runner —
@@ -154,7 +158,7 @@ jobs:
             platform: linux
             arch: x86_64
             target: ''
-            args: --bundles appimage,deb
+            args: --bundles deb
           # `app` is what writes bundle/macos/agenthub.app, and that .app is what
           # the portable .tar.gz packs; `dmg` on its own only produces the disk
           # image and leaves no .app behind for the packaging step to find.
@@ -256,6 +260,27 @@ jobs:
           # There is no updater plugin, so there is nothing to feed a
           # latest.json.
           uploadUpdaterJson: false
+
+      # tauri-action attaches every bundle it finds, and on macOS that list
+      # always contains bundle/macos/<name>.app.tar.gz — the archive the
+      # updater would consume. There is no updater, and the portable archive
+      # packaged below holds the very same .app under the release's own name,
+      # with a checksum beside it. Dropping the duplicate keeps the release
+      # down to one macOS asset per shape; the action has no input to exclude
+      # it, so it is removed after the upload.
+      - name: Drop the updater's app archive (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${{ github.event.release.id }}/assets?per_page=100" \
+            --jq '.[] | select((.name | endswith(".app.tar.gz")) or (.name | endswith(".app.tar.gz.sig"))) | "\(.id) \(.name)"' \
+            | while read -r id name; do
+                echo "removing ${name} from the release"
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${id}"
+              done
 
       - name: Package the portable archive (Linux, macOS)
         if: matrix.platform != 'windows'

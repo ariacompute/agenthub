@@ -222,9 +222,13 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
 - 平台仅 `linux/amd64`（与 docker 仓 release.yml 一致）；如需多架构再引 `setup-qemu` + `setup-buildx`。
 - **桌面端**：三格矩阵（linux-x86_64 / macos-aarch64 / windows-x86_64），每格先
   `bun run build` 出控制台 → `tauri-action`（`releaseId` 指向触发本次运行的 Release，
-  `uploadUpdaterJson: false`）出原生安装包（MSI / DMG / AppImage + deb）并自行附着；随后脚本把
+  `uploadUpdaterJson: false`）出原生安装包（MSI / DMG / deb）并自行附着；随后脚本把
   应用目录打成**便携包**（zip / tar.gz），为安装包与便携包生成 `SHA256SUMS.txt`，最后由
   `softprops/action-gh-release` 附着便携包与校验和 —— **不新建 Release、不改 body**。
+- **每个平台每种形态只留一个产物**：Linux `--bundles deb`（不出 AppImage，便携包已覆盖「解开即跑」）；
+  macOS 的 `bundle/macos/<name>.app.tar.gz` 被 tauri-action **硬编码**附着（其入参只能改名、不能排除，
+  `uploadUpdaterJson: false` 也拦不住），故上传后由脚本按 asset id 删除，只删 `.app.tar.gz` 与其 `.sig`，
+  保留 `.dmg`。
 - **macOS 只出 arm64**：原 Intel 一格跑在 `macos-13` 标签上，该 runner 已被 GitHub 退役——作业
   受理后永远等不到 runner，而 `fail-fast: false` 让整个 Release 一直 in_progress（其余格子产物已上传），
   既不成功也不失败。不要恢复该标签；要恢复 Intel 产物只能在 `macos-latest` 上交叉编译

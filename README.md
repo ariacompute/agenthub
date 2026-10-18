@@ -248,7 +248,7 @@ the platform:
 | --- | --- |
 | macOS | *System Settings → Privacy & Security → Open Anyway*, or `xattr -d com.apple.quarantine /Applications/agenthub.app` after copying it out of the archive |
 | Windows | SmartScreen: *More info → Run anyway* |
-| Linux | `chmod +x agenthub-*.AppImage` (or install the `.deb`) |
+| Linux | Nothing to bypass: install the `.deb`, or unpack the `.tar.gz` — the binary keeps its executable bit |
 
 Every asset ships with a `SHA256SUMS.txt` next to it.
 

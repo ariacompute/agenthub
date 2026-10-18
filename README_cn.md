@@ -221,7 +221,7 @@ URL、`HttpOnly` 会话 cookie、SSE 事件流与文件下载才能原样工作�
 | --- | --- |
 | macOS | *系统设置 → 隐私与安全性 → 仍要打开*；或解压后执行 `xattr -d com.apple.quarantine /Applications/agenthub.app` |
 | Windows | SmartScreen 选 *更多信息 → 仍要运行* |
-| Linux | `chmod +x agenthub-*.AppImage`（或安装 `.deb`） |
+| Linux | 无需绕行：安装 `.deb`，或解开 `.tar.gz` 直接运行（二进制保留可执行位） |
 
 每个产物旁边都附带 `SHA256SUMS.txt`。
 

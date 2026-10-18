@@ -314,8 +314,9 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 ### 交付形态
 
 每次 Release 发布三个构建（linux-x86_64 / macos-aarch64 / windows-x86_64），
-每个都包含**原生安装包**（MSI / DMG / AppImage + deb）、**便携压缩包**（zip / tar.gz）
-与覆盖两者的 **SHA256SUMS.txt**；安装包版本即 Release tag。macOS **仅 arm64**：原先的
+每个都包含**原生安装包**（MSI / DMG / deb）、**便携压缩包**（zip / tar.gz）
+与覆盖两者的 **SHA256SUMS.txt**；安装包版本即 Release tag。Linux **不再出 AppImage**——
+`.deb` 负责安装、便携包负责解开即跑，AppImage 只是同一份二进制的第三种形态。macOS **仅 arm64**：原先的
 Intel 一格跑在已被 GitHub 退役的 `macos-13` 标签上，作业受理后永远等不到 runner，而矩阵
 是 `fail-fast: false`，于是整个 Release 一直挂着、既不成功也不失败；Intel Mac 请用
 `make desktop-build` 从源码构建。产物**未做代码签名**，首次启动会被系统拦下：
@@ -324,7 +325,7 @@ Intel 一格跑在已被 GitHub 退役的 `macos-13` 标签上，作业受理后
 | --- | --- |
 | macOS | *系统设置 → 隐私与安全性 → 仍要打开*；或解压后 `xattr -d com.apple.quarantine /Applications/agenthub.app` |
 | Windows | SmartScreen 选 *更多信息 → 仍要运行* |
-| Linux | `chmod +x agenthub-*.AppImage`（或安装 `.deb`） |
+| Linux | 无需绕行：安装 `.deb`，或解开 `.tar.gz` 直接运行（二进制保留可执行位） |
 
 ---
 

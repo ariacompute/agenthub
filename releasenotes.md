@@ -381,8 +381,10 @@ a reverse proxy serves the embedded console and forwards upstream:
 ### Distribution
 
 Every release publishes three builds (linux-x86_64, macos-aarch64,
-windows-x86_64), each with a **native installer** (MSI / DMG / AppImage + deb), a
-**portable archive** (zip / tar.gz) and a **SHA256SUMS.txt** covering both. macOS is
+windows-x86_64), each with a **native installer** (MSI / DMG / deb), a
+**portable archive** (zip / tar.gz) and a **SHA256SUMS.txt** covering both. Linux
+ships no AppImage — the `.deb` installs, the portable archive unpacks, and an
+AppImage would be a third way to run the same binary. macOS is
 **arm64 only**: the Intel cell built on the `macos-13` label, which GitHub has retired,
 so that job was accepted and then waited for a runner that never comes — and because
 the matrix runs with `fail-fast: false`, the whole release hung instead of failing.
@@ -394,7 +396,7 @@ platform:
 | --- | --- |
 | macOS | *System Settings → Privacy & Security → Open Anyway*, or `xattr -d com.apple.quarantine /Applications/agenthub.app` |
 | Windows | SmartScreen: *More info → Run anyway* |
-| Linux | `chmod +x agenthub-*.AppImage` (or install the `.deb`) |
+| Linux | Nothing to bypass: install the `.deb`, or unpack the `.tar.gz` — the binary keeps its executable bit |
 
 ---
 
