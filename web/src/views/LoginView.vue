@@ -224,6 +224,12 @@ async function submit() {
 }
 
 .login-card {
+  /* The card is the reason the page exists, so it sits in the middle of the
+     viewport instead of wherever the header happens to leave it. Auto margins
+     rather than justify-content: when the form is taller than the window the
+     margins collapse and the page scrolls from the first field, where a
+     centred flex item would have its top clipped. */
+  margin-block: auto;
   width: min(520px, 100%);
   padding: 24px;
   display: flex;
