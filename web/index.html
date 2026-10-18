@@ -3,6 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Resolve the theme before the first paint. The console follows the OS
+         unless the user has already picked one, and the stylesheet paints the
+         body on arrival, so doing this when Vue mounts instead would show a
+         dark frame first on a machine set to light. -->
+    <script>
+      try {
+        var stored = window.localStorage.getItem('agenthub.theme')
+        document.documentElement.dataset.theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark'
+      } catch (error) {
+        document.documentElement.dataset.theme = 'dark'
+      }
+    </script>
     <!-- The mark, not a wordmark: at 16px a hub reads, letters do not. -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
     <title>agenthub</title>
