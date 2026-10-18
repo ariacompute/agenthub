@@ -6,11 +6,16 @@
  * `tests/style.spec.js` enforces this by scanning the whole src tree.
  */
 :root {
+  color-scheme: dark;
   /* Backgrounds: three levels build depth without tinting. */
   --bg-base: #050505;
   --bg-surface: #0d0d0d;
   --bg-elevated: #161616;
   --bg-overlay: rgba(255, 255, 255, 0.04);
+  /* Surfaces that float above the page carry their own wash so a blur never
+     lets the opposite theme bleed through. */
+  --topbar-bg: rgba(5, 5, 5, 0.72);
+  --backdrop: rgba(0, 0, 0, 0.62);
 
   /* Strokes: white translucency replaces coloured borders. */
   --stroke-1: rgba(255, 255, 255, 0.08);
@@ -264,7 +269,7 @@ textarea:focus {
   align-items: center;
   gap: 12px;
   padding-inline: 24px;
-  background: rgba(5, 5, 5, 0.72);
+  background: var(--topbar-bg);
   backdrop-filter: blur(14px);
   border-block-end: 1px solid var(--stroke-1);
   z-index: 15;
@@ -578,7 +583,7 @@ textarea:focus {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.62);
+  background: var(--backdrop);
   backdrop-filter: blur(3px);
   z-index: 40;
   display: grid;
@@ -591,6 +596,10 @@ textarea:focus {
   max-height: 86vh;
   overflow: auto;
   padding: 20px;
+  /* The card wash alone is translucent, which is correct over the page but
+     leaves a drawer reading as the backdrop behind it. Sit it on the real
+     surface colour so both themes get an opaque panel. */
+  background-color: var(--bg-surface);
   animation: drawer-in 0.16s ease;
 }
 
@@ -918,10 +927,13 @@ textarea:focus {
 
 /* Light theme flips the same grey scale; it never introduces a hue. */
 [data-theme='light'] {
+  color-scheme: light;
   --bg-base: #f5f5f5;
   --bg-surface: #ffffff;
   --bg-elevated: #ececec;
   --bg-overlay: rgba(0, 0, 0, 0.04);
+  --topbar-bg: rgba(245, 245, 245, 0.82);
+  --backdrop: rgba(0, 0, 0, 0.34);
   --stroke-1: rgba(0, 0, 0, 0.1);
   --stroke-2: rgba(0, 0, 0, 0.18);
   --stroke-3: rgba(0, 0, 0, 0.34);
