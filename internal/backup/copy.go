@@ -241,6 +241,17 @@ func (e *copyEngine) Restore(ctx context.Context, r io.Reader, m Manifest) error
 // they belong to. The order is derived from the foreign keys themselves, which
 // means a migration that adds a referencing table needs no change here.
 func insertOrder(ctx context.Context, conn *pgx.Conn, tables []string) ([]string, error) {
+	parentOf, err := foreignKeys(ctx, conn)
+	if err != nil {
+		return nil, err
+	}
+	return orderTables(tables, parentOf), nil
+}
+
+// orderTables is the sort itself, kept free of the connection so the ordering
+// can be tested without a database: it is the rule that decides whether a
+// reload is accepted by the foreign keys or rejected halfway through.
+func orderTables(tables []string, parentOf map[string]string) []string {
 	inSet := make(map[string]bool, len(tables))
 	for _, t := range tables {
 		inSet[t] = true
@@ -249,10 +260,6 @@ func insertOrder(ctx context.Context, conn *pgx.Conn, tables []string) ([]string
 	indegree := map[string]int{}
 	for _, t := range tables {
 		indegree[t] = 0
-	}
-	parentOf, err := foreignKeys(ctx, conn)
-	if err != nil {
-		return nil, err
 	}
 	for child, parent := range parentOf {
 		// A table that references itself cannot be ordered against itself; the
@@ -299,7 +306,7 @@ func insertOrder(ctx context.Context, conn *pgx.Conn, tables []string) ([]string
 		sort.Strings(rest)
 		order = append(order, rest...)
 	}
-	return order, nil
+	return order
 }
 
 // foreignKeys maps each table to the table it references.
@@ -388,14 +395,14 @@ func readFrame(r *bufio.Reader) (table string, cols []string, size int64, err er
 	if !validIdent(table) {
 		return "", nil, 0, fmt.Errorf("%w: bad table name %q", ErrArchive, table)
 	}
+	if len(colsBlob) == 0 {
+		return "", nil, 0, fmt.Errorf("%w: table %q has no columns", ErrArchive, table)
+	}
 	for _, c := range strings.Split(string(colsBlob), columnSeparator) {
 		if !validIdent(c) {
 			return "", nil, 0, fmt.Errorf("%w: bad column name %q", ErrArchive, c)
 		}
 		cols = append(cols, c)
-	}
-	if len(cols) == 0 {
-		return "", nil, 0, fmt.Errorf("%w: table %q has no columns", ErrArchive, table)
 	}
 	return table, cols, int64(payloadLen), nil
 }

@@ -167,6 +167,7 @@ make docker-build     # docker build --build-arg VERSION=$(make version)
 make compose-build    # 同一镜像改走 compose 构建（含 git 打标转发）
 make test             # go test -race ./...（含DB 门控用例）
 make test-integration # 只跑 Integration 用例
+go test ./... -cover  # 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 ./scripts/test-api.sh        # 对运行中实例的完整 HTTP 接口自测（PASS/FAIL 逐条，失败非 0 退出）
