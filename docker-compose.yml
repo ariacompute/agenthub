@@ -39,6 +39,9 @@ services:
         #   export BUILD_PROXY=http://127.0.0.1:7897   # e.g. Clash
         BUILD_PROXY: ${BUILD_PROXY:-}
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        # Mirror root for the runtime stage's apk add. Empty => the Alpine CDN.
+        #   export ALPINE_MIRROR=https://mirrors.aliyun.com   # if the CDN stalls
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-}
         # Reported as "version@commit" in the console and /healthz. Stamp with
         #   VERSION=$(git describe --tags --abbrev=0 --always) \
         #   COMMIT=$(git rev-parse --short=7 HEAD) docker compose build

@@ -33,6 +33,12 @@
 #   * GOPROXY      Go module proxy. Defaults to the goproxy.cn mirror, which is
 #                 reachable without a proxy in most networks; override with
 #                 `--build-arg GOPROXY=https://proxy.golang.org,direct`.
+#   * ALPINE_MIRROR
+#                 Mirror root the runtime stage installs its packages from.
+#                 Defaults to the Alpine CDN; swap it for a mirror when that
+#                 host is unreachable, e.g. https://mirrors.aliyun.com or
+#                 https://mirrors.tuna.tsinghua.edu.cn (the v3.21 path is
+#                 appended to whatever is passed).
 #   * VERSION / COMMIT / DISTANCE / DIRTY
 #                 Build stamp reported by /healthz and shown in the console as
 #                 "version@commit". `.git` is excluded by .dockerignore, so the
@@ -106,7 +112,23 @@ FROM alpine:3.21
 # a pg_dump custom-format archive, and pg_restore loads it back. Without it the
 # built-in COPY engine produces the archive instead — no error, no missing
 # feature, just a different engine name in the console.
-RUN apk add --no-cache ca-certificates tzdata wget postgresql17-client && \
+#
+# This stage is the only one that pulls from a host with no mirror to fall back
+# on: bun has the registry, go has GOPROXY, apk has only the Alpine CDN. On a
+# network that cannot reach it the build looks dead — `apk add` sits on
+# "fetch https://dl-cdn.alpinelinux.org/.../APKINDEX.tar.gz" until someone
+# gives up — so the mirror root itself is an argument, apk gets a deadline, and
+# neither the proxy nor anything else leaks into the final image.
+ARG BUILD_PROXY=
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org
+
+# The proxy is passed on the command line, not with ENV: an ENV here would
+# survive into the running container and proxy the server's own requests.
+RUN sed -i "s|https://dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
+    ( http_proxy="${BUILD_PROXY}" https_proxy="${BUILD_PROXY}" \
+        timeout 180 apk add --no-cache ca-certificates tzdata wget postgresql17-client || \
+      timeout 180 apk add --no-cache ca-certificates tzdata wget postgresql17-client || \
+      { echo "apk add failed: retry with --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com (or https://mirrors.tuna.tsinghua.edu.cn); with a host-side proxy use --build-arg BUILD_PROXY=<proxy> together with --network=host"; exit 1; } ) && \
     addgroup -g 10001 agenthub && \
     adduser -D -u 10001 -G agenthub agenthub && \
     mkdir -p /app/backend/static /var/lib/agenthub/backups && \

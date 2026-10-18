@@ -36,6 +36,9 @@ export DIRTY
 # host-side proxy on 127.0.0.1. Leave it empty for a direct connection.
 BUILD_PROXY ?= $(HTTP_PROXY)
 GOPROXY ?= https://goproxy.cn,direct
+# Empty leaves the Dockerfile's default (the Alpine CDN) in place; set it when
+# that host is unreachable, e.g. ALPINE_MIRROR=https://mirrors.aliyun.com
+ALPINE_MIRROR ?=
 
 # Local compose database (host port 5434 avoids postgres 5432 / bankmind 5433).
 DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable
@@ -81,6 +84,7 @@ version:
 docker-build:
 	docker build --network=host \
 	  --build-arg BUILD_PROXY=$(BUILD_PROXY) --build-arg GOPROXY=$(GOPROXY) \
+	  --build-arg ALPINE_MIRROR=$(ALPINE_MIRROR) \
 	  --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
 	  --build-arg DISTANCE=$(DISTANCE) --build-arg DIRTY=$(DIRTY) \
 	  -t agenthub:$(VERSION) .
@@ -91,7 +95,7 @@ docker-build:
 # to a direct download in that case, so this succeeds with or without a proxy.
 compose-build:
 	VERSION=$(VERSION) COMMIT=$(COMMIT) DISTANCE=$(DISTANCE) DIRTY=$(DIRTY) \
-	BUILD_PROXY=$(BUILD_PROXY) GOPROXY=$(GOPROXY) \
+	BUILD_PROXY=$(BUILD_PROXY) GOPROXY=$(GOPROXY) ALPINE_MIRROR=$(ALPINE_MIRROR) \
 	docker compose build agenthub
 
 # Start the composed stack and report what each published port answers. Compose

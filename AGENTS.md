@@ -290,6 +290,12 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
   对这两步各做一次「清掉代理变量」的重试并回落默认 `GOPROXY` 镜像
   （`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；两次都失败才报错退出，
   绝不静默装作成功。
+- **运行时阶段的 `apk add` 是唯一没有镜像回落的一步**：bun 有 registry、go 有 `GOPROXY`，
+  apk 只有 Alpine CDN。`dl-cdn.alpinelinux.org` 不可达时该步会一直挂着（表现为构建"卡死"），
+  因此新增 `ALPINE_MIRROR`（默认 `https://dl-cdn.alpinelinux.org`，可换
+  `https://mirrors.aliyun.com` / `https://mirrors.tuna.tsinghua.edu.cn`，镜像根后面会接 `/alpine/v3.21/...`），
+  并用 `timeout` 给每一步限时：宁可带提示失败，不要静默干等。代理以命令行前缀传入而非 `ENV`，
+  否则会残留到运行中的容器、代理服务端自身的出网请求。
 - 兜底哨兵 `"dev"` / `"unknown"`：未打标的构建在 `/healthz` 上报 `dev`，一眼可辨，
   绝不冒充某个发布号。
 

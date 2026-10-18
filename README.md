@@ -162,27 +162,13 @@ DISTANCE=$(git rev-list --count "$(git describe --tags --abbrev=0)"..HEAD) \
   docker compose build agenthub
 ```
 
-Everything below applies to both flows.
+If the build hangs on `apk add` — the runtime stage fetching from
+`dl-cdn.alpinelinux.org` — switch the mirror it installs from:
 
-Compose starts `postgres:16-alpine` first and only launches `agenthub` once it reports healthy
-(pgvector is not needed); the server then runs its migrations and seeds itself.
-`DATABASE_URL` is injected by compose; the published host port can be overridden with
-`POSTGRES_PORT`.
-
-The image is a three-stage build (`oven/bun` builds the console → `golang:1.27-alpine` compiles →
-`alpine:3.21` runtime). It runs as a **non-root user** (uid 10001) and uses `/healthz` as its
-healthcheck; the response carries a `"database":"up"` field and returns 503 when the database is
-unreachable. The container is **stateless**: migrations ship inside the binary and every byte of
-state lives in the PostgreSQL volume.
-
-The build pulls npm packages and Go modules, so it needs outbound network (`make docker-build`,
-`make compose-build`, or a plain `docker compose build`). Behind a proxy, pass it as `BUILD_PROXY` —
-`make docker-build` takes it from `$HTTP_PROXY` and adds `--network=host`, which is what makes a
-host-side `127.0.0.1:<port>` resolve inside the build container. Compose builds on the bridge
-network where that address does not exist, so the Dockerfile retries
-`bun install` and `go mod download` with the proxy variables cleared and falls back to the default
-`GOPROXY` mirror (`https://goproxy.cn,direct`; override with `--build-arg GOPROXY=...`); only when
-both attempts fail does the build stop with an explicit hint.
+```bash
+ALPINE_MIRROR=https://mirrors.aliyun.com docker compose up --build
+# or: ALPINE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+```
 
 **Published images.** Publishing a release builds and pushes
 `ariacompute/agenthub-agenthub` to DockerHub (`.github/workflows/release.yml`): `:<release tag>` for
@@ -232,14 +218,6 @@ network, choose one of the 13 languages, and press **Connect** — the shell pro
 it saves anything. After that the tray carries *Open console*, *Connection settings…*, *About* and
 *Quit*; closing the window parks the app in the tray instead of ending it. The setting lives in the
 shell's own `config.json` under the per-user config directory.
-
-**How it works.** The window loads `http://127.0.0.1:<random port>`, where a loopback reverse proxy
-serves the embedded console and forwards `/api/*`, `/a2a`, `/healthz` and `/.well-known/*` to the
-configured server. That is what lets the console keep its relative URLs, its `HttpOnly` session
-cookie, its server-sent event streams and its downloads — neither the console nor the Go server
-changes by a byte. The proxy strips `Secure` and `Domain` from `Set-Cookie` (a plain-http loopback
-origin cannot keep them), pins every cookie to `Path=/`, streams responses without buffering, and
-rewrites redirects that point back at the server so an OAuth round trip stays inside the app.
 
 **Unsigned builds.** The published binaries are not code-signed, so the first launch is stopped by
 the platform:

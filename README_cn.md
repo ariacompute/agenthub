@@ -148,21 +148,12 @@ DISTANCE=$(git rev-list --count "$(git describe --tags --abbrev=0)"..HEAD) \
   docker compose build agenthub
 ```
 
-以下内容对两条路径都适用。
+若构建卡在 `apk add`（运行时阶段去 `dl-cdn.alpinelinux.org` 取包），换成镜像源即可：
 
-compose 会先拉起 `postgres:16-alpine`，健康检查通过后（pgvector 不需要）再启动 `agenthub`，
-后者启动时自动执行迁移与种子。`DATABASE_URL` 由 compose 注入，宿主端口可用 `POSTGRES_PORT` 覆盖。
-
-镜像为三段构建（`oven/bun` 构建控制台 → `golang:1.27-alpine` 编译 → `alpine:3.21` 运行时），
-运行时以**非 root 用户**（uid 10001）启动，`/healthz` 为健康检查端点（响应含 `"database":"up"` 字段，
-库不可达时返回 503）。容器**无状态**：迁移随二进制内嵌，状态全在 PostgreSQL 卷里。
-
-构建要拉 npm 包与 Go 模块，因此需要出网（`make docker-build`、`make compose-build`，或原生
-`docker compose build`）。走代理时用 `BUILD_PROXY` 传入——`make docker-build` 从 `$HTTP_PROXY` 取值
-并追加 `--network=host`，容器内的 `127.0.0.1:<port>` 才会指向宿主机代理。compose 构建跑在 bridge
-网络上，该地址不存在，因此 `Dockerfile` 对 `bun install` 与 `go mod download` 各做一次「清掉代理变量」
-的重试，并回落默认 `GOPROXY` 镜像（`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；
-两次都失败才带提示报错退出，不会静默装作成功。
+```bash
+ALPINE_MIRROR=https://mirrors.aliyun.com docker compose up --build
+# 或：ALPINE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+```
 
 **已发布镜像。** 发布 Release 会自动构建并推送 `ariacompute/agenthub-agenthub` 到 DockerHub
 （`.github/workflows/release.yml`）：`:<release tag>` 对应该次发布，`:latest` 指向最新一次发布。
@@ -207,13 +198,6 @@ make desktop-test     # cd desktop/src-tauri && cargo test
 「忽略自签证书」只对你自己网络内的服务端勾选、选一个 13 语之一，然后点**连接**——
 外壳会先探 `/healthz` 再落盘。之后托盘常驻四项：**打开控制台 / 连接设置… / 关于 / 退出**；
 关闭窗口只是收进托盘，不会退出。配置存于外壳自有的 `config.json`（当前用户配置目录下）。
-
-**原理。** 窗口加载 `http://127.0.0.1:<随机端口>`，那里有一个环回反向代理：托管内嵌的控制台，
-并把 `/api/*`、`/a2a`、`/healthz`、`/.well-known/*` 转发到配置的服务端。正因如此，控制台的相对
-URL、`HttpOnly` 会话 cookie、SSE 事件流与文件下载才能原样工作——控制台与 Go 服务端**一行都不用改**。
-代理会剥掉 `Set-Cookie` 里的 `Secure` 与 `Domain`（明文 http 的环回源存不下它们）、把 cookie 统一
-钉到 `Path=/`、转发时不缓冲（否则事件流只在结束时一次性到达），并把指回服务端的重定向改写回环回
-源，让 OAuth 往返留在应用内。
 
 **未签名产物。** 发布的二进制未做代码签名，首次启动会被系统拦下：
 
