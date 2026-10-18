@@ -9,6 +9,8 @@ import { shellCopy } from './copy/shell-copy.js'
 import { registryCopy } from './copy/registry-copy.js'
 import { traceCopy } from './copy/trace-copy.js'
 import { topologyCopy } from './copy/topology-copy.js'
+import { authCopy } from './copy/auth-copy.js'
+import { adminCopy } from './copy/admin-copy.js'
 import { enumsCopy } from './copy/enums-copy.js'
 import { errorsCopy } from './copy/errors-copy.js'
 
@@ -19,6 +21,8 @@ const COPIES = {
   registry: registryCopy,
   trace: traceCopy,
   topology: topologyCopy,
+  auth: authCopy,
+  admin: adminCopy,
   errors: errorsCopy,
 }
 

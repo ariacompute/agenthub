@@ -6,8 +6,18 @@ import { registryCopy } from '../src/lib/copy/registry-copy.js'
 import { traceCopy } from '../src/lib/copy/trace-copy.js'
 import { topologyCopy } from '../src/lib/copy/topology-copy.js'
 import { errorsCopy } from '../src/lib/copy/errors-copy.js'
+import { authCopy } from '../src/lib/copy/auth-copy.js'
+import { adminCopy } from '../src/lib/copy/admin-copy.js'
 
-const PROSE = { shell: shellCopy, registry: registryCopy, trace: traceCopy, topology: topologyCopy, errors: errorsCopy }
+const PROSE = {
+  shell: shellCopy,
+  registry: registryCopy,
+  trace: traceCopy,
+  topology: topologyCopy,
+  auth: authCopy,
+  admin: adminCopy,
+  errors: errorsCopy,
+}
 
 describe('copy fallback', () => {
   it('keeps English complete for every key translated elsewhere', () => {

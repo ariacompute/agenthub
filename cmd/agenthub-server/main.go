@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"agenthub/internal/adapter"
+	"agenthub/internal/auth"
+	"agenthub/internal/authz"
 	"agenthub/internal/config"
 	"agenthub/internal/handlers"
 	"agenthub/internal/hub"
@@ -56,6 +58,40 @@ func main() {
 		slog.Info("store: demo resources not seeded", "hint", "set AGENTHUB_SEED_DEMO=true to register the five demo resources")
 	}
 
+	// Identities: the authorization layer first (it resolves a user into
+	// permissions), then the identity layer on top of it. Both are backed by the
+	// same database as everything else.
+	az := authz.New(store.NewAuthzStore(db))
+	authSvc := auth.New(
+		store.NewUserStore(db),
+		store.NewSessionStore(db),
+		store.NewOAuthStore(db),
+		az,
+		auth.Options{
+			CookieName: "agenthub_session",
+			TTL:        cfg.SessionTTL,
+			Secure:     cfg.CookieSecure,
+			OAuth:      cfg.OAuth,
+		},
+	)
+	// The administrator described by .env is upserted on every boot, so a fresh
+	// instance is never unreachable and a restart never resets a password the
+	// operator changed in the console.
+	if err := authSvc.BootstrapAdmin(context.Background(), cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminName); err != nil {
+		slog.Error("bootstrap admin", "error", err)
+		os.Exit(1)
+	}
+	if cfg.BootstrapAdminEmail != "" {
+		slog.Info("auth: bootstrap administrator ready", "email", cfg.BootstrapAdminEmail)
+	} else {
+		slog.Info("auth: no bootstrap administrator configured", "hint", "set AGENTHUB_BOOTSTRAP_ADMIN_EMAIL/PASSWORD, or the first registered account becomes the owner")
+	}
+	// Expired sessions are dead weight in a table that is read on every
+	// request; sweep them once at boot and then hourly.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	defer stopSweep()
+	go sweepSessions(sweepCtx, store.NewSessionStore(db))
+
 	reg := registry.NewWithStore(store.NewResourceStore(db))
 
 	opts := adapter.Options{
@@ -71,7 +107,7 @@ func main() {
 	})
 	defer h.Close()
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default()}
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Register(deps),
@@ -118,6 +154,27 @@ func main() {
 		slog.Error("shutdown", "error", err)
 	}
 	slog.Info("agenthub stopped")
+}
+
+// sweepSessions deletes sessions that expired a while ago. Revoked sessions are
+// kept for a day: they are the record of who was logged out and when.
+func sweepSessions(ctx context.Context, sessions auth.SessionStore) {
+	sweep := func() {
+		if err := sessions.DeleteExpired(ctx, time.Now().UTC().Add(-24*time.Hour)); err != nil {
+			slog.Warn("auth: sweep expired sessions", "error", err)
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweep()
+		}
+	}
 }
 
 func setupLogger(cfg *config.Config) {

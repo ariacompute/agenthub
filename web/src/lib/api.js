@@ -4,6 +4,9 @@ const BASE = ''
 
 async function request(path, options = {}) {
   const res = await fetch(BASE + path, {
+    // Sessions are HttpOnly cookies, so every call has to be allowed to carry
+    // them — including the ones the console makes before it knows who you are.
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   })
@@ -164,4 +167,110 @@ export function subscribeTaskEvents(id, onEvent) {
 
 export function mcpExport() {
   return request('/api/export/mcp')
+}
+
+// --- identity --------------------------------------------------------------
+
+export function authConfig() {
+  return request('/api/auth/config')
+}
+
+export function register(payload) {
+  return request('/api/auth/register', { method: 'POST', ...body(payload) })
+}
+
+export function login(email, password) {
+  return request('/api/auth/login', { method: 'POST', ...body({ email, password }) })
+}
+
+export function logout() {
+  return request('/api/auth/logout', { method: 'POST', ...body({}) })
+}
+
+export function me() {
+  return request('/api/auth/me')
+}
+
+export function listSessions() {
+  return request('/api/auth/sessions')
+}
+
+export function revokeSession(id) {
+  return request(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// --- administration --------------------------------------------------------
+
+export function listUsers(q = '') {
+  const query = q ? `?${new URLSearchParams({ q }).toString()}` : ''
+  return request(`/api/users${query}`)
+}
+
+export function getUser(id) {
+  return request(`/api/users/${encodeURIComponent(id)}`)
+}
+
+export function createUser(payload) {
+  return request('/api/users', { method: 'POST', ...body(payload) })
+}
+
+export function updateUser(id, payload) {
+  return request(`/api/users/${encodeURIComponent(id)}`, { method: 'PUT', ...body(payload) })
+}
+
+export function deleteUser(id) {
+  return request(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function revokeUserSessions(id) {
+  return request(`/api/users/${encodeURIComponent(id)}/sessions`, { method: 'DELETE' })
+}
+
+export function listPermissions() {
+  return request('/api/permissions')
+}
+
+export function listRoles() {
+  return request('/api/roles')
+}
+
+export function createRole(payload) {
+  return request('/api/roles', { method: 'POST', ...body(payload) })
+}
+
+export function updateRole(id, payload) {
+  return request(`/api/roles/${encodeURIComponent(id)}`, { method: 'PUT', ...body(payload) })
+}
+
+export function deleteRole(id) {
+  return request(`/api/roles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function listGroups() {
+  return request('/api/groups')
+}
+
+export function createGroup(payload) {
+  return request('/api/groups', { method: 'POST', ...body(payload) })
+}
+
+export function updateGroup(id, payload) {
+  return request(`/api/groups/${encodeURIComponent(id)}`, { method: 'PUT', ...body(payload) })
+}
+
+export function deleteGroup(id) {
+  return request(`/api/groups/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function listGrants(resource = '') {
+  const query = resource ? `?${new URLSearchParams({ resource }).toString()}` : ''
+  return request(`/api/grants${query}`)
+}
+
+export function createGrant(payload) {
+  return request('/api/grants', { method: 'POST', ...body(payload) })
+}
+
+export function deleteGrant(id) {
+  return request(`/api/grants/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

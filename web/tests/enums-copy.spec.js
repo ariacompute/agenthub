@@ -3,7 +3,7 @@ import { LANGUAGES } from '../src/lib/languages.js'
 import { enumsCopy } from '../src/lib/copy/enums-copy.js'
 import { enumLabel } from '../src/lib/use-copy.js'
 
-const GROUPS = ['kind', 'taskState', 'transport', 'health', 'flow', 'connection']
+const GROUPS = ['kind', 'taskState', 'transport', 'health', 'flow', 'connection', 'permission', 'userStatus']
 
 describe('enum copy', () => {
   it('covers every backend enum group', () => {

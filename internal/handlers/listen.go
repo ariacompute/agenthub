@@ -25,7 +25,13 @@ func Listeners() []Listener {
 		{"GET /.well-known/agent.json", "A2A Agent Card, the discovery entry point"},
 		{"POST /a2a", "A2A JSON-RPC: message/send, message/stream, tasks/*"},
 		{"GET /a2a/stream", "SSE frames for a single task"},
+		{"GET /api/auth/config", "login screen: which OAuth providers exist"},
+		{"POST /api/auth/login", "email + password login, sets the session cookie"},
+		{"GET /api/auth/me", "current identity, permissions and membership"},
 		{"GET /api/*", "control plane: resources, tasks, events, push records"},
+		{"GET /api/users", "admin: list, create, update and disable users"},
+		{"GET /api/roles", "admin: roles, groups and the permission matrix"},
+		{"GET /api/grants", "admin: per-resource read/write grants"},
 		{"GET /healthz", "health probe, also the container healthcheck"},
 	}
 }

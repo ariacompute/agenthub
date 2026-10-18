@@ -46,7 +46,7 @@ func newHarness(t *testing.T) *harness {
 		HTTPPort:        "3500",
 		Env:             "dev",
 		StaticDir:       t.TempDir(),
-		AuthOpenMode:    true,
+		SessionTTL:      time.Hour,
 		LegacyMethods:   true,
 		MaxParallel:     4,
 		CLITimeout:      time.Second,
@@ -263,8 +263,10 @@ func TestE2EAgentCardAndHealthz(t *testing.T) {
 	if health.Health["healthy"] != 4 || health.Health["degraded"] != 1 {
 		t.Fatalf("health counts = %+v", health.Health)
 	}
-	if health.Auth != "open" {
-		t.Fatalf("auth = %q, want open", health.Auth)
+	// The e2e harness runs without an identity layer, and says so: identities
+	// are disabled rather than silently open.
+	if health.Auth != "disabled" {
+		t.Fatalf("auth = %q, want disabled", health.Auth)
 	}
 }
 

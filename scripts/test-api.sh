@@ -8,10 +8,16 @@
 # console bundle. Every assertion prints PASS / FAIL / SKIP and the exit status
 # is non-zero as soon as one of them fails, so CI can gate on it.
 #
-#   ./scripts/test-api.sh                       # http://127.0.0.1:3500, open mode
+#   ./scripts/test-api.sh                       # http://127.0.0.1:3500
 #   BASE_URL=https://hub.example.com ./scripts/test-api.sh
-#   AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh
+#   AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
 #   MAX_TIME=60 ./scripts/test-api.sh           # per-request curl timeout
+#
+# The control plane is behind a session, so the script logs in first and keeps
+# the cookie in a jar for everything after it. Credentials come from
+# AGENTHUB_TEST_EMAIL / AGENTHUB_TEST_PASSWORD, falling back to the bootstrap
+# administrator (AGENTHUB_BOOTSTRAP_ADMIN_*). On a fresh instance without any
+# account it registers the first one, which becomes the owner.
 #
 # Start a stack that carries the demo resources first — they are opt-in, so the
 # flag is required:
@@ -27,13 +33,20 @@ set -u
 
 BASE_URL=${BASE_URL:-http://127.0.0.1:${AGENTHUB_HTTP_PORT:-3500}}
 BASE_URL=${BASE_URL%/}
-ADMIN_TOKEN=${AGENTHUB_ADMIN_TOKEN:-}
 MAX_TIME=${MAX_TIME:-20}
 READY_TIMEOUT=${READY_TIMEOUT:-30}
+
+# Who the script runs as. AGENTHUB_SESSION_TOKEN bypasses the login entirely,
+# which is how CI reuses a session it already has.
+TEST_EMAIL=${AGENTHUB_TEST_EMAIL:-${AGENTHUB_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}}
+TEST_PASSWORD=${AGENTHUB_TEST_PASSWORD:-${AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD:-agenthub-admin-pass}}
+SESSION_TOKEN=${AGENTHUB_SESSION_TOKEN:-}
 
 TMP=$(mktemp -d)
 BODY="$TMP/body"
 CURL_ERR="$TMP/curl.err"
+COOKIES="$TMP/cookies"
+: >"$COOKIES"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 PASS=0
@@ -90,6 +103,10 @@ expect_ere() { # expect_ere <name> <extended regex> <haystack>
 # request helpers
 # ---------------------------------------------------------------------------
 
+# Every request carries the session: the cookie jar when the script logged in,
+# the X-AgentHub-Session header when a token was handed to it. (POSIX `set --`
+# only touches the caller's own positional parameters, so these two lines are
+# inlined rather than hidden behind a helper.)
 # http <method> <path> [body] [extra header]
 http() {
 	__m=$1
@@ -97,7 +114,10 @@ http() {
 	__d=${3:-}
 	__h=${4:-}
 	set -- -s -S --max-time "$MAX_TIME" -X "$__m" -o "$BODY" -w '%{http_code}' "$BASE_URL$__p"
-	[ -n "$ADMIN_TOKEN" ] && set -- "$@" -H "Authorization: Bearer $ADMIN_TOKEN"
+	if [ "${ANON:-0}" != "1" ]; then
+		set -- "$@" -b "$COOKIES" -c "$COOKIES"
+		[ -n "$SESSION_TOKEN" ] && set -- "$@" -H "X-AgentHub-Session: $SESSION_TOKEN"
+	fi
 	case "$__m" in
 	POST | PUT) set -- "$@" -H 'Content-Type: application/json' ;;
 	esac
@@ -107,13 +127,22 @@ http() {
 	[ -n "$STATUS" ] || STATUS=000
 }
 
+# http_anon <method> <path> — same as http but without any credential, which is
+# how the script proves the control plane is actually closed.
+http_anon() {
+	ANON=1
+	http "$@"
+	ANON=0
+}
+
 # sse <method> <path> [body] — keep the connection open and capture the frames.
 sse() {
 	__m=$1
 	__p=$2
 	__d=${3:-}
 	set -- -sN --max-time "$MAX_TIME" -X "$__m" "$BASE_URL$__p"
-	[ -n "$ADMIN_TOKEN" ] && set -- "$@" -H "Authorization: Bearer $ADMIN_TOKEN"
+	set -- "$@" -b "$COOKIES" -c "$COOKIES"
+	[ -n "$SESSION_TOKEN" ] && set -- "$@" -H "X-AgentHub-Session: $SESSION_TOKEN"
 	[ -n "$__d" ] && set -- "$@" -H 'Content-Type: application/json' --data-binary "$__d"
 	STREAM=$(curl "$@" 2>/dev/null) || true
 }
@@ -217,6 +246,51 @@ if [ "$i" -ge "$READY_TIMEOUT" ]; then
 	printf 'start it first:  make up   (compose)  or  make run   (local)\n' >&2
 	exit 2
 fi
+
+# ---------------------------------------------------------------------------
+# identity: log in, then prove the control plane is closed without a session
+# ---------------------------------------------------------------------------
+
+section 'identity & session'
+http GET /api/auth/config
+expect 'auth config returns 200' 200 "$STATUS"
+
+# Without a credential nothing in the control plane answers.
+http_anon GET /api/resources
+expect 'the control plane is closed without a session' 401 "$STATUS"
+expect 'the code on the wire is unauthenticated' unauthenticated "$(jget code)"
+
+if [ -z "$SESSION_TOKEN" ]; then
+	http POST /api/auth/login "$(printf '{"email":"%s","password":"%s"}' "$TEST_EMAIL" "$TEST_PASSWORD")"
+	if [ "$STATUS" != "200" ]; then
+		# A fresh instance has no account yet: register the first one, which
+		# becomes the owner and therefore holds every permission.
+		http POST /api/auth/register "$(printf '{"email":"%s","password":"%s","name":"smoke"}' "$TEST_EMAIL" "$TEST_PASSWORD")"
+		case "$STATUS" in
+		201)
+			pass "registered the first account ($TEST_EMAIL)"
+			http POST /api/auth/login "$(printf '{"email":"%s","password":"%s"}' "$TEST_EMAIL" "$TEST_PASSWORD")"
+			;;
+		409) skip 'register' 'the account already exists' ;;
+		esac
+	fi
+	expect 'login returns 200' 200 "$STATUS"
+else
+	skip 'login' 'AGENTHUB_SESSION_TOKEN was supplied'
+fi
+
+http GET /api/auth/me
+expect 'me returns 200' 200 "$STATUS"
+expect 'me reports the account' "$TEST_EMAIL" "$(jget user.email)"
+case "$(jget permissions)" in
+*'resources:read'*) pass 'the session carries resources:read' ;;
+*) fail 'the session carries resources:read' "$(jget permissions)" ;;
+esac
+http GET /api/auth/sessions
+expect 'my sessions return 200' 200 "$STATUS"
+
+http GET /healthz
+expect 'healthz reports a session' session "$(jget auth)"
 
 # The demo resources are opt-in (AGENTHUB_SEED_DEMO=true), and this script talks
 # to them. Fail here with the fix instead of drowning in failed assertions.
@@ -327,16 +401,11 @@ http GET /api/resources/nope
 expect 'an unknown resource returns 404' 404 "$STATUS"
 expect '404 carries not_found' not_found "$(jget code)"
 
-if [ -n "$ADMIN_TOKEN" ]; then
-	http GET /api/resources
-	expect 'an authenticated request is accepted' 200 "$STATUS"
-	__token=$ADMIN_TOKEN
-	ADMIN_TOKEN=
-	http GET /api/resources
-	expect 'a request without the token is rejected' 401 "$STATUS"
-	expect 'the rejection carries unauthorized' unauthorized "$(jget code)"
-	ADMIN_TOKEN=$__token
-fi
+http GET /api/resources
+expect 'an authenticated request is accepted' 200 "$STATUS"
+http_anon GET /api/resources
+expect 'a request without a session is rejected' 401 "$STATUS"
+expect 'the rejection carries unauthenticated' unauthenticated "$(jget code)"
 
 # ---------------------------------------------------------------------------
 # exports
@@ -489,6 +558,99 @@ http POST "/api/tasks/$REST_PARKED/resume" '{"message":{"role":"user","parts":[{
 expect 'resuming a cancelled task is a client error' 400 "$STATUS"
 http POST /api/tasks/nope/cancel ''
 expect 'cancelling an unknown task returns 404' 404 "$STATUS"
+
+# ---------------------------------------------------------------------------
+# administration: users, roles, groups, resource grants
+# ---------------------------------------------------------------------------
+
+section 'administration: users'
+http GET /api/users
+expect 'list users returns 200' 200 "$STATUS"
+http POST /api/users '{"email":"smoke-member@example.com","password":"smoke-member-pass","name":"smoke member","roles":[],"groups":[]}'
+case "$STATUS" in
+201) pass 'the console can create a user' ;;
+409) skip 'create user' 'smoke-member@example.com already exists' ;;
+*) fail 'create user' "status $STATUS" ;;
+esac
+MEMBER_ID=$(jget user.id)
+if [ -z "$MEMBER_ID" ]; then
+	http GET '/api/users?q=smoke-member'
+	MEMBER_ID=$(jget users.0.id)
+fi
+http GET "/api/users/$MEMBER_ID"
+expect 'get user returns 200' 200 "$STATUS"
+expect 'get user reports the address' smoke-member@example.com "$(jget user.email)"
+http PUT "/api/users/$MEMBER_ID" '{"name":"smoke member renamed"}'
+expect 'update user returns 200' 200 "$STATUS"
+expect 'the new name is stored' 'smoke member renamed' "$(jget user.name)"
+http GET '/api/users?q=smoke-member'
+expect_match 'searching users finds the account' "$MEMBER_ID" "$(cat "$BODY")"
+
+section 'administration: roles and permissions'
+http GET /api/permissions
+expect 'permissions are listed' 200 "$STATUS"
+expect_match 'the vocabulary carries resources:read' 'resources:read' "$(cat "$BODY")"
+http GET /api/roles
+expect 'roles are listed' 200 "$STATUS"
+ROLE_NAME="smoke-role-$$-$(date +%s)"
+http POST /api/roles "$(printf '{"name":"%s","permissions":["resources:read"]}' "$ROLE_NAME")"
+expect 'a role can be created' 201 "$STATUS"
+ROLE_ID=$(jget role.id)
+if [ -z "$ROLE_ID" ]; then
+	fail 'a role can be created' "no role id in the response ($(cat "$BODY"))"
+else
+	http PUT "/api/roles/$ROLE_ID" "$(printf '{"name":"%s","permissions":["resources:read","tasks:read"]}' "$ROLE_NAME")"
+	expect 'the permission matrix can be saved' 200 "$STATUS"
+	expect_match 'the saved matrix carries tasks:read' 'tasks:read' "$(jget role.permissions)"
+	http DELETE "/api/roles/$ROLE_ID"
+	expect 'a custom role can be deleted' 204 "$STATUS"
+fi
+# The seeded roles are the safety net: deleting one must be refused.
+http GET /api/roles
+BUILTIN_ROLE=$(jget roles.0.id)
+http DELETE "/api/roles/$BUILTIN_ROLE"
+if [ "$STATUS" = "204" ]; then
+	fail 'a built-in role cannot be deleted' 'the delete succeeded'
+else
+	pass 'a built-in role cannot be deleted'
+fi
+GROUP_NAME="smoke-group-$$-$(date +%s)"
+http POST /api/groups "$(printf '{"name":"%s","roles":[]}' "$GROUP_NAME")"
+expect 'a group can be created' 201 "$STATUS"
+GROUP_ID=$(jget group.id)
+http GET /api/groups
+expect 'groups are listed' 200 "$STATUS"
+expect_match 'the new group is listed' "$GROUP_NAME" "$(cat "$BODY")"
+
+section 'administration: resource grants'
+http POST /api/resources '{"kind":"model","name":"smoke-granted-model"}'
+expect 'a resource to grant can be created' 201 "$STATUS"
+GRANT_RESOURCE=$(jget id)
+GRANT_NAME=$(jget name)
+# Before any grant exists the resource is part of the public catalogue.
+http_anon GET /.well-known/agent.json
+expect_match 'an unrestricted resource is advertised' "$GRANT_NAME" "$(cat "$BODY")"
+http POST /api/grants "$(printf '{"resourceId":"%s","principalKind":"user","principalId":"%s","level":"read"}' "$GRANT_RESOURCE" "$MEMBER_ID")"
+case "$STATUS" in
+201 | 409) pass 'a grant can be created' ;;
+*) fail 'create grant' "status $STATUS ($(jget code))" ;;
+esac
+# The whole point of a grant: discovery stops publishing the resource.
+http_anon GET /.well-known/agent.json
+expect_no 'a granted resource is hidden from discovery' "$GRANT_NAME" "$(cat "$BODY")"
+http GET "/api/grants?resource=$GRANT_RESOURCE"
+expect 'grants are listed for a resource' 200 "$STATUS"
+GRANT_ID=$(jget grants.0.id)
+if [ -z "$GRANT_ID" ]; then
+	fail 'the grant is listed' "no grant id in the response ($(cat "$BODY"))"
+else
+	http DELETE "/api/grants/$GRANT_ID"
+	expect 'a grant can be revoked' 204 "$STATUS"
+fi
+http DELETE "/api/resources/$GRANT_RESOURCE"
+expect 'the granted resource is cleaned up' 204 "$STATUS"
+http DELETE "/api/users/$MEMBER_ID"
+expect 'a user can be disabled' 204 "$STATUS"
 
 # ---------------------------------------------------------------------------
 # cleanup + console bundle

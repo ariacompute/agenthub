@@ -29,9 +29,36 @@ travels back the same path.
 ## Configuration
 
 See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PORT` (default 3500),
-`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`, `AGENTHUB_MAX_PARALLEL`,
-`AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`, `AGENTHUB_MAX_OUTPUT_BYTES`,
-`AGENTHUB_PUSH_RECORD_LIMIT` (default 100), `AGENTHUB_SEED_DEMO` (default **false**).
+`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` + `AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD`, `AGENTHUB_SESSION_TTL`,
+`AGENTHUB_MAX_PARALLEL`, `AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`,
+`AGENTHUB_MAX_OUTPUT_BYTES`, `AGENTHUB_PUSH_RECORD_LIMIT` (default 100),
+`AGENTHUB_SEED_DEMO` (default **false**).
+
+### Users, sessions and RBAC
+
+The console and the `/api/*` control plane are behind a **session**, not a shared token:
+
+- **Email + password**: `POST /api/auth/register` and `POST /api/auth/login` (the response sets an
+  HttpOnly cookie). Passwords are hashed with PBKDF2-HMAC-SHA256; only the derived value is stored.
+- **OAuth**: Google, GitHub and any generic OIDC issuer, hand-rolled authorization code flow with
+  PKCE (S256) and `state`. A provider without credentials is simply not offered.
+- **Bootstrap administrator**: `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` / `..._PASSWORD` is upserted at every
+  boot and becomes the **owner**. With neither that nor an existing account, the first registered
+  account becomes the owner, so a fresh instance is never unreachable.
+- **RBAC**: users → groups → roles → permissions (`resources:read`, `resources:write`, `tasks:read`,
+  `tasks:write`, `users:manage`, `roles:manage`, `grants:manage`, `sessions:manage`). The owner holds
+  all of them, which is what keeps a misconfigured instance recoverable.
+- **Resource grants**: `POST /api/grants` restricts one resource to a user or group (`read` / `write`).
+  A resource **without** a grant stays visible to everyone; the first grant restricts it everywhere —
+  listings, exports and the Agent Card — and a direct request to it is answered `404`.
+- **Sessions**: server-side rows, revocable (`DELETE /api/auth/sessions/{id}`, or
+  `DELETE /api/users/{id}/sessions` for `sessions:manage`). `/healthz` reports
+  `auth: session | anonymous | disabled`.
+
+Deleting a user **disables** it: tasks, spans and grants stay for the audit trail.
+
+All of this is available in the console: `/login` for registration and login, `/admin` (visible with
+`users:manage`, `roles:manage` or `grants:manage`) for users, the permission matrix and grants.
 
 No demo data is inserted unless you ask for it: `AGENTHUB_SEED_DEMO=true` registers the five
 `demo-*` resources (`demo-model`, `demo-agent`, `demo-mcp`, `demo-skill`, `demo-cli`) at startup,
@@ -41,8 +68,8 @@ registry, and `config.Validate` refuses the combination `AGENTHUB_ENV=prod` + `A
 ## Run
 
 ```bash
-make db-up                # start PostgreSQL (host port 5434) and wait until it is ready
-make run                  # defaults to :3500 (Open → Migrate → Seed)
+make db-up                                  # start PostgreSQL (host port 5434) and wait until it is ready
+make run                                    # defaults to :3500 (Open → Migrate → Seed)
 curl localhost:3500/healthz
 curl localhost:3500/.well-known/agent.json
 ```
@@ -77,9 +104,9 @@ nothing but Docker and Compose.
 ### Make
 
 ```bash
-make up                              # docker compose up -d, then prints the port map
-make ports                           # re-print the port map of a running stack
-make down                            # stop; data survives in the agenthub-pgdata volume
+make up     # docker compose up -d, then prints the port map
+make ports  # re-print the port map of a running stack
+make down   # stop; data survives in the agenthub-pgdata volume
 ```
 
 Compose has no post-up hook, so `make up` prints the map once the stack is healthy, and
@@ -110,11 +137,11 @@ an attached `docker compose up` or `docker compose logs -f agenthub` spells it o
 ### Docker compose
 
 ```bash
-docker compose up -d                 # build if needed, then start postgres + agenthub, :3500 / :5434
-docker compose ps                    # STATUS should be Up (healthy)
+docker compose up -d                # build if needed, then start postgres + agenthub, :3500 / :5434
+docker compose ps                   # STATUS should be Up (healthy)
 docker compose logs -f agenthub
-docker compose --profile dev up -d   # also starts the web dev server on :5173
-docker compose down                  # stop; data survives in the agenthub-pgdata volume
+docker compose --profile dev up -d  # also starts the web dev server on :5173
+docker compose down                 # stop; data survives in the agenthub-pgdata volume
 ```
 
 Two differences from the `make` flow:
@@ -162,20 +189,24 @@ always agree. The workflow needs two repository secrets: `DOCKERHUB_USERNAME` an
 `DOCKERHUB_TOKEN`.
 
 ```bash
-docker pull ariacompute/agenthub-agenthub:<tag>   # e.g. v0.3.0
+docker pull ariacompute/agenthub-agenthub:<tag>  # e.g. v0.3.0
 ```
 
 **Required for production:**
 
 ```bash
 AGENTHUB_ENV=prod
-AGENTHUB_ADMIN_TOKEN=<strong-random-string>
+AGENTHUB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<strong-random-string>
+AGENTHUB_COOKIE_SECURE=true                               # behind HTTPS
+AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 ```
 
-With `AGENTHUB_ENV=prod` and no `AGENTHUB_ADMIN_TOKEN`, `config.Validate` **refuses to start**
-(an open control plane is not allowed). Once set, `/api/*` requires
-`Authorization: Bearer <token>`. Configuration is passed through the compose `.env` file or
-environment variables; `AGENTHUB_HTTP_PORT` changes the published host port.
+With `AGENTHUB_ENV=prod` and no `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL`, `config.Validate` **refuses to
+start**: a production instance without an administrator is unrecoverable. The account is upserted at
+every boot and never has its password overwritten, so a password changed in the console survives a
+restart. Configuration is passed through the compose `.env` file or environment variables;
+`AGENTHUB_HTTP_PORT` changes the published host port.
 
 ## Tests
 
@@ -199,9 +230,13 @@ AGENTHUB_SEED_DEMO=true make up                     # the test targets the demo-
 AGENTHUB_SEED_DEMO=true make run                    # or locally
 ./scripts/test-api.sh                               # defaults to http://127.0.0.1:3500
 BASE_URL=https://hub.example.com ./scripts/test-api.sh
-AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh  # also asserts /api/* stays closed
+AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
 MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # slow networks / cold boots
 ```
+
+The script logs in first (registering the first account when the instance is brand new) and asserts
+that `/api/*` stays closed without a session, then walks users, roles, the permission matrix and a
+resource grant — including the fact that a granted resource disappears from discovery.
 
 It targets the seeded resources (`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` /
 `demo-cli`), needs nothing beyond `curl` and `python3`, deletes the resource it creates, and exits

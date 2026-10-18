@@ -20,7 +20,9 @@ func TestListenersCoverRoutes(t *testing.T) {
 	}
 
 	entry := &registry.Entry{Kind: registry.KindSkill, Name: "s1"}
-	d := testDeps(t, openConfig(dir), entry)
+	// With identities wired in: the auth and admin routes only exist as routes
+	// when there is a user store behind them.
+	d, _ := authTestDeps(t, dir, entry)
 	h := Register(d)
 	// A finished task: its SSE stream replays the terminal event and closes at
 	// once, where a live one would block the probe until something happens.
@@ -37,7 +39,13 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /.well-known/agent.json": {http.MethodGet, "/.well-known/agent.json", ""},
 		"POST /a2a":                   {http.MethodPost, "/a2a", `{"jsonrpc":"2.0","id":1,"method":"tasks/get","params":{"id":"x"}}`},
 		"GET /a2a/stream":             {http.MethodGet, "/a2a/stream?task=" + finished, ""},
+		"GET /api/auth/config":        {http.MethodGet, "/api/auth/config", ""},
+		"POST /api/auth/login":        {http.MethodPost, "/api/auth/login", `{"email":"a@b.c","password":"x"}`},
+		"GET /api/auth/me":            {http.MethodGet, "/api/auth/me", ""},
 		"GET /api/*":                  {http.MethodGet, "/api/resources", ""},
+		"GET /api/users":              {http.MethodGet, "/api/users", ""},
+		"GET /api/roles":              {http.MethodGet, "/api/roles", ""},
+		"GET /api/grants":             {http.MethodGet, "/api/grants", ""},
 		"GET /healthz":                {http.MethodGet, "/healthz", ""},
 	}
 

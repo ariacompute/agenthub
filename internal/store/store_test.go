@@ -93,11 +93,14 @@ func TestEmbeddedMigrationsAreOrderedAndIdempotent(t *testing.T) {
 			names = append(names, e.Name())
 		}
 	}
-	if len(names) != 4 {
-		t.Fatalf("embedded migrations = %v, want 4", names)
+	want := []string{
+		"001_resources.sql", "002_tasks.sql", "003_events.sql", "004_push_records.sql",
+		"005_auth.sql", "006_rbac.sql",
+	}
+	if len(names) != len(want) {
+		t.Fatalf("embedded migrations = %v, want %v", names, want)
 	}
 	sort.Strings(names)
-	want := []string{"001_resources.sql", "002_tasks.sql", "003_events.sql", "004_push_records.sql"}
 	for i := range want {
 		if names[i] != want[i] {
 			t.Fatalf("migration %d = %q, want %q", i, names[i], want[i])

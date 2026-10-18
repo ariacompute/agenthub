@@ -92,4 +92,37 @@ export const enumsCopy = {
     ar: { connected: 'متصل', reconnecting: 'إعادة الاتصال', offline: 'غير متصل', idle: 'خامل' },
     hi: { connected: 'कनेक्टेड', reconnecting: 'पुनः कनेक्ट', offline: 'ऑफलाइन', idle: 'निष्क्रिय' },
   },
+  // The RBAC vocabulary of the admin permission matrix. The codes themselves are
+  // backend identifiers and are never translated; the labels are.
+  permission: {
+    en: { 'resources:read': 'Read resources', 'resources:write': 'Change resources', 'tasks:read': 'Read tasks', 'tasks:write': 'Cancel and resume tasks', 'users:manage': 'Manage users', 'roles:manage': 'Manage groups and roles', 'grants:manage': 'Manage resource grants', 'sessions:manage': 'Revoke sessions' },
+    zh: { 'resources:read': '查看资源', 'resources:write': '变更资源', 'tasks:read': '查看任务', 'tasks:write': '取消与恢复任务', 'users:manage': '管理用户', 'roles:manage': '管理用户组与角色', 'grants:manage': '管理资源授权', 'sessions:manage': '吊销会话' },
+    'zh-TW': { 'resources:read': '檢視資源', 'resources:write': '變更資源', 'tasks:read': '檢視任務', 'tasks:write': '取消與恢復任務', 'users:manage': '管理使用者', 'roles:manage': '管理群組與角色', 'grants:manage': '管理資源授權', 'sessions:manage': '撤銷工作階段' },
+    es: { 'resources:read': 'Ver recursos', 'resources:write': 'Modificar recursos', 'tasks:read': 'Ver tareas', 'tasks:write': 'Cancelar y reanudar tareas', 'users:manage': 'Gestionar usuarios', 'roles:manage': 'Gestionar grupos y roles', 'grants:manage': 'Gestionar permisos de recursos', 'sessions:manage': 'Revocar sesiones' },
+    fr: { 'resources:read': 'Voir les ressources', 'resources:write': 'Modifier les ressources', 'tasks:read': 'Voir les tâches', 'tasks:write': 'Annuler et reprendre les tâches', 'users:manage': 'Gérer les utilisateurs', 'roles:manage': 'Gérer les groupes et les rôles', 'grants:manage': 'Gérer les autorisations', 'sessions:manage': 'Révoquer les sessions' },
+    de: { 'resources:read': 'Ressourcen lesen', 'resources:write': 'Ressourcen ändern', 'tasks:read': 'Aufgaben lesen', 'tasks:write': 'Aufgaben abbrechen und fortsetzen', 'users:manage': 'Benutzer verwalten', 'roles:manage': 'Gruppen und Rollen verwalten', 'grants:manage': 'Ressourcenfreigaben verwalten', 'sessions:manage': 'Sitzungen widerrufen' },
+    it: { 'resources:read': 'Leggere le risorse', 'resources:write': 'Modificare le risorse', 'tasks:read': 'Leggere le attività', 'tasks:write': 'Annullare e riprendere le attività', 'users:manage': 'Gestire gli utenti', 'roles:manage': 'Gestire gruppi e ruoli', 'grants:manage': 'Gestire le autorizzazioni', 'sessions:manage': 'Revocare le sessioni' },
+    ru: { 'resources:read': 'Чтение ресурсов', 'resources:write': 'Изменение ресурсов', 'tasks:read': 'Чтение задач', 'tasks:write': 'Отмена и возобновление задач', 'users:manage': 'Управление пользователями', 'roles:manage': 'Управление группами и ролями', 'grants:manage': 'Управление правами на ресурсы', 'sessions:manage': 'Отзыв сессий' },
+    ja: { 'resources:read': 'リソースの閲覧', 'resources:write': 'リソースの変更', 'tasks:read': 'タスクの閲覧', 'tasks:write': 'タスクのキャンセルと再開', 'users:manage': 'ユーザー管理', 'roles:manage': 'グループとロールの管理', 'grants:manage': 'リソース権限の管理', 'sessions:manage': 'セッションの失効' },
+    ko: { 'resources:read': '리소스 조회', 'resources:write': '리소스 변경', 'tasks:read': '태스크 조회', 'tasks:write': '태스크 취소와 재개', 'users:manage': '사용자 관리', 'roles:manage': '그룹과 역할 관리', 'grants:manage': '리소스 권한 관리', 'sessions:manage': '세션 철회' },
+    pt: { 'resources:read': 'Ver recursos', 'resources:write': 'Alterar recursos', 'tasks:read': 'Ver tarefas', 'tasks:write': 'Cancelar e retomar tarefas', 'users:manage': 'Gerenciar usuários', 'roles:manage': 'Gerenciar grupos e funções', 'grants:manage': 'Gerenciar permissões de recursos', 'sessions:manage': 'Revogar sessões' },
+    ar: { 'resources:read': 'قراءة الموارد', 'resources:write': 'تعديل الموارد', 'tasks:read': 'قراءة المهام', 'tasks:write': 'إلغاء المهام واستئنافها', 'users:manage': 'إدارة المستخدمين', 'roles:manage': 'إدارة المجموعات والأدوار', 'grants:manage': 'إدارة صلاحيات الموارد', 'sessions:manage': 'إلغاء الجلسات' },
+    hi: { 'resources:read': 'संसाधन पढ़ें', 'resources:write': 'संसाधन बदलें', 'tasks:read': 'टास्क पढ़ें', 'tasks:write': 'टास्क रद्द और पुनः शुरू', 'users:manage': 'उपयोगकर्ता प्रबंधन', 'roles:manage': 'समूह और भूमिका प्रबंधन', 'grants:manage': 'संसाधन अनुमति प्रबंधन', 'sessions:manage': 'सत्र रद्द करें' },
+  },
+  // Account status shown in the user table.
+  userStatus: {
+    en: { active: 'Active', disabled: 'Disabled' },
+    zh: { active: '正常', disabled: '已停用' },
+    'zh-TW': { active: '正常', disabled: '已停用' },
+    es: { active: 'Activo', disabled: 'Desactivado' },
+    fr: { active: 'Actif', disabled: 'Désactivé' },
+    de: { active: 'Aktiv', disabled: 'Deaktiviert' },
+    it: { active: 'Attivo', disabled: 'Disattivato' },
+    ru: { active: 'Активен', disabled: 'Отключён' },
+    ja: { active: '有効', disabled: '無効' },
+    ko: { active: '활성', disabled: '비활성' },
+    pt: { active: 'Ativo', disabled: 'Desativado' },
+    ar: { active: 'نشط', disabled: 'معطّل' },
+    hi: { active: 'सक्रिय', disabled: 'निष्क्रिय' },
+  },
 }

@@ -3,18 +3,28 @@ import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
-import { Boxes, Network, Workflow } from 'lucide-vue-next'
+import { useAuthStore } from '../lib/auth-store.js'
+import { Boxes, Network, Shield, Workflow } from 'lucide-vue-next'
 import StateDot from './StateDot.vue'
 
 const route = useRoute()
 const store = useHubStore()
+const auth = useAuthStore()
 const { t } = useCopy('shell')
 
-const items = computed(() => [
-  { to: '/registry', label: t('navRegistry'), icon: Boxes },
-  { to: '/trace', label: t('navTrace'), icon: Workflow },
-  { to: '/topology', label: t('navTopology'), icon: Network },
-])
+const items = computed(() => {
+  const base = [
+    { to: '/registry', label: t('navRegistry'), icon: Boxes },
+    { to: '/trace', label: t('navTrace'), icon: Workflow },
+    { to: '/topology', label: t('navTopology'), icon: Network },
+  ]
+  // The administration screen is only offered to accounts that can use it:
+  // a link that answers 403 is worse than no link.
+  if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage')) {
+    base.push({ to: '/admin', label: t('navAdmin'), icon: Shield })
+  }
+  return base
+})
 
 const online = computed(() => Boolean(store.health))
 

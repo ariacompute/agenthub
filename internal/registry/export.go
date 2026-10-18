@@ -25,7 +25,13 @@ type MCPServerDescription struct {
 
 // MCPServerDescriptions renders the catalogue as MCP server descriptions.
 func MCPServerDescriptions(r *Registry) []MCPServerDescription {
-	entries := r.Snapshot()
+	return MCPServerDescriptionsOf(r.Snapshot())
+}
+
+// MCPServerDescriptionsOf renders an already filtered entry set. The
+// authorization layer decides which entries a caller may see, so export is
+// always built from what the caller was allowed to list.
+func MCPServerDescriptionsOf(entries []*Entry) []MCPServerDescription {
 	out := make([]MCPServerDescription, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, MCPServerDescription{
@@ -49,6 +55,15 @@ func MCPServerDescriptions(r *Registry) []MCPServerDescription {
 // resource becomes one advertised skill so a peer agent can see what the hub is
 // able to reach before sending the first task.
 func AgentCard(r *Registry, baseURL, version, protocolVersion string) a2a.AgentCard {
+	if r == nil {
+		return AgentCardOf(nil, nil, 0, baseURL, version, protocolVersion)
+	}
+	return AgentCardOf(r.Snapshot(), r.CountsByKind(), r.Size(), baseURL, version, protocolVersion)
+}
+
+// AgentCardOf renders the discovery document from an already filtered entry
+// set, so a peer only ever sees the resources its caller was granted.
+func AgentCardOf(entries []*Entry, counts map[string]int, total int, baseURL, version, protocolVersion string) a2a.AgentCard {
 	card := a2a.AgentCard{
 		Name:               "agenthub",
 		Description:        "A2A interconnection platform for model, agent, mcp, skill and cli resources.",
@@ -63,10 +78,9 @@ func AgentCard(r *Registry, baseURL, version, protocolVersion string) a2a.AgentC
 		Provider:           &a2a.AgentProvider{Organization: "ariacompute"},
 		DocumentationURL:   baseURL + "/healthz",
 	}
-	if r == nil {
+	if entries == nil {
 		return card
 	}
-	entries := r.Snapshot()
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Kind == entries[j].Kind {
 			return entries[i].Name < entries[j].Name
@@ -90,9 +104,19 @@ func AgentCard(r *Registry, baseURL, version, protocolVersion string) a2a.AgentC
 			ResourceKind: string(e.Kind),
 		})
 	}
+	// Counts mirror the filtered set: an agent must not be able to infer the
+	// existence of resources it was never granted from a total that is larger
+	// than what it can list.
+	if counts == nil {
+		counts = map[string]int{}
+		for _, e := range entries {
+			counts[string(e.Kind)]++
+		}
+		total = len(entries)
+	}
 	card.Metadata = map[string]any{
-		"resourceCounts": r.CountsByKind(),
-		"resourceTotal":  r.Size(),
+		"resourceCounts": counts,
+		"resourceTotal":  total,
 	}
 	return card
 }

@@ -24,9 +24,35 @@
 ## 配置
 
 见 `.env.example`。主要项：`DATABASE_URL`（**必填**）、`AGENTHUB_HTTP_PORT`（默认 3500）、
-`AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`、`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、
-`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）、
+`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` + `AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD`、`AGENTHUB_SESSION_TTL`、
+`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、`AGENTHUB_CLI_TIMEOUT`、
+`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）、
 `AGENTHUB_SEED_DEMO`（默认 **false**）。
+
+### 用户、会话与 RBAC
+
+控制台与 `/api/*` 控制面走的是**会话**，不再是共享 token：
+
+- **邮箱 + 密码**：`POST /api/auth/register`、`POST /api/auth/login`（响应下发 HttpOnly cookie）。
+  口令以 PBKDF2-HMAC-SHA256 派生存储，明文与原始口令都不落库。
+- **OAuth**：Google、GitHub 与任意通用 OIDC 发行方，手写授权码流程，带 PKCE（S256）与 `state`。
+  未配置凭据的提供方不会出现在登录页。
+- **引导管理员**：`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` / `..._PASSWORD` 每次启动幂等 upsert，并成为
+  **owner**。若两者都未配置且库中无账号，第一个注册的账号即成为 owner，实例因此不会无人可用。
+- **RBAC**：用户 → 组 → 角色 → 权限（`resources:read`、`resources:write`、`tasks:read`、`tasks:write`、
+  `users:manage`、`roles:manage`、`grants:manage`、`sessions:manage`）。owner 持有全部权限，
+  这是配置出错时仍可挽回的兜底。
+- **资源级授权**：`POST /api/grants` 把某条资源限定给某个用户或组（`read` / `write`）。
+  **没有**授权的资源对所有人可见；一旦产生授权，它在列表、导出与 Agent Card 中都被隐藏，
+  直接访问返回 `404`。
+- **会话**：服务端行记录，可吊销（`DELETE /api/auth/sessions/{id}`；`sessions:manage` 可用
+  `DELETE /api/users/{id}/sessions` 踢人）。`/healthz` 的 `auth` 字段为
+  `session | anonymous | disabled`。
+
+删除用户是**停用**：任务、span 与授权都会保留以备审计。
+
+以上能力在控制台中均可使用：`/login` 注册与登录；`/admin`（需 `users:manage`、`roles:manage`
+或 `grants:manage`）管理用户、权限矩阵与资源授权。
 
 默认不灌任何演示数据：只有显式 `AGENTHUB_SEED_DEMO=true`，启动时才会幂等地写入五条 `demo-*` 资源
 （`demo-model`、`demo-agent`、`demo-mcp`、`demo-skill`、`demo-cli`），下面的示例正是面向它们。
@@ -36,8 +62,8 @@
 ## 运行
 
 ```bash
-make db-up                # 起 PostgreSQL（宿主 5434）并等待 ready
-make run                  # 默认 :3500（Open → Migrate → Seed）
+make db-up                                  # 起 PostgreSQL（宿主 5434）并等待 ready
+make run                                    # 默认 :3500（Open → Migrate → Seed）
 curl localhost:3500/healthz
 curl localhost:3500/.well-known/agent.json
 ```
@@ -67,9 +93,9 @@ registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=t
 ### Make
 
 ```bash
-make up                              # docker compose up -d，完成后打印端口清单
-make ports                           # 对已运行的栈重打端口清单
-make down                            # 停止；数据保留在 agenthub-pgdata 卷
+make up     # docker compose up -d，完成后打印端口清单
+make ports  # 对已运行的栈重打端口清单
+make down   # 停止；数据保留在 agenthub-pgdata 卷
 ```
 
 compose 没有 after-up 钩子，所以 `make up` 在栈健康后立刻打印端口清单，`make ports` 之后可随时重打：
@@ -100,11 +126,11 @@ agenthub listening ports
 ### Docker compose
 
 ```bash
-docker compose up -d                 # 需要时先构建，再起 postgres + agenthub，:3500 / :5434
-docker compose ps                    # STATUS 应为 Up (healthy)
+docker compose up -d                # 需要时先构建，再起 postgres + agenthub，:3500 / :5434
+docker compose ps                   # STATUS 应为 Up (healthy)
 docker compose logs -f agenthub
-docker compose --profile dev up -d   # 额外起控制台 dev server，:5173
-docker compose down                  # 停止；数据保留在 agenthub-pgdata 卷
+docker compose --profile dev up -d  # 额外起控制台 dev server，:5173
+docker compose down                 # 停止；数据保留在 agenthub-pgdata 卷
 ```
 
 与 `make` 路径有两点不同：
@@ -144,19 +170,23 @@ Release tag 与该 tag 的 commit 会作为 `VERSION` / `COMMIT` 构建参数写
 与 `DOCKERHUB_TOKEN`。
 
 ```bash
-docker pull ariacompute/agenthub-agenthub:<tag>   # 例如 v0.3.0
+docker pull ariacompute/agenthub-agenthub:<tag>  # 例如 v0.3.0
 ```
 
 **生产部署必须**：
 
 ```bash
 AGENTHUB_ENV=prod
-AGENTHUB_ADMIN_TOKEN=<强随机串>
+AGENTHUB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<强随机串>
+AGENTHUB_COOKIE_SECURE=true                       # 走 HTTPS 时开启
+AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 ```
 
-`AGENTHUB_ENV=prod` 且未配置 `AGENTHUB_ADMIN_TOKEN` 时 `config.Validate` **拒绝启动**
-（不允许开放控制面）；配置后 `/api/*` 需携带 `Authorization: Bearer <token>`。
-配置通过 compose 的 `.env` 或环境变量传入，`AGENTHUB_HTTP_PORT` 可改宿主端口。
+`AGENTHUB_ENV=prod` 且未配置 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` 时 `config.Validate` **拒绝启动**：
+没有管理员的生产实例无法挽回。该账号每次启动幂等 upsert，且**不会覆盖**已有口令，
+因此在控制台改过的密码能跨重启保留。配置通过 compose 的 `.env` 或环境变量传入，
+`AGENTHUB_HTTP_PORT` 可改宿主端口。
 
 ## 测试
 
@@ -179,9 +209,12 @@ AGENTHUB_SEED_DEMO=true make up                     # 脚本面向 demo-* 资源
 AGENTHUB_SEED_DEMO=true make run                    # 或本地运行
 ./scripts/test-api.sh                               # 默认 http://127.0.0.1:3500
 BASE_URL=https://hub.example.com ./scripts/test-api.sh
-AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh  # 额外断言 /api/* 不带 token 会被拦
+AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
 MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时放宽超时
 ```
+
+脚本会先登录（实例全新时注册第一个账号），断言无会话时 `/api/*` 被拦，随后遍历用户、角色、
+权限矩阵与资源授权，并验证「被授权的资源会从发现文档里消失」。
 
 脚本面向种子资源（`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` / `demo-cli`），除
 `curl` 与 `python3` 外无依赖，跑完会删掉自己创建的资源；若服务始终不应答 `/healthz` 则以 2 退出。

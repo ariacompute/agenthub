@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"agenthub/internal/auth"
 )
 
 // Version is the agenthub release reported by /healthz and the Agent Card. It
@@ -69,12 +71,22 @@ func BuildNote() string {
 
 // Config is the fully validated runtime configuration.
 type Config struct {
-	HTTPPort     string
-	Env          string
-	StaticDir    string
-	AdminToken   string
-	AuthOpenMode bool
-	DatabaseURL  string
+	HTTPPort  string
+	Env       string
+	StaticDir string
+	// Identity: the bootstrap administrator is the only account that exists
+	// before someone registers, and .env is how an operator seeds it.
+	BootstrapAdminEmail    string
+	BootstrapAdminPassword string
+	BootstrapAdminName     string
+	// Session lifetime and whether the session cookie may only travel over
+	// https.
+	SessionTTL   time.Duration
+	CookieSecure bool
+	// PublicBaseURL is the externally visible origin, used to build the OAuth
+	// redirect URI. Empty falls back to the request host at redirect time.
+	PublicBaseURL string
+	DatabaseURL   string
 	// SeedDemo inserts the five demo resources at startup. It is off by
 	// default: an instance should start with whatever the operator registers,
 	// not with sample rows nobody asked for. Turn it on for a local walkthrough
@@ -88,18 +100,25 @@ type Config struct {
 	EventBuffer     int
 	PushEnabled     bool
 	PushRecordLimit int
+	// OAuth providers. A provider without credentials is simply absent from the
+	// login page, so an instance without any of them stays self contained.
+	OAuth auth.OAuthConfig
 }
 
 // Load reads the environment (after LoadDotEnv) and validates the result.
 func Load() (*Config, error) {
 	c := &Config{
-		HTTPPort:   envStr("AGENTHUB_HTTP_PORT", "3500"),
-		Env:        envStr("AGENTHUB_ENV", "dev"),
-		StaticDir:  envStr("AGENTHUB_STATIC_DIR", "./backend/static"),
-		AdminToken: envStr("AGENTHUB_ADMIN_TOKEN", ""),
-		// Local bootstrap convenience: open mode defaults on, but Validate
-		// refuses to run a production deployment without a token.
-		AuthOpenMode:   envBool("AGENTHUB_AUTH_OPEN_MODE", true),
+		HTTPPort:               envStr("AGENTHUB_HTTP_PORT", "3500"),
+		Env:                    envStr("AGENTHUB_ENV", "dev"),
+		StaticDir:              envStr("AGENTHUB_STATIC_DIR", "./backend/static"),
+		BootstrapAdminEmail:    envStr("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL", ""),
+		BootstrapAdminPassword: envStr("AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD", ""),
+		BootstrapAdminName:     envStr("AGENTHUB_BOOTSTRAP_ADMIN_NAME", ""),
+		SessionTTL:             envDur("AGENTHUB_SESSION_TTL", 12*time.Hour),
+		// Secure cookies by default in production; a plain http dev box can
+		// turn them off.
+		CookieSecure:   envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
+		PublicBaseURL:  envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
 		DatabaseURL:    envStr("DATABASE_URL", ""),
 		SeedDemo:       envBool("AGENTHUB_SEED_DEMO", false),
 		LegacyMethods:  envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
@@ -111,6 +130,25 @@ func Load() (*Config, error) {
 		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
 		// Retention cap for the push callback audit trail, per task.
 		PushRecordLimit: envInt("AGENTHUB_PUSH_RECORD_LIMIT", 100),
+		OAuth: auth.OAuthConfig{
+			Enabled: envBool("AGENTHUB_OAUTH_ENABLED", true),
+			Google: auth.ProviderConfig{
+				ClientID:     envStr("AGENTHUB_OAUTH_GOOGLE_CLIENT_ID", ""),
+				ClientSecret: envStr("AGENTHUB_OAUTH_GOOGLE_CLIENT_SECRET", ""),
+				Scopes:       envList("AGENTHUB_OAUTH_GOOGLE_SCOPES", nil),
+			},
+			GitHub: auth.ProviderConfig{
+				ClientID:     envStr("AGENTHUB_OAUTH_GITHUB_CLIENT_ID", ""),
+				ClientSecret: envStr("AGENTHUB_OAUTH_GITHUB_CLIENT_SECRET", ""),
+				Scopes:       envList("AGENTHUB_OAUTH_GITHUB_SCOPES", nil),
+			},
+			OIDC: auth.ProviderConfig{
+				Issuer:       envStr("AGENTHUB_OAUTH_OIDC_ISSUER", ""),
+				ClientID:     envStr("AGENTHUB_OAUTH_OIDC_CLIENT_ID", ""),
+				ClientSecret: envStr("AGENTHUB_OAUTH_OIDC_CLIENT_SECRET", ""),
+				Scopes:       envList("AGENTHUB_OAUTH_OIDC_SCOPES", nil),
+			},
+		},
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -152,8 +190,16 @@ func (c *Config) Validate() error {
 	if c.PushRecordLimit < 1 {
 		return fmt.Errorf("AGENTHUB_PUSH_RECORD_LIMIT must be positive, got %d", c.PushRecordLimit)
 	}
-	if c.Env == "prod" && c.AdminToken == "" && c.AuthOpenMode {
-		return fmt.Errorf("AGENTHUB_ENV=prod requires AGENTHUB_ADMIN_TOKEN (or AGENTHUB_AUTH_OPEN_MODE=false with another auth layer)")
+	if c.SessionTTL <= 0 {
+		return fmt.Errorf("AGENTHUB_SESSION_TTL must be positive")
+	}
+	// The single shared admin token is gone: identities live in the database, so
+	// a production deployment must arrive with an administrator it can log in as.
+	if c.Env == "prod" && strings.TrimSpace(c.BootstrapAdminEmail) == "" {
+		return fmt.Errorf("AGENTHUB_ENV=prod requires AGENTHUB_BOOTSTRAP_ADMIN_EMAIL (the shared AGENTHUB_ADMIN_TOKEN was removed)")
+	}
+	if c.BootstrapAdminEmail != "" && !auth.ValidEmail(auth.NormalizeEmail(c.BootstrapAdminEmail)) {
+		return fmt.Errorf("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL is not a valid address: %q", c.BootstrapAdminEmail)
 	}
 	// Demo resources in production would be indistinguishable from real ones.
 	if c.Env == "prod" && c.SeedDemo {
@@ -162,10 +208,9 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// ControlPlaneOpen reports whether /api/* is reachable without a token.
-func (c *Config) ControlPlaneOpen() bool {
-	return c.AdminToken == "" && c.AuthOpenMode
-}
+// AuthMode is the identity mode reported by /healthz. agenthub always
+// authenticates against the users table now: the shared admin token is gone.
+func (c *Config) AuthMode() string { return "session" }
 
 func envStr(key, def string) string {
 	if v := os.Getenv(key); v != "" {

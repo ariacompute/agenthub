@@ -51,7 +51,6 @@ func openConfig(staticDir string) *config.Config {
 		HTTPPort:       "3500",
 		Env:            "dev",
 		StaticDir:      staticDir,
-		AuthOpenMode:   true,
 		LegacyMethods:  true,
 		MaxParallel:    4,
 		CLITimeout:     time.Second,
@@ -152,7 +151,9 @@ func TestHealthz(t *testing.T) {
 	if len(body.Methods) != len(a2a.Methods) {
 		t.Fatalf("methods = %v, want %v", body.Methods, a2a.Methods)
 	}
-	if body.Auth != "open" || !body.LegacyMethods || !body.PushEnabled {
+	// No auth service wired in means identities are disabled, which is the
+	// only honest answer for a harness that has no users.
+	if body.Auth != "disabled" || !body.LegacyMethods || !body.PushEnabled {
 		t.Fatalf("healthz flags = %+v", body)
 	}
 	if body.Resources["model"] != 1 || body.Health["healthy"] != 1 {
@@ -196,40 +197,23 @@ func TestAgentCardEndpoints(t *testing.T) {
 // control plane auth
 // ---------------------------------------------------------------------------
 
-func TestRequireAdmin(t *testing.T) {
+// TestControlPlaneIsOpenWithoutIdentities pins the fallback that keeps every
+// in-memory harness working: with no auth service wired in, every caller is the
+// dev principal and the control plane behaves as it did before identities
+// existed. The shared admin token is gone — there is nothing to carry.
+func TestControlPlaneIsOpenWithoutIdentities(t *testing.T) {
 	entries := []*registry.Entry{{Kind: registry.KindModel, Name: "m1"}}
+	h := Register(testDeps(t, openConfig(""), entries...))
 
-	// Open mode (no token configured): reachable.
-	d := testDeps(t, openConfig(""), entries...)
-	if w := do(t, Register(d), http.MethodGet, "/api/resources", "", nil); w.Code != http.StatusOK {
-		t.Fatalf("open mode: status = %d, want 200", w.Code)
+	if w := do(t, h, http.MethodGet, "/api/resources", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
 	}
-
-	// Token configured: requests must carry it.
-	cfg := openConfig("")
-	cfg.AdminToken = "secret"
-	d = testDeps(t, cfg, entries...)
-	h := Register(d)
-	if w := do(t, h, http.MethodGet, "/api/resources", "", nil); w.Code != http.StatusUnauthorized {
-		t.Fatalf("no token: status = %d, want 401", w.Code)
+	// A bearer header is not a credential any more: it is simply ignored.
+	if w := do(t, h, http.MethodGet, "/api/resources", "", map[string]string{"Authorization": "Bearer whatever"}); w.Code != http.StatusOK {
+		t.Fatalf("with bearer header: status = %d, want 200", w.Code)
 	}
-	var body struct {
-		Code string `json:"code"`
-	}
-	decodeJSON(t, do(t, h, http.MethodGet, "/api/resources", "", nil), &body)
-	if body.Code != "unauthorized" {
-		t.Fatalf("code = %q, want unauthorized", body.Code)
-	}
-	for _, header := range []string{"Bearer secret", "ApiKey secret", "secret"} {
-		if w := do(t, h, http.MethodGet, "/api/resources", "", map[string]string{"Authorization": header}); w.Code != http.StatusOK {
-			t.Fatalf("header %q: status = %d, want 200", header, w.Code)
-		}
-	}
-	if w := do(t, h, http.MethodGet, "/api/resources", "", map[string]string{"Authorization": "Bearer wrong"}); w.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong token: status = %d, want 401", w.Code)
-	}
-
-	// /healthz and the A2A plane are never behind the admin token.
+	// /healthz and the A2A plane were never behind the admin token and still
+	// are not behind a session.
 	if w := do(t, h, http.MethodGet, "/healthz", "", nil); w.Code != http.StatusOK {
 		t.Fatalf("healthz: status = %d", w.Code)
 	}

@@ -32,6 +32,25 @@ const CODE_KEYS = {
   task_not_cancelable: 'taskNotCancelable',
   push_notification_not_supported: 'pushNotificationNotSupported',
   unsupported_operation: 'unsupportedOperation',
+  // Identity and authorization.
+  unauthenticated: 'unauthenticated',
+  forbidden: 'forbidden',
+  invalid_credentials: 'invalidCredentials',
+  email_taken: 'emailTaken',
+  weak_password: 'weakPassword',
+  invalid_email: 'invalidEmail',
+  user_disabled: 'userDisabled',
+  password_required: 'passwordRequired',
+  session_expired: 'sessionExpired',
+  oauth_not_configured: 'oauthNotConfigured',
+  oauth_state_mismatch: 'oauthStateMismatch',
+  oauth_failed: 'oauthFailed',
+  oauth_no_email: 'oauthNoEmail',
+  role_already_exists: 'roleAlreadyExists',
+  group_already_exists: 'groupAlreadyExists',
+  builtin_role: 'builtinRole',
+  unknown_permission: 'unknownPermission',
+  invalid_grant: 'invalidGrant',
 }
 
 /** Returns the localised message for a machine readable code. */

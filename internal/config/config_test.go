@@ -82,8 +82,8 @@ func TestBuildNote(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	for _, key := range []string{
-		"AGENTHUB_HTTP_PORT", "AGENTHUB_ENV", "AGENTHUB_ADMIN_TOKEN",
-		"AGENTHUB_AUTH_OPEN_MODE", "AGENTHUB_MAX_PARALLEL", "AGENTHUB_CLI_TIMEOUT",
+		"AGENTHUB_HTTP_PORT", "AGENTHUB_ENV", "AGENTHUB_BOOTSTRAP_ADMIN_EMAIL",
+		"AGENTHUB_SESSION_TTL", "AGENTHUB_MAX_PARALLEL", "AGENTHUB_CLI_TIMEOUT",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -105,8 +105,17 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.PushRecordLimit != 100 {
 		t.Fatalf("push record limit = %d, want 100", cfg.PushRecordLimit)
 	}
-	if !cfg.ControlPlaneOpen() {
-		t.Fatal("open mode should be enabled by default with no token")
+	// Identities live in the users table now: there is no shared token left to
+	// fall back to, so every request is authenticated as a session or as
+	// anonymous.
+	if got := cfg.AuthMode(); got != "session" {
+		t.Fatalf("auth mode = %q, want session", got)
+	}
+	if cfg.SessionTTL != 12*time.Hour {
+		t.Fatalf("session ttl = %v, want 12h", cfg.SessionTTL)
+	}
+	if cfg.CookieSecure {
+		t.Fatal("cookies must not be Secure by default outside prod: a plain http dev box could not log in")
 	}
 	if cfg.SeedDemo {
 		t.Fatal("SeedDemo must default to off: an instance starts with only the resources you register")
@@ -151,10 +160,44 @@ func TestSeedDemoIsOptIn(t *testing.T) {
 
 	t.Setenv("AGENTHUB_SEED_DEMO", "true")
 	t.Setenv("AGENTHUB_ENV", "prod")
-	t.Setenv("AGENTHUB_ADMIN_TOKEN", "secret")
-	t.Setenv("AGENTHUB_AUTH_OPEN_MODE", "false")
+	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
 	if _, err := Load(); err == nil {
 		t.Fatal("production must refuse demo resources")
+	}
+}
+
+// TestBootstrapAdminIsValidated pins how an operator seeds the first account:
+// .env carries the address, and a typo must fail at boot rather than leaving an
+// instance nobody can log in to.
+func TestBootstrapAdminIsValidated(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+
+	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
+	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD", "correct horse battery")
+	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_NAME", "Admin")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BootstrapAdminEmail != "admin@example.com" || cfg.BootstrapAdminName != "Admin" {
+		t.Fatalf("bootstrap admin = %q / %q", cfg.BootstrapAdminEmail, cfg.BootstrapAdminName)
+	}
+	if cfg.BootstrapAdminPassword == "" {
+		t.Fatal("bootstrap password must survive Load: main hashes it into the users table")
+	}
+
+	// A malformed address is rejected, so the operator sees the typo at boot.
+	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL", "not-an-email")
+	if _, err := Load(); err == nil {
+		t.Fatal("malformed AGENTHUB_BOOTSTRAP_ADMIN_EMAIL must be rejected")
+	}
+
+	// Production cannot start without an administrator.
+	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL", "")
+	os.Unsetenv("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL")
+	t.Setenv("AGENTHUB_ENV", "prod")
+	if _, err := Load(); err == nil {
+		t.Fatal("AGENTHUB_ENV=prod must require AGENTHUB_BOOTSTRAP_ADMIN_EMAIL")
 	}
 }
 
@@ -179,7 +222,9 @@ func TestValidateRejectsBadInput(t *testing.T) {
 		{"zero parallel", func(c *Config) { c.MaxParallel = 0 }},
 		{"negative timeout", func(c *Config) { c.CLITimeout = -time.Second }},
 		{"zero output cap", func(c *Config) { c.MaxOutputBytes = 0 }},
-		{"prod without token", func(c *Config) { c.Env = "prod"; c.AdminToken = ""; c.AuthOpenMode = true }},
+		{"prod without bootstrap admin", func(c *Config) { c.Env = "prod"; c.BootstrapAdminEmail = "" }},
+		{"bad bootstrap admin email", func(c *Config) { c.BootstrapAdminEmail = "not-an-email" }},
+		{"zero session ttl", func(c *Config) { c.SessionTTL = 0 }},
 		{"missing database url", func(c *Config) { c.DatabaseURL = "" }},
 		{"blank database url", func(c *Config) { c.DatabaseURL = "   " }},
 		{"zero push record limit", func(c *Config) { c.PushRecordLimit = 0 }},

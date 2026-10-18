@@ -19,17 +19,21 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 
 ```
 a2a（协议类型/编解码，零依赖）
-  → registry（五类资源条目 + export）      ┐
-    → adapter（Connector 工厂 + 五类实现） │ 依赖倒置：三个端口接口由消费方定义
-      → hub（任务状态机 + 事件 broker + span + flow 编排）
-        → handlers（/.well-known、/a2a、/api/*、/healthz、静态托管）
+  → authz（权限解析 + 资源级授权）         ┐
+    → auth（密码、会话、OAuth、Principal） │ 端口由本包定义，实现在 store
+      → registry（五类资源条目 + export）  │ 依赖倒置：端口接口由消费方定义
+        → adapter（Connector 工厂 + 五类实现）
+          → hub（任务状态机 + 事件 broker + span + flow 编排）
+            → handlers（/.well-known、/a2a、/api/*、/healthz、静态托管）
 persistence ← internal/store（GORM 实现）
   ├─ migrations/*.sql（go:embed，幂等）+ schema_migrations 版本表
-  └─ resources / tasks / task_artifacts / task_spans / task_pending / task_push / events / push_records
+  └─ resources / tasks / task_artifacts / task_spans / task_pending / task_push / events /
+     push_records / users / sessions / oauth_accounts / groups / roles / permissions / grants
 ```
 
-一次请求：鉴权（`/api/*`）→ 方法规范化（v0.1 别名）→ 资源选择 → 适配执行 → 状态机推进 →
-artifact 累积 → 事件扇出（SSE + **异步落 `events`**）→ pushNotification 回调（**落 `push_records`**）。
+一次请求：身份解析（会话 cookie → `Principal`）→ 权限校验（`/api/*`）→ 方法规范化（v0.1 别名）→
+资源可见性过滤 → 资源选择 → 适配执行 → 状态机推进 → artifact 累积 → 事件扇出（SSE +
+**异步落 `events`**）→ pushNotification 回调（**落 `push_records`**）。
 
 生命周期：`submitted → working → input-required → completed / failed / canceled`。
 `input-required` 可**无限期挂起**，并凭 `taskId` 通过 `tasks/resume` 续接恢复（suspend/resume 语义）。
@@ -42,6 +46,8 @@ artifact 累积 → 事件扇出（SSE + **异步落 `events`**）→ pushNotifi
 | `hub.TaskRepository` | `store.NewTaskRepository` | `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` |
 | `hub.EventRepository` | `store.NewEventRepository` | `events(seq, task_id, kind, payload)`，供 `since=<seq>` 断线重连回放 |
 | `hub.PushRepository` | `store.NewPushRepository` | `push_records`：mock notifier 捕获的每次回调（url/state/config 快照） |
+| `auth.UserStore` / `SessionStore` / `OAuthStore` | `store.NewUserStore` / `NewSessionStore` / `NewOAuthStore` | `users` / `sessions` / `oauth_accounts` |
+| `authz.AuthzStore` | `store.NewAuthzStore` | `groups` / `roles` / `permissions` / `user_groups` / `user_roles` / `group_roles` / `role_permissions` / `resource_grants` |
 
 - **依赖倒置**：端口接口定义在 `registry` / `hub`，实现在 `store`，因此 `hub`、`registry` **不 import `store`**。
 - **两套行为**：不注入 GORM 仓库时 `registry.Registry` / `hub.TaskStore` / `hub.Broker` /
@@ -62,9 +68,16 @@ artifact 累积 → 事件扇出（SSE + **异步落 `events`**）→ pushNotifi
 - `internal/model`：GORM 模型 —— `Resource` / `Task` / `TaskArtifact` / `TaskSpan` /
   `TaskPending` / `TaskPush` / `PushRecord` / `Event` / `SchemaMigration`，以及 `JSONField`
   （`driver.Valuer` + `sql.Scanner`，列类型 `jsonb`，**不引入** `gorm.io/datatypes`）
+- `internal/auth`：**认证内核**（零新依赖，全部标准库）。`password.go`（PBKDF2-HMAC-SHA256，
+  `pbkdf2-sha256$iters$salt$key` 编码，盐与迭代参数一起入库便于日后升级）、`auth.go`
+  （注册/登录/引导管理员/会话 cookie/`Principal`/吊销，端口 `UserStore`/`SessionStore`/`OAuthStore`）、
+  `oauth.go`（Google/GitHub/通用 OIDC，手写授权码 + PKCE(S256) + state）
+- `internal/authz`：**授权内核**。`Permission` 常量 + `Principal.Can`（owner 持有全部已知权限）+
+  组/角色/权限解析（一次请求一次）+ `CanAccessResource` / `VisibleResourceIDs` + 端口 `AuthzStore`
 - `internal/store`：`db.go`（`Open`/`Ping`/`Close`/`RedactDSN`，连接池 25/10/30min、`PrepareStmt`）、
   `migrate.go`（`go:embed` + `schema_migrations` 按序单事务执行）、`seed.go`（demo 五类资源）、
-  `resource_store.go` / `task_store.go` / `event_store.go` / `push_store.go`（四个仓库实现）
+  `resource_store.go` / `task_store.go` / `event_store.go` / `push_store.go` /
+  `auth_store.go` / `authz_store.go`（六个仓库实现）
 - `internal/registry`：`registry.go`（`Kind`/`Health`/`Transport`/`Entry` + CRUD + 发现 +
   `ResourceStore` 端口 + 委托）、`export.go`（聚合 Agent Card + MCP server 描述）
 - `internal/adapter`：`connector.go`（`Connector` 接口 + `Options` + `For` 工厂）、
@@ -73,14 +86,20 @@ artifact 累积 → 事件扇出（SSE + **异步落 `events`**）→ pushNotifi
   `task.go`（TaskStore + 合法迁移校验 + 挂起状态 + 条件更新委托）、`trace.go`（span 时间线）、
   `broker.go`（事件扇出 + 有界队列异步落库）、`flow.go`（`then/branch/parallel`）、
   `orchestrator.go`（send/stream/get/cancel/resume/push + MockNotifier 落库 + Prune ticker）
-- `internal/handlers`：`handlers.go`（路由注册中心 + `requireAdmin` + 静态回退 + `/healthz` 的 `database` 字段）、
-  `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放）
-- `migrations/`：`001_resources.sql` … `004_push_records.sql`，经 `embed.go` 内嵌
+- `internal/handlers`：`handlers.go`（路由注册中心 + 静态回退 + `/healthz` 的 `database` 字段）、
+  `principal.go`（`identify`/`requireAuth`/`requirePermission` + 可见性过滤 + 计数重算）、
+  `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放）、
+  `api_auth.go`（注册/登录/登出/me/会话/OAuth 回调）、
+  `api_admin.go`（users/groups/roles/permissions/grants 管理）
+- `migrations/`：`001_resources.sql` … `004_push_records.sql`、`005_auth.sql`（users/sessions/
+  oauth_accounts）、`006_rbac.sql`（groups/roles/permissions/各种关联表/resource_grants + 内置
+  角色权限种子），经 `embed.go` 内嵌
 - `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go`：`DATABASE_URL` 门控集成
 - `docker-compose.yml`：`postgres:16-alpine`（宿主 **5434**）+ `agenthub`（依赖 `service_healthy`）
   + `web`（`profiles: [dev]`）
 - `web/`：Vue 3 控制台（`src/lib/copy/*-copy.js` ×13 语、`languages.js`、`use-copy.js`、`api.js`、
-  `errors.js`、`style.css` 单色 token；`views/` 三屏；`tests/` vitest）
+  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 五屏
+  （registry / trace / topology / **login** / **admin**）；`tests/` vitest）
 - `backend/static/`：Vue 构建产物（Go 进程托管，gitignore）
 
 ## 开发规范
@@ -209,8 +228,18 @@ make web-install / make web-dev / make web-build / make web-test
 
 - 端口：服务 **3500**，compose 数据库宿主 **5434**；避开 bankmind(8080)、cockpit store(3400)、
   宿主 postgres(5432)、bankmind 数据库(5433)。
-- 控制面 `/api/*` 走 `AGENTHUB_ADMIN_TOKEN`（Bearer / ApiKey / 裸 token 均可）；未配置 token 时
-  仅在 `AGENTHUB_AUTH_OPEN_MODE=true` 下开放，**`AGENTHUB_ENV=prod` 必须配 token**（`Validate` 拒绝）。
+- **身份与权限（重要）**：
+  - 控制面 `/api/*` 走**会话**（HttpOnly cookie），由 `requirePermission(<perm>)` 逐路由声明；
+    共享管理员 token（`AGENTHUB_ADMIN_TOKEN` / `AGENTHUB_AUTH_OPEN_MODE`）**已移除**。
+  - 路由只声明**权限点**（`authz.Perm*`），永不判断角色或组：新角色不必改 handler。
+  - **可见性只在 `principal.go` 过滤一次**：列表/详情/导出/Agent Card 必须都走
+    `visibleEntries`，写路径必须再单独 `canAccess(..., write=true)`，否则列表过滤挡不住直接 PUT。
+  - **没有授权的资源 = 公开**：`resource_grants` 为空表示不限制，第一条授权才使其受限
+    （这是老实例升级后行为不变的保证）。
+  - 删除用户是**软删除**（`disabled_at`），任务与审计链必须存活；owner 不可停用。
+  - 未注入 `Auth`/`Authz`（单测、内存模式）时每个调用者都是 `authz.DevPrincipal()`，
+    即身份体系出现前的开放行为，`/healthz` 如实上报 `auth: disabled`。
+  - 凭据与口令只以派生值落库（`password_hash`、`session_token_hash`），日志只记 user id 与结果。
 - 控制面错误码到状态码的映射集中在 `internal/handlers/api.go:writeDomainErr`
   （`invalid_*`/`duplicate` → 400，`*_not_found` → 404，`not_cancelable`/`not_resumable` → 400），
   新增领域错误需同步该映射，否则会退化为 500。

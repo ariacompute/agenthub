@@ -55,10 +55,12 @@ func (d Deps) handleListResources(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	entries := d.visibleEntries(r, d.Reg.List(kind, r.URL.Query().Get("q")))
+	byKind, byHealth := countsOf(entries)
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"resources": d.Reg.List(kind, r.URL.Query().Get("q")),
-		"counts":    d.Reg.CountsByKind(),
-		"health":    d.Reg.HealthCounts(),
+		"resources": entries,
+		"counts":    byKind,
+		"health":    byHealth,
 	})
 }
 
@@ -78,8 +80,11 @@ func (d Deps) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleGetResource(w http.ResponseWriter, r *http.Request) {
-	entry, ok := d.Reg.Get(r.PathValue("id"))
-	if !ok {
+	id := r.PathValue("id")
+	entry, ok := d.Reg.Get(id)
+	if !ok || !d.canAccess(r, id, false) {
+		// A resource the caller may not see is reported as absent: revealing
+		// that it exists would leak the shape of somebody else's catalogue.
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
 		return
 	}
@@ -88,7 +93,7 @@ func (d Deps) handleGetResource(w http.ResponseWriter, r *http.Request) {
 
 func (d Deps) handleUpdateResource(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, ok := d.Reg.Get(id); !ok {
+	if _, ok := d.Reg.Get(id); !ok || !d.canAccess(r, id, true) {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
 		return
 	}
@@ -107,7 +112,12 @@ func (d Deps) handleUpdateResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
-	if err := d.Reg.Delete(r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	if _, ok := d.Reg.Get(id); !ok || !d.canAccess(r, id, true) {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
+		return
+	}
+	if err := d.Reg.Delete(id); err != nil {
 		writeDomainErr(w, err)
 		return
 	}
@@ -127,7 +137,12 @@ func (d Deps) handleResourceHealth(w http.ResponseWriter, r *http.Request) {
 		writeDomainErr(w, err)
 		return
 	}
-	if err := d.Reg.SetHealth(r.PathValue("id"), health); err != nil {
+	id := r.PathValue("id")
+	if _, ok := d.Reg.Get(id); !ok || !d.canAccess(r, id, true) {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
+		return
+	}
+	if err := d.Reg.SetHealth(id, health); err != nil {
 		writeDomainErr(w, err)
 		return
 	}
@@ -185,12 +200,18 @@ func (d Deps) handleResumeTask(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, task)
 }
 
+// handleExportMCP and handleExportAgentCard publish the catalogue, so they
+// publish what the caller may see — no more. An exporter that ignored grants
+// would be the easiest way around them.
 func (d Deps) handleExportMCP(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"servers": registry.MCPServerDescriptions(d.Reg)})
+	entries := d.visibleEntries(r, d.Reg.Snapshot())
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"servers": registry.MCPServerDescriptionsOf(entries)})
 }
 
 func (d Deps) handleExportAgentCard(w http.ResponseWriter, r *http.Request) {
-	card := registry.AgentCard(d.Reg, baseURL(r), config.Version, config.ProtocolVersion)
+	entries := d.visibleEntries(r, d.Reg.Snapshot())
+	byKind, _ := countsOf(entries)
+	card := registry.AgentCardOf(entries, byKind, len(entries), baseURL(r), config.Version, config.ProtocolVersion)
 	httputil.WriteJSON(w, http.StatusOK, card)
 }
 

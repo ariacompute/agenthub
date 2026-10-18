@@ -16,9 +16,13 @@ import (
 // errMissingParams marks a request with no params object.
 var errMissingParams = errors.New("missing_params")
 
-// handleAgentCard serves A2A discovery at the well-known path.
+// handleAgentCard serves A2A discovery at the well-known path. Discovery stays
+// open to anonymous peers, but it advertises only the resources the caller may
+// read: a resource granted to one group is not published to the world.
 func (d Deps) handleAgentCard(w http.ResponseWriter, r *http.Request) {
-	card := registry.AgentCard(d.Reg, baseURL(r), config.Version, config.ProtocolVersion)
+	entries := d.visibleEntries(r, d.Reg.Snapshot())
+	byKind, _ := countsOf(entries)
+	card := registry.AgentCardOf(entries, byKind, len(entries), baseURL(r), config.Version, config.ProtocolVersion)
 	httputil.WriteJSON(w, http.StatusOK, card)
 }
 
@@ -48,6 +52,10 @@ func (d Deps) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 			a2a.WriteRPCError(w, req.ID, a2a.NewError(a2a.CodeInvalidParams, a2a.MsgInvalidParams))
 			return
 		}
+		if !d.mayInvoke(r, &params) {
+			a2a.WriteRPCError(w, req.ID, a2a.NewError(a2a.CodeResourceNotFound, a2a.MsgResourceNotFound))
+			return
+		}
 		task, err := d.Hub.Send(r.Context(), params)
 		if err != nil {
 			a2a.WriteRPCErr(w, req.ID, err)
@@ -59,6 +67,10 @@ func (d Deps) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 		var params a2a.MessageSendParams
 		if err := decodeParams(req.Params, &params); err != nil {
 			a2a.WriteRPCError(w, req.ID, a2a.NewError(a2a.CodeInvalidParams, a2a.MsgInvalidParams))
+			return
+		}
+		if !d.mayInvoke(r, &params) {
+			a2a.WriteRPCError(w, req.ID, a2a.NewError(a2a.CodeResourceNotFound, a2a.MsgResourceNotFound))
 			return
 		}
 		d.streamTask(w, r, req.ID, params)
@@ -131,6 +143,30 @@ func (d Deps) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 	default:
 		a2a.WriteRPCError(w, req.ID, a2a.NewError(a2a.CodeUnsupportedOperation, a2a.MsgUnsupportedOperation))
 	}
+}
+
+// mayInvoke decides whether the caller may run this resource.
+//
+// The A2A data plane stays reachable without a session — a peer agent must be
+// able to send its first task — but a resource that carries grants is only
+// invocable by the users and groups it was granted to. An explicitly named
+// Only an explicitly named resource is checked: a request that names nothing
+// leaves the choice to the hub's kind fallback, and the id it lands on is not
+// known before the run starts. Restricting a resource is therefore only
+// meaningful together with listing it, which is where the same grant hides it.
+func (d Deps) mayInvoke(r *http.Request, params *a2a.MessageSendParams) bool {
+	if params.Metadata == nil {
+		return true
+	}
+	raw, ok := params.Metadata["resourceId"]
+	if !ok {
+		return true
+	}
+	id, ok := raw.(string)
+	if !ok || id == "" {
+		return true
+	}
+	return d.canAccess(r, id, false)
 }
 
 // streamTask answers message/stream with an SSE body where every frame is a
