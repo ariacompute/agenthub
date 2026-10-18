@@ -147,6 +147,20 @@ make web-install / make web-dev / make web-build / make web-test
 - 必填 secrets：`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`；`:latest` **只由 CI 推**，禁止本地手工推。
 - 平台仅 `linux/amd64`（与 docker 仓 release.yml 一致）；如需多架构再引 `setup-qemu` + `setup-buildx`。
 
+## 演示数据（demo resources）
+
+- 唯一的 mock data 就是 `store.Seed()` 写入的五条 `demo-*` 资源，**默认不再灌**：新实例以空 registry
+  启动，只有显式 `AGENTHUB_SEED_DEMO=true`（见 `internal/config`）才幂等写入
+  （`ON CONFLICT DO NOTHING`），用于本地走查与 `scripts/test-api.sh`。
+- `cmd/agenthub-server` 在未开启时打一条 `store: demo resources not seeded` 日志（带 hint），
+  绝不静默。
+- `config.Validate` 拒绝 `AGENTHUB_ENV=prod` + `AGENTHUB_SEED_DEMO=true`：生产实例里 demo 资源与真实
+  资源无法区分。`AGENTHUB_SEED_DEMO` 取值解析走 `envBool`，不可解析回落默认 false。
+- 因此 README 与 `scripts/test-api.sh` 都必须以 `AGENTHUB_SEED_DEMO=true` 启动依赖方能跑；
+  脚本在 `/api/resources` 里找不到 `demo-mcp` / `demo-agent` 时直接 exit 2 并给出同一条命令。
+- 关闭开关**不会**清理已存在的行（`store.Seed` 只做 insert，不做 purge）；要回到干净状态手动
+  `DELETE FROM resources WHERE id LIKE 'demo-%'`（compose 环境用 `make db-psql`）。
+
 ## 端口清单
 
 - 容器内**只有一个监听端口**（恒为 `3500`），宿主侧映射由 compose 决定；因此「哪个端口在应答、

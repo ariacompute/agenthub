@@ -45,9 +45,15 @@ func main() {
 		slog.Error("migrate", "error", err)
 		os.Exit(1)
 	}
-	if err := store.Seed(db); err != nil {
-		slog.Error("seed", "error", err)
-		os.Exit(1)
+	// Demo resources are opt-in (AGENTHUB_SEED_DEMO=true): a default instance
+	// starts empty, which is what the README scripts switch on explicitly.
+	if cfg.SeedDemo {
+		if err := store.Seed(db); err != nil {
+			slog.Error("seed", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		slog.Info("store: demo resources not seeded", "hint", "set AGENTHUB_SEED_DEMO=true to register the five demo resources")
 	}
 
 	reg := registry.NewWithStore(store.NewResourceStore(db))

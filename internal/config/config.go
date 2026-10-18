@@ -69,12 +69,17 @@ func BuildNote() string {
 
 // Config is the fully validated runtime configuration.
 type Config struct {
-	HTTPPort        string
-	Env             string
-	StaticDir       string
-	AdminToken      string
-	AuthOpenMode    bool
-	DatabaseURL     string
+	HTTPPort     string
+	Env          string
+	StaticDir    string
+	AdminToken   string
+	AuthOpenMode bool
+	DatabaseURL  string
+	// SeedDemo inserts the five demo resources at startup. It is off by
+	// default: an instance should start with whatever the operator registers,
+	// not with sample rows nobody asked for. Turn it on for a local walkthrough
+	// or for scripts/test-api.sh, which targets those resources.
+	SeedDemo        bool
 	LegacyMethods   bool
 	MaxParallel     int
 	CLITimeout      time.Duration
@@ -96,6 +101,7 @@ func Load() (*Config, error) {
 		// refuses to run a production deployment without a token.
 		AuthOpenMode:   envBool("AGENTHUB_AUTH_OPEN_MODE", true),
 		DatabaseURL:    envStr("DATABASE_URL", ""),
+		SeedDemo:       envBool("AGENTHUB_SEED_DEMO", false),
 		LegacyMethods:  envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
 		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
 		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
@@ -148,6 +154,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Env == "prod" && c.AdminToken == "" && c.AuthOpenMode {
 		return fmt.Errorf("AGENTHUB_ENV=prod requires AGENTHUB_ADMIN_TOKEN (or AGENTHUB_AUTH_OPEN_MODE=false with another auth layer)")
+	}
+	// Demo resources in production would be indistinguishable from real ones.
+	if c.Env == "prod" && c.SeedDemo {
+		return fmt.Errorf("AGENTHUB_SEED_DEMO must stay off when AGENTHUB_ENV=prod")
 	}
 	return nil
 }

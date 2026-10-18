@@ -31,7 +31,12 @@ travels back the same path.
 See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PORT` (default 3500),
 `AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`, `AGENTHUB_MAX_PARALLEL`,
 `AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`, `AGENTHUB_MAX_OUTPUT_BYTES`,
-`AGENTHUB_PUSH_RECORD_LIMIT` (default 100).
+`AGENTHUB_PUSH_RECORD_LIMIT` (default 100), `AGENTHUB_SEED_DEMO` (default **false**).
+
+No demo data is inserted unless you ask for it: `AGENTHUB_SEED_DEMO=true` registers the five
+`demo-*` resources (`demo-model`, `demo-agent`, `demo-mcp`, `demo-skill`, `demo-cli`) at startup,
+idempotently, which is what the examples below target. Everything else starts with an empty
+registry, and `config.Validate` refuses the combination `AGENTHUB_ENV=prod` + `AGENTHUB_SEED_DEMO=true`.
 
 ## Run
 
@@ -48,6 +53,9 @@ database-less fallback). Local value:
 
 Console: `make web-dev` (development) or `make web-build && make run` (the bundle is hosted at `/`
 by the Go process).
+
+The registry starts **empty** — nothing is seeded. Set `AGENTHUB_SEED_DEMO=true` to get the five
+`demo-*` resources the examples below talk to.
 
 ### Version stamping
 
@@ -187,7 +195,8 @@ cancel), the JSON-RPC error contract and the console bundle. One PASS / FAIL lin
 a non-zero exit as soon as one of them fails, so CI can gate on it:
 
 ```bash
-make up                                             # or make run
+AGENTHUB_SEED_DEMO=true make up                     # the test targets the demo-* resources
+AGENTHUB_SEED_DEMO=true make run                    # or locally
 ./scripts/test-api.sh                               # defaults to http://127.0.0.1:3500
 BASE_URL=https://hub.example.com ./scripts/test-api.sh
 AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh  # also asserts /api/* stays closed

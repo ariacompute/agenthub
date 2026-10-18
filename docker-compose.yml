@@ -53,6 +53,9 @@ services:
       AGENTHUB_ENV: ${AGENTHUB_ENV:-dev}
       AGENTHUB_ADMIN_TOKEN: ${AGENTHUB_ADMIN_TOKEN:-}
       AGENTHUB_AUTH_OPEN_MODE: ${AGENTHUB_AUTH_OPEN_MODE:-true}
+      # Demo resources are opt-in: a default instance starts with an empty
+      # registry. Enable for a walkthrough or before scripts/test-api.sh.
+      AGENTHUB_SEED_DEMO: ${AGENTHUB_SEED_DEMO:-false}
       AGENTHUB_A2A_LEGACY_METHODS: ${AGENTHUB_A2A_LEGACY_METHODS:-true}
       AGENTHUB_MAX_PARALLEL: ${AGENTHUB_MAX_PARALLEL:-8}
       AGENTHUB_CLI_TIMEOUT: ${AGENTHUB_CLI_TIMEOUT:-15s}

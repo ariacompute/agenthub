@@ -13,9 +13,14 @@
 #   AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh
 #   MAX_TIME=60 ./scripts/test-api.sh           # per-request curl timeout
 #
-# Start the stack first: `make up` (compose) or `make run` (local). The seeded
-# resources (demo-model / demo-agent / demo-mcp / demo-skill / demo-cli) are what
-# the A2A calls target, so run it against a freshly seeded instance.
+# Start a stack that carries the demo resources first — they are opt-in, so the
+# flag is required:
+#
+#   AGENTHUB_SEED_DEMO=true make up      # compose
+#   AGENTHUB_SEED_DEMO=true make run     # local
+#
+# The A2A calls below target demo-mcp / demo-agent, so without those resources the
+# script stops with exit 2 instead of reporting a wall of failures.
 #
 # Requires: curl, python3 (used only to pick values out of JSON responses).
 set -u
@@ -213,11 +218,24 @@ if [ "$i" -ge "$READY_TIMEOUT" ]; then
 	exit 2
 fi
 
+# The demo resources are opt-in (AGENTHUB_SEED_DEMO=true), and this script talks
+# to them. Fail here with the fix instead of drowning in failed assertions.
+http GET /api/resources
+if [ "$STATUS" != "200" ] || ! grep -q 'demo-mcp' "$BODY" || ! grep -q 'demo-agent' "$BODY"; then
+	printf '\nthe demo resources (demo-* ) are not registered on %s\n' "$BASE_URL" >&2
+	printf 'start the demo stack first:\n' >&2
+	printf '  AGENTHUB_SEED_DEMO=true make up     # compose\n' >&2
+	printf '  AGENTHUB_SEED_DEMO=true make run    # local\n\n' >&2
+	exit 2
+fi
+
 # ---------------------------------------------------------------------------
 # health & discovery
 # ---------------------------------------------------------------------------
 
 section 'health & discovery'
+# Read health explicitly: the preflight above left /api/resources in the buffer.
+http GET /healthz
 expect 'healthz returns 200' 200 "$STATUS"
 expect 'healthz status is ok' ok "$(jget status)"
 VERSION=$(jget version)

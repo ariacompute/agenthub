@@ -108,6 +108,54 @@ func TestLoadDefaults(t *testing.T) {
 	if !cfg.ControlPlaneOpen() {
 		t.Fatal("open mode should be enabled by default with no token")
 	}
+	if cfg.SeedDemo {
+		t.Fatal("SeedDemo must default to off: an instance starts with only the resources you register")
+	}
+}
+
+// The demo resources are the only "mock data" agenthub can insert, so they must
+// be opt-in and impossible to enable in production.
+func TestSeedDemoIsOptIn(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"true", true},
+		{"TRUE", true},
+		{"1", true},
+		{"false", false},
+		{"0", false},
+		{"not-a-bool", false}, // unparsable falls back to the default
+	} {
+		t.Setenv("AGENTHUB_SEED_DEMO", tc.raw)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.SeedDemo != tc.want {
+			t.Fatalf("AGENTHUB_SEED_DEMO=%q: SeedDemo = %v, want %v", tc.raw, cfg.SeedDemo, tc.want)
+		}
+	}
+
+	t.Setenv("AGENTHUB_SEED_DEMO", "")
+	os.Unsetenv("AGENTHUB_SEED_DEMO")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SeedDemo {
+		t.Fatal("unset AGENTHUB_SEED_DEMO must leave demo resources off")
+	}
+
+	t.Setenv("AGENTHUB_SEED_DEMO", "true")
+	t.Setenv("AGENTHUB_ENV", "prod")
+	t.Setenv("AGENTHUB_ADMIN_TOKEN", "secret")
+	t.Setenv("AGENTHUB_AUTH_OPEN_MODE", "false")
+	if _, err := Load(); err == nil {
+		t.Fatal("production must refuse demo resources")
+	}
 }
 
 // TestLoadRejectsMissingDatabaseURL pins the "database is mandatory" rule: a

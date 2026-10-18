@@ -25,7 +25,13 @@
 
 见 `.env.example`。主要项：`DATABASE_URL`（**必填**）、`AGENTHUB_HTTP_PORT`（默认 3500）、
 `AGENTHUB_ADMIN_TOKEN` + `AGENTHUB_AUTH_OPEN_MODE`、`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、
-`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）。
+`AGENTHUB_CLI_TIMEOUT`、`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）、
+`AGENTHUB_SEED_DEMO`（默认 **false**）。
+
+默认不灌任何演示数据：只有显式 `AGENTHUB_SEED_DEMO=true`，启动时才会幂等地写入五条 `demo-*` 资源
+（`demo-model`、`demo-agent`、`demo-mcp`、`demo-skill`、`demo-cli`），下面的示例正是面向它们。
+除此之外实例以**空 registry** 启动；`config.Validate` 会拒绝 `AGENTHUB_ENV=prod` +
+`AGENTHUB_SEED_DEMO=true` 这一组合。
 
 ## 运行
 
@@ -40,6 +46,9 @@ curl localhost:3500/.well-known/agent.json
 本地地址：`postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable`（见 `.env.example`）。
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
+
+registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=true` 才会得到下面示例所依赖的
+五条 `demo-*` 资源。
 
 ### 版本打标
 
@@ -166,7 +175,8 @@ input-required → resume → cancel）、JSON-RPC 错误约定与控制台产�
 有一条失败就以非 0 退出，便于 CI 卡口：
 
 ```bash
-make up                                             # 或 make run
+AGENTHUB_SEED_DEMO=true make up                     # 脚本面向 demo-* 资源
+AGENTHUB_SEED_DEMO=true make run                    # 或本地运行
 ./scripts/test-api.sh                               # 默认 http://127.0.0.1:3500
 BASE_URL=https://hub.example.com ./scripts/test-api.sh
 AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh  # 额外断言 /api/* 不带 token 会被拦
