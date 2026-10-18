@@ -153,16 +153,19 @@ jobs:
             arch: x86_64
             target: ''
             args: --bundles appimage,deb
+          # `app` is what writes bundle/macos/agenthub.app, and that .app is what
+          # the portable .tar.gz packs; `dmg` on its own only produces the disk
+          # image and leaves no .app behind for the packaging step to find.
           - os: macos-latest
             platform: macos
             arch: aarch64
             target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin --bundles dmg
+            args: --target aarch64-apple-darwin --bundles app,dmg
           - os: macos-13
             platform: macos
             arch: x64
             target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --bundles dmg
+            args: --target x86_64-apple-darwin --bundles app,dmg
           - os: windows-latest
             platform: windows
             arch: x86_64
@@ -279,8 +282,8 @@ jobs:
             # do with the build, so the pipeline's status is not what decides.
             APP="$(find "$TARGET_ROOT" -maxdepth 6 -type d -name '*.app' | head -1 || true)"
             if [ -z "$APP" ]; then
-              echo "::error::no app bundle under $TARGET_ROOT" >&2
-              find "$TARGET_ROOT" -maxdepth 6 -type d | sort | head -40 >&2
+              echo "::error::no app bundle under $TARGET_ROOT — is 'app' in --bundles?" >&2
+              find "$TARGET_ROOT" -path '*/bundle/*' -maxdepth 6 | sort | head -40 >&2
               exit 1
             fi
             tar -czf "$OUT/${NAME}.tar.gz" -C "$(dirname "$APP")" "$(basename "$APP")"
