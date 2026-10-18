@@ -132,6 +132,7 @@ make test             # go test -race ./...（含DB 门控用例）
 make test-integration # 只跑 Integration 用例
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
+./scripts/test-api.sh        # 对运行中实例的完整 HTTP 接口自测（PASS/FAIL 逐条，失败非 0 退出）
 ```
 
 ## 镜像发布

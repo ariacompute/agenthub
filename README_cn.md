@@ -160,34 +160,21 @@ make test-integration  # 只跑 integration_test.go
 make web-test          # cd web && bunx vitest run
 ```
 
-对着已起的栈（`make up`，访问 `localhost:3500`）跑端到端冒烟：发现、发一个任务、流式、
-以及挂起并恢复一个等待审批的任务。
+对着运行中实例的端到端接口测试——把所有 `curl` 可达的端点都脚本化了：健康与发现、整套 `/api`
+控制面（资源 CRUD、导出、任务、span、事件回放）、A2A 方法（send、get、流式、push 通知、
+input-required → resume → cancel）、JSON-RPC 错误约定与控制台产物。每条断言打印一行 PASS / FAIL，
+有一条失败就以非 0 退出，便于 CI 卡口：
 
 ```bash
-# 1) 发现
-curl -s localhost:3500/.well-known/agent.json | head
-
-# 2) 发一个任务（选中 demo-mcp）
-curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":1,"method":"message/send",
-  "params":{"message":{"role":"user","parts":[{"type":"text","text":"查一下上周的请假记录"}]},
-            "metadata":{"resourceId":"demo-mcp"}}}'
-
-# 3) 流式（SSE）
-curl -N -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":2,"method":"message/stream",
-  "params":{"message":{"role":"user","parts":[{"type":"text","text":"帮我请明天下午半天年假"}]},
-            "metadata":{"flow":[{"op":"then","resource":"demo-skill"},{"op":"then","resource":"demo-mcp"}]}}}'
-
-# 4) 挂起与恢复（agent 遇 approve/confirm 进入 input-required）
-curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":3,"method":"message/send",
-  "params":{"message":{"role":"user","parts":[{"type":"text","text":"approve the change"}]},
-            "metadata":{"resourceId":"demo-agent"}}}'
-curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":4,"method":"tasks/resume",
-  "params":{"id":"<taskId>","message":{"role":"user","parts":[{"type":"text","text":"approved"}]}}}'
+make up                                             # 或 make run
+./scripts/test-api.sh                               # 默认 http://127.0.0.1:3500
+BASE_URL=https://hub.example.com ./scripts/test-api.sh
+AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh  # 额外断言 /api/* 不带 token 会被拦
+MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时放宽超时
 ```
+
+脚本面向种子资源（`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` / `demo-cli`），除
+`curl` 与 `python3` 外无依赖，跑完会删掉自己创建的资源；若服务始终不应答 `/healthz` 则以 2 退出。
 
 ## A2A 端点
 

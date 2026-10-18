@@ -180,34 +180,23 @@ make test-integration  # only integration_test.go
 make web-test          # cd web && bunx vitest run
 ```
 
-End-to-end smoke test against a running stack (`make up`, then talk to `localhost:3500`): discovery,
-sending a task, streaming, and parking + resuming a task that asks for approval.
+End-to-end API test against a running instance — the scripted form of every `curl`-able endpoint:
+health and discovery, the whole `/api` control plane (resources CRUD, exports, tasks, spans, event
+replay), the A2A methods (send, get, streaming, push notifications, input-required → resume →
+cancel), the JSON-RPC error contract and the console bundle. One PASS / FAIL line per assertion and
+a non-zero exit as soon as one of them fails, so CI can gate on it:
 
 ```bash
-# 1) discovery
-curl -s localhost:3500/.well-known/agent.json | head
-
-# 2) send a task (targets demo-mcp)
-curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":1,"method":"message/send",
-  "params":{"message":{"role":"user","parts":[{"type":"text","text":"look up last week leave records"}]},
-            "metadata":{"resourceId":"demo-mcp"}}}'
-
-# 3) streaming (SSE)
-curl -N -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":2,"method":"message/stream",
-  "params":{"message":{"role":"user","parts":[{"type":"text","text":"apply half-day annual leave tomorrow afternoon"}]},
-            "metadata":{"flow":[{"op":"then","resource":"demo-skill"},{"op":"then","resource":"demo-mcp"}]}}}'
-
-# 4) park and resume (the agent parks on approve / confirm)
-curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":3,"method":"message/send",
-  "params":{"message":{"role":"user","parts":[{"type":"text","text":"approve the change"}]},
-            "metadata":{"resourceId":"demo-agent"}}}'
-curl -s localhost:3500/a2a -H 'Content-Type: application/json' -d '{
-  "jsonrpc":"2.0","id":4,"method":"tasks/resume",
-  "params":{"id":"<taskId>","message":{"role":"user","parts":[{"type":"text","text":"approved"}]}}}'
+make up                                             # or make run
+./scripts/test-api.sh                               # defaults to http://127.0.0.1:3500
+BASE_URL=https://hub.example.com ./scripts/test-api.sh
+AGENTHUB_ADMIN_TOKEN=<token> ./scripts/test-api.sh  # also asserts /api/* stays closed
+MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # slow networks / cold boots
 ```
+
+It targets the seeded resources (`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` /
+`demo-cli`), needs nothing beyond `curl` and `python3`, deletes the resource it creates, and exits
+2 when the service never answers `/healthz`.
 
 ## A2A endpoints
 
