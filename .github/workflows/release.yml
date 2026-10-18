@@ -1,0 +1,110 @@
+name: Release container image
+
+# Build and publish the agenthub image to DockerHub whenever a release is
+# published:
+#
+#   ariacompute/agenthub-agenthub:<release tag>   pinned to that release
+#   ariacompute/agenthub-agenthub:latest          whatever was released last
+#
+# The release tag is both the image tag and the VERSION build-arg, so the image
+# tag always equals what /healthz reports and what the console renders in the
+# bottom-left corner as "version@commit". Nothing here falls back to the
+# Dockerfile defaults: publishing without a tag would otherwise push an
+# untraceable :latest stamped with the "dev" sentinel.
+#
+# The other three stamp args come from the checkout of that tag: COMMIT is the
+# seven character revision, DISTANCE is how far HEAD sits after the tag (0 for a
+# release), DIRTY is false because CI always builds from a clean checkout. They
+# are the same four args `make docker-build` / `make compose-build` pass locally;
+# .git is excluded by .dockerignore, so this checkout is the only source for them.
+#
+# The image needs no proxy here: the Dockerfile already retries `bun install` and
+# `go mod download` with the proxy variables cleared, which on a runner with
+# direct internet is the first thing that works.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   - DOCKERHUB_USERNAME: DockerHub account / org name
+#   - DOCKERHUB_TOKEN:    DockerHub access token with write permission
+on:
+  release:
+    types: [published]
+
+# One publish at a time: a newer release cancels an in-progress one, so :latest
+# can never be overwritten by an older release that happens to finish later.
+concurrency:
+  group: release-image
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    name: Build & publish agenthub image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@v4
+        with:
+          # The default release checkout does not have to sit on the tag; pinning
+          # the ref is what makes COMMIT the revision actually released.
+          ref: ${{ github.event.release.tag_name }}
+          # Full history so `git rev-list` can measure the distance to the tag.
+          fetch-depth: 0
+
+      - name: Resolve build stamp
+        id: meta
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::Release carries no tag; refusing to publish an image that cannot be traced back to a release." >&2
+            exit 1
+          fi
+          if [ ! -f ./Dockerfile ]; then
+            echo "::error::./Dockerfile is missing at the repository root." >&2
+            exit 1
+          fi
+
+          COMMIT="$(git rev-parse --short=7 HEAD)"
+          # 0 when HEAD is exactly the tag; non-zero only for a release cut from
+          # a commit the tag does not point at.
+          DISTANCE="$(git rev-list --count "${TAG}..HEAD" 2>/dev/null || echo 0)"
+
+          {
+            echo "tag=${TAG}"
+            echo "commit=${COMMIT}"
+            echo "distance=${DISTANCE}"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing ${TAG} (commit ${COMMIT}, distance ${DISTANCE})"
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push the agenthub image
+        uses: docker/build-push-action@v6
+        with:
+          # The console bundle, cmd/, internal/ and migrations/ are copied from
+          # the repository root, so the context is "." and not a subdirectory.
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          # Names must match the ARGs in Dockerfile exactly, otherwise the binary
+          # silently keeps the dev / unknown sentinels.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.tag }}
+            COMMIT=${{ steps.meta.outputs.commit }}
+            DISTANCE=${{ steps.meta.outputs.distance }}
+            DIRTY=false
+          push: true
+          tags: |
+            ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
+            ariacompute/agenthub-agenthub:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.commit }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}

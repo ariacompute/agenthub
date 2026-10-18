@@ -146,6 +146,17 @@ network where that address does not exist, so the Dockerfile retries
 `GOPROXY` mirror (`https://goproxy.cn,direct`; override with `--build-arg GOPROXY=...`); only when
 both attempts fail does the build stop with an explicit hint.
 
+**Published images.** Publishing a release builds and pushes
+`ariacompute/agenthub-agenthub` to DockerHub (`.github/workflows/release.yml`): `:<release tag>` for
+that release, `:latest` for the newest one. The release tag and its commit go into the image as the
+`VERSION` / `COMMIT` build args, so the image tag and the `version@commit` reported by `/healthz`
+always agree. The workflow needs two repository secrets: `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN`.
+
+```bash
+docker pull ariacompute/agenthub-agenthub:<tag>   # e.g. v0.3.0
+```
+
 **Required for production:**
 
 ```bash

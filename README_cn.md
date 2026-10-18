@@ -128,6 +128,16 @@ compose 会先拉起 `postgres:16-alpine`，健康检查通过后（pgvector 不
 的重试，并回落默认 `GOPROXY` 镜像（`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；
 两次都失败才带提示报错退出，不会静默装作成功。
 
+**已发布镜像。** 发布 Release 会自动构建并推送 `ariacompute/agenthub-agenthub` 到 DockerHub
+（`.github/workflows/release.yml`）：`:<release tag>` 对应该次发布，`:latest` 指向最新一次发布。
+Release tag 与该 tag 的 commit 会作为 `VERSION` / `COMMIT` 构建参数写进镜像，因此镜像 tag 与
+`/healthz` 上报的 `version@commit` 永远一致。该工作流需要两个仓库 secrets：`DOCKERHUB_USERNAME`
+与 `DOCKERHUB_TOKEN`。
+
+```bash
+docker pull ariacompute/agenthub-agenthub:<tag>   # 例如 v0.3.0
+```
+
 **生产部署必须**：
 
 ```bash
