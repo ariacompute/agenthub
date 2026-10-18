@@ -102,6 +102,14 @@ healthcheck; the response carries a `"database":"up"` field and returns 503 when
 unreachable. The container is **stateless**: migrations ship inside the binary and every byte of
 state lives in the PostgreSQL volume.
 
+The build pulls npm packages and Go modules, so it needs outbound network. Behind a proxy, pass it
+as `BUILD_PROXY` — `make docker-build` takes it from `$HTTP_PROXY` and adds `--network=host`, which
+is what makes a host-side `127.0.0.1:<port>` resolve inside the build container. A compose build
+runs on the bridge network where that address does not exist, so the Dockerfile retries
+`bun install` and `go mod download` with the proxy variables cleared and falls back to the default
+`GOPROXY` mirror (`https://goproxy.cn,direct`; override with `--build-arg GOPROXY=...`); only when
+both attempts fail does the build stop with an explicit hint.
+
 **Required for production:**
 
 ```bash

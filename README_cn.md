@@ -83,6 +83,13 @@ docker compose --profile dev up -d   # 额外起 web，:5173
 运行时以**非 root 用户**（uid 10001）启动，`/healthz` 为健康检查端点（响应含 `"database":"up"` 字段，
 库不可达时返回 503）。容器**无状态**：迁移随二进制内嵌，状态全在 PostgreSQL 卷里。
 
+构建需要拉 npm 包与 Go 模块，即需要出网。走代理时用 `BUILD_PROXY` 传入——`make docker-build`
+从 `$HTTP_PROXY` 取值并追加 `--network=host`，容器内的 `127.0.0.1:<port>` 才会指向宿主机代理。
+compose 构建跑在 bridge 网络上，该地址不存在，因此 `Dockerfile` 对 `bun install` 与
+`go mod download` 各做一次「清掉代理变量」的重试，并回落默认 `GOPROXY` 镜像
+（`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；两次都失败才带提示报错退出，
+不会静默装作成功。
+
 **生产部署必须**：
 
 ```bash

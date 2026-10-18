@@ -124,6 +124,7 @@ make run              # db-up + go run（默认 :3500）
 make build            # web-build + go build → bin/agenthub-server
 make version          # 打印本次构建将写入的 version（git describe）
 make docker-build     # docker build --build-arg VERSION=$(make version)
+make compose-build    # 同一镜像改走 compose 构建（含 git 打标转发）
 make test             # go test -race ./...（含DB 门控用例）
 make test-integration # 只跑 Integration 用例
 make vet / make fmt
@@ -150,6 +151,12 @@ make web-install / make web-dev / make web-build / make web-test
   `ARG COMMIT=unknown` / `ARG DISTANCE=0` / `ARG DIRTY=false` 承接，
   `make docker-build` 或 compose 的 `VERSION` / `COMMIT` / `DISTANCE` / `DIRTY` 传入
   （CI 从干净 checkout 构建时后两者用默认值）。
+- 镜像构建联网：`bun install` 与 `go mod download` 需要出网，代理走 `BUILD_PROXY`
+  （`make docker-build` 从 `$HTTP_PROXY` 取值并加 `--network=host`，容器内 `127.0.0.1:<port>`
+  才指向宿主机代理）。compose 构建跑在 bridge 网络上，该地址不存在，故 `Dockerfile`
+  对这两步各做一次「清掉代理变量」的重试并回落默认 `GOPROXY` 镜像
+  （`https://goproxy.cn,direct`，可用 `--build-arg GOPROXY=…` 覆盖）；两次都失败才报错退出，
+  绝不静默装作成功。
 - 兜底哨兵 `"dev"` / `"unknown"`：未打标的构建在 `/healthz` 上报 `dev`，一眼可辨，
   绝不冒充某个发布号。
 

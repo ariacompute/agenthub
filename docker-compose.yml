@@ -27,7 +27,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # No `network: host` here on purpose: recent Docker refuses it unless the
+      # caller passes `--allow=network.host`, which would break a plain
+      # `docker compose build`. On the bridge network a host-side BUILD_PROXY
+      # (127.0.0.1) is unreachable, so the Dockerfile retries bun install and
+      # `go mod download` with the proxy variables cleared and falls back to the
+      # direct GOPROXY mirror. For a build that really needs the host proxy use
+      # `make docker-build` (it passes --network=host on the command line).
       args:
+        # Outbound proxy for the build. Empty => direct internet connection.
+        #   export BUILD_PROXY=http://127.0.0.1:7897   # e.g. Clash
+        BUILD_PROXY: ${BUILD_PROXY:-}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
         # Reported as "version@commit" in the console and /healthz. Stamp with
         #   VERSION=$(git describe --tags --abbrev=0 --always) \
         #   COMMIT=$(git rev-parse --short=7 HEAD) docker compose build

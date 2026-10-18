@@ -30,11 +30,18 @@ export COMMIT
 export DISTANCE
 export DIRTY
 
+# Image build: the Dockerfile fetches npm packages and Go modules, so it needs
+# outbound network. BUILD_PROXY defaults to whatever the shell already exports
+# ($HTTP_PROXY) — with --network=host the build container can then reach a
+# host-side proxy on 127.0.0.1. Leave it empty for a direct connection.
+BUILD_PROXY ?= $(HTTP_PROXY)
+GOPROXY ?= https://goproxy.cn,direct
+
 # Local compose database (host port 5434 avoids postgres 5432 / bankmind 5433).
 DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable
 export DATABASE_URL
 
-.PHONY: run build test test-integration vet fmt version docker-build \
+.PHONY: run build test test-integration vet fmt version docker-build compose-build \
         db-up db-down db-psql \
         web-install web-dev web-build web-test web-test-watch clean
 
@@ -68,10 +75,22 @@ version:
 # Build the image with the same stamp (see the VERSION / COMMIT / DISTANCE /
 # DIRTY args in Dockerfile). Images are built from a clean checkout by CI, so
 # DISTANCE / DIRTY default to 0 / false there.
+# --network=host is what lets BUILD_PROXY's 127.0.0.1 resolve to the host.
 docker-build:
-	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
+	docker build --network=host \
+	  --build-arg BUILD_PROXY=$(BUILD_PROXY) --build-arg GOPROXY=$(GOPROXY) \
+	  --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
 	  --build-arg DISTANCE=$(DISTANCE) --build-arg DIRTY=$(DIRTY) \
 	  -t agenthub:$(VERSION) .
+
+# Same image, built through compose, with the git stamp forwarded (compose itself
+# cannot read git metadata). The build runs on the bridge network, where a
+# host-side BUILD_PROXY (127.0.0.1) does not resolve; the Dockerfile falls back
+# to a direct download in that case, so this succeeds with or without a proxy.
+compose-build:
+	VERSION=$(VERSION) COMMIT=$(COMMIT) DISTANCE=$(DISTANCE) DIRTY=$(DIRTY) \
+	BUILD_PROXY=$(BUILD_PROXY) GOPROXY=$(GOPROXY) \
+	docker compose build agenthub
 
 db-up:
 	docker compose up -d postgres
