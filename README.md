@@ -211,6 +211,46 @@ every boot and never has its password overwritten, so a password changed in the 
 restart. Configuration is passed through the compose `.env` file or environment variables;
 `AGENTHUB_HTTP_PORT` changes the published host port.
 
+## Desktop
+
+`desktop/` is a **Tauri v2** shell for Windows, macOS (arm64 and x64) and Linux. It carries no
+backend and no database of its own: it embeds the same console the server serves, and opens it
+against an agenthub server you point it at. Everything you can do in a browser — registry, task
+trace, topology, administration, SSE streams, downloads — works the same way inside the window.
+
+```bash
+make desktop-install  # cd desktop && bun install
+make desktop-dev      # builds the console, then runs `tauri dev`
+make desktop-build    # builds the console, then runs `tauri build`
+make desktop-test     # cd desktop/src-tauri && cargo test
+```
+
+**Connecting.** The first start shows the connection page: enter the server address
+(`https://hub.example.com`), tick *ignore self-signed certificates* only for a server on your own
+network, choose one of the 13 languages, and press **Connect** — the shell probes `/healthz` before
+it saves anything. After that the tray carries *Open console*, *Connection settings…*, *About* and
+*Quit*; closing the window parks the app in the tray instead of ending it. The setting lives in the
+shell's own `config.json` under the per-user config directory.
+
+**How it works.** The window loads `http://127.0.0.1:<random port>`, where a loopback reverse proxy
+serves the embedded console and forwards `/api/*`, `/a2a`, `/healthz` and `/.well-known/*` to the
+configured server. That is what lets the console keep its relative URLs, its `HttpOnly` session
+cookie, its server-sent event streams and its downloads — neither the console nor the Go server
+changes by a byte. The proxy strips `Secure` and `Domain` from `Set-Cookie` (a plain-http loopback
+origin cannot keep them), pins every cookie to `Path=/`, streams responses without buffering, and
+rewrites redirects that point back at the server so an OAuth round trip stays inside the app.
+
+**Unsigned builds.** The published binaries are not code-signed, so the first launch is stopped by
+the platform:
+
+| Platform | What to do |
+| --- | --- |
+| macOS | *System Settings → Privacy & Security → Open Anyway*, or `xattr -d com.apple.quarantine /Applications/agenthub.app` after copying it out of the archive |
+| Windows | SmartScreen: *More info → Run anyway* |
+| Linux | `chmod +x agenthub-*.AppImage` (or install the `.deb`) |
+
+Every asset ships with a `SHA256SUMS.txt` next to it.
+
 ## Tests
 
 Unit and integration suites:

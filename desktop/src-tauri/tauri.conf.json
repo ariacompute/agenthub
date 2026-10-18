@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "agenthub",
+  "version": "0.1.0",
+  "identifier": "ai.ariacompute.agenthub.desktop",
+  "build": {
+    "frontendDist": "../frontend-stub"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "agenthub",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "visible": false
+      }
+    ],
+    "trayIcon": {
+      "id": "main",
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false,
+      "title": "agenthub"
+    },
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "dmg", "appimage", "deb"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "copyright": "Copyright (c) 2026 Aria Compute",
+    "category": "DeveloperTool",
+    "shortDescription": "agenthub console",
+    "longDescription": "Desktop shell for the agenthub A2A console: connect it to an agenthub server and use the registry, task trace, topology and administration screens from your desktop."
+  }
+}

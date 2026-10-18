@@ -1,0 +1,17 @@
+{
+  "name": "agenthub-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tauri v2 shell that opens the agenthub console against a server you point it at",
+  "scripts": {
+    "icons": "tauri icon assets/app-icon.png",
+    "stamp": "bun scripts/stamp.mjs",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

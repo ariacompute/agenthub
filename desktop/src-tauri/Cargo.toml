@@ -1,0 +1,39 @@
+[package]
+# The package name is what the produced binary is called (Tauri v2 has no
+# separate mainBinaryName), so it is the plain product name: agenthub.exe in the
+# Windows portable archive, agenthub in the Linux one.
+name = "agenthub"
+version = "0.1.0"
+description = "Desktop shell for the agenthub console: connects to an agenthub server, opens the console"
+authors = ["agenthub"]
+edition = "2021"
+rust-version = "1.77"
+
+# The desktop app is its own crate, deliberately outside any workspace: the rest
+# of agenthub is Go, and the shell must stay buildable on its own.
+[lib]
+name = "agenthub_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "net", "sync", "time"] }
+axum = { version = "0.8", features = ["macros"] }
+# rustls rather than the platform TLS stack: one implementation to reason about
+# on all three platforms, and no system OpenSSL to ship.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "json", "stream"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
+sys-locale = "0.3"
+url = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

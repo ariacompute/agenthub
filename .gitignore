@@ -15,3 +15,9 @@ node_modules/
 web/dist/
 backend/static/
 *.local
+
+# Desktop (Tauri v2)
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/node_modules/
+desktop/bun.lock

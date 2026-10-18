@@ -1,7 +1,11 @@
-name: Release container image
+name: Release
 
-# Build and publish the agenthub image to DockerHub whenever a release is
-# published:
+# Publish an agenthub release. Two jobs, independent and in parallel:
+#
+#   build-and-publish  the container image on DockerHub (unchanged)
+#   desktop            Windows / macOS / Linux desktop builds as release assets
+#
+# Image:
 #
 #   ariacompute/agenthub-agenthub:<release tag>   pinned to that release
 #   ariacompute/agenthub-agenthub:latest          whatever was released last
@@ -25,14 +29,23 @@ name: Release container image
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
 #   - DOCKERHUB_USERNAME: DockerHub account / org name
 #   - DOCKERHUB_TOKEN:    DockerHub access token with write permission
+#
+# Desktop: each matrix cell builds one platform/architecture and attaches a
+# native installer (attached by tauri-action) plus a portable archive and a
+# SHA256SUMS.txt covering both (attached by action-gh-release). The builds are
+# not code-signed — no certificate secrets are configured — so every asset name
+# and the release notes say so; see README "Desktop" for how to open an
+# unsigned build on macOS and Windows.
 on:
   release:
     types: [published]
 
 # One publish at a time: a newer release cancels an in-progress one, so :latest
-# can never be overwritten by an older release that happens to finish later.
+# can never be overwritten by an older release that happens to finish later,
+# and a release's assets are never a mix of two runs. The group used to be
+# named after the image alone; it now guards the desktop builds too.
 concurrency:
-  group: release-image
+  group: release
   cancel-in-progress: true
 
 jobs:
@@ -108,3 +121,242 @@ jobs:
             org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
             org.opencontainers.image.revision=${{ steps.meta.outputs.commit }}
             org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+
+  # ---------------------------------------------------------------- desktop --
+  #
+  # The desktop shell is a GUI with no backend: it embeds the console bundle and
+  # talks to whichever agenthub server the user points it at. Every cell of the
+  # matrix is one platform/architecture pair and publishes:
+  #
+  #   a native installer   .msi (Windows) / .dmg (macOS) / .AppImage + .deb (Linux)
+  #   a portable archive   .zip (Windows) / .tar.gz (macOS, Linux)
+  #   SHA256SUMS.txt       covering both, written next to the archive
+  #
+  # macOS gets two cells rather than one universal build: arm64 and x64 are
+  # built natively on their own runner, which avoids the SDK pitfalls of
+  # cross-compiling a WKWebView app.
+  desktop:
+    name: Desktop ${{ matrix.platform }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      # Attaching assets to the published release needs write. The image job
+      # above deliberately keeps contents: read.
+      contents: write
+
+    strategy:
+      # One platform failing must not hide the other three from the release.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            target: ''
+            args: --bundles appimage,deb
+          - os: macos-latest
+            platform: macos
+            arch: aarch64
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles dmg
+          - os: macos-13
+            platform: macos
+            arch: x64
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles dmg
+          - os: windows-latest
+            platform: windows
+            arch: x86_64
+            target: ''
+            args: --bundles msi
+
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Resolve the release stamp
+        id: meta
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::Release carries no tag; refusing to publish desktop builds that cannot be traced back to a release." >&2
+            exit 1
+          fi
+          # The tag carries the "v" prefix; Cargo and tauri.conf.json want the
+          # bare version, so "installer version === release tag" still holds.
+          VERSION="${TAG#v}"
+          COMMIT="$(git rev-parse --short=7 HEAD)"
+          {
+            echo "version=${VERSION}"
+            echo "commit=${COMMIT}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building desktop ${VERSION} (commit ${COMMIT})"
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Empty for the native cells; the macOS cells add their own triple.
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install the Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install the shell's JavaScript tooling
+        working-directory: desktop
+        run: bun install
+
+      # The version has to be written before cargo runs: it is both the package
+      # version and what the installer reports.
+      - name: Stamp the release version
+        working-directory: desktop
+        shell: bash
+        run: bun run stamp "${{ steps.meta.outputs.version }}"
+
+      # The console is embedded by rust-embed at compile time, so it must exist
+      # before `tauri build`. Same two commands as `make web-build`.
+      - name: Build the console
+        working-directory: web
+        shell: bash
+        run: |
+          bun install
+          bun run build
+          test -f ../backend/static/index.html
+
+      - name: Build the desktop app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Read by option_env! in src-tauri/src/lib.rs, so "About" reports the
+          # revision this build came from.
+          AGENTHUB_COMMIT: ${{ steps.meta.outputs.commit }}
+        with:
+          projectPath: desktop
+          tauriScript: bun run tauri
+          args: ${{ matrix.args }}
+          # Attach to the release that triggered this run. Without this the
+          # action would create a second release of its own.
+          releaseId: ${{ github.event.release.id }}
+          # There is no updater plugin, so there is nothing to feed a
+          # latest.json.
+          uploadUpdaterJson: false
+
+      - name: Package the portable archive (Linux, macOS)
+        if: matrix.platform != 'windows'
+        shell: bash
+        working-directory: desktop/src-tauri
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A --target build lands under target/<triple>/release, not
+          # target/release.
+          BIN_DIR="target/release"
+          if [ -n "${{ matrix.target }}" ]; then
+            BIN_DIR="target/${{ matrix.target }}/release"
+          fi
+          BUNDLE_DIR="$BIN_DIR/bundle"
+          OUT="${GITHUB_WORKSPACE}/desktop-artifacts"
+          mkdir -p "$OUT"
+
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            tar -czf "$OUT/agenthub-${VERSION}-macos-${{ matrix.arch }}.tar.gz" \
+              -C "$BUNDLE_DIR/macos" agenthub.app
+          else
+            # The binary is named after the cargo package, which is not the
+            # product name; accept either so renaming the package cannot break
+            # the release.
+            BIN=""
+            for candidate in agenthub agenthub-desktop; do
+              [ -f "$BIN_DIR/$candidate" ] && BIN="$candidate"
+            done
+            if [ -z "$BIN" ]; then
+              echo "::error::no desktop binary under $BIN_DIR" >&2
+              exit 1
+            fi
+            tar -czf "$OUT/agenthub-${VERSION}-linux-${{ matrix.arch }}.tar.gz" \
+              -C "$BIN_DIR" "$BIN"
+          fi
+
+      - name: Package the portable archive (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $out = "$env:GITHUB_WORKSPACE/desktop-artifacts"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $exe = Get-ChildItem -Path "desktop/src-tauri/target/release" -Filter "agenthub*.exe" |
+            Where-Object { $_.Name -notlike "*.dll" } | Select-Object -First 1
+          if (-not $exe) { throw "no desktop executable under desktop/src-tauri/target/release" }
+          Compress-Archive -Path $exe.FullName `
+            -DestinationPath "$out/agenthub-$env:VERSION-windows-${{ matrix.arch }}.zip"
+
+      - name: Write the checksums (Linux, macOS)
+        if: matrix.platform != 'windows'
+        shell: bash
+        working-directory: desktop/src-tauri
+        run: |
+          set -euo pipefail
+          BIN_DIR="${GITHUB_WORKSPACE}/desktop/src-tauri/target/release"
+          if [ -n "${{ matrix.target }}" ]; then
+            BIN_DIR="${GITHUB_WORKSPACE}/desktop/src-tauri/target/${{ matrix.target }}/release"
+          fi
+          OUT="${GITHUB_WORKSPACE}/desktop-artifacts"
+          # macOS ships shasum, Linux sha256sum; both print "<hash>  <file>".
+          sum() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              (cd "$1" && sha256sum "$2")
+            else
+              (cd "$1" && shasum -a 256 "$2")
+            fi
+          }
+          # The installers keep the name tauri-action attached them under, so
+          # the sums in this file match the assets already on the release.
+          for file in "$BIN_DIR"/bundle/*/*.dmg "$BIN_DIR"/bundle/*/*.AppImage "$BIN_DIR"/bundle/*/*.deb; do
+            [ -f "$file" ] || continue
+            sum "$(dirname "$file")" "$(basename "$file")"
+          done > "$OUT/SHA256SUMS.txt"
+          (cd "$OUT" && sum "$OUT" agenthub-*.tar.gz >> SHA256SUMS.txt)
+          cat "$OUT/SHA256SUMS.txt"
+
+      - name: Write the checksums (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $out = "$env:GITHUB_WORKSPACE/desktop-artifacts"
+          $lines = @()
+          foreach ($file in Get-ChildItem -Path "desktop/src-tauri/target/release/bundle" -Recurse -File -Include *.msi) {
+            $lines += "$((Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower())  $($file.Name)"
+          }
+          foreach ($file in Get-ChildItem -Path $out -File -Filter *.zip) {
+            $lines += "$((Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower())  $($file.Name)"
+          }
+          if ($lines.Count -eq 0) { throw "nothing to checksum" }
+          Set-Content -Path "$out/SHA256SUMS.txt" -Value $lines -Encoding utf8
+          Get-Content "$out/SHA256SUMS.txt"
+
+      - name: Attach the archive and the checksums to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The release that triggered this run; no new release, no body edit.
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            desktop-artifacts/*
+          fail_on_unmatched_files: true

@@ -189,6 +189,41 @@ AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 因此在控制台改过的密码能跨重启保留。配置通过 compose 的 `.env` 或环境变量传入，
 `AGENTHUB_HTTP_PORT` 可改宿主端口。
 
+## 桌面端
+
+`desktop/` 是 **Tauri v2** 外壳，覆盖 Windows、macOS（arm64 与 x64）与 Linux。它**不带后端、
+不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着你指定的 agenthub 服务端打开。浏览器里能做的
+一切——注册中心、任务追踪、拓扑、管理、SSE 实时流、归档下载——在窗口里同样可用。
+
+```bash
+make desktop-install  # cd desktop && bun install
+make desktop-dev      # 先构建控制台，再 tauri dev
+make desktop-build    # 先构建控制台，再 tauri build
+make desktop-test     # cd desktop/src-tauri && cargo test
+```
+
+**连接。** 首次启动进入连接页：填写服务端地址（如 `https://hub.example.com`）、
+「忽略自签证书」只对你自己网络内的服务端勾选、选一个 13 语之一，然后点**连接**——
+外壳会先探 `/healthz` 再落盘。之后托盘常驻四项：**打开控制台 / 连接设置… / 关于 / 退出**；
+关闭窗口只是收进托盘，不会退出。配置存于外壳自有的 `config.json`（当前用户配置目录下）。
+
+**原理。** 窗口加载 `http://127.0.0.1:<随机端口>`，那里有一个环回反向代理：托管内嵌的控制台，
+并把 `/api/*`、`/a2a`、`/healthz`、`/.well-known/*` 转发到配置的服务端。正因如此，控制台的相对
+URL、`HttpOnly` 会话 cookie、SSE 事件流与文件下载才能原样工作——控制台与 Go 服务端**一行都不用改**。
+代理会剥掉 `Set-Cookie` 里的 `Secure` 与 `Domain`（明文 http 的环回源存不下它们）、把 cookie 统一
+钉到 `Path=/`、转发时不缓冲（否则事件流只在结束时一次性到达），并把指回服务端的重定向改写回环回
+源，让 OAuth 往返留在应用内。
+
+**未签名产物。** 发布的二进制未做代码签名，首次启动会被系统拦下：
+
+| 平台 | 绕行方式 |
+| --- | --- |
+| macOS | *系统设置 → 隐私与安全性 → 仍要打开*；或解压后执行 `xattr -d com.apple.quarantine /Applications/agenthub.app` |
+| Windows | SmartScreen 选 *更多信息 → 仍要运行* |
+| Linux | `chmod +x agenthub-*.AppImage`（或安装 `.deb`） |
+
+每个产物旁边都附带 `SHA256SUMS.txt`。
+
 ## 测试
 
 单元与集成套件：

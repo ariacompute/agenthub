@@ -44,7 +44,8 @@ export DATABASE_URL
 .PHONY: run build test test-integration vet fmt version up down ports \
         docker-build compose-build \
         db-up db-down db-psql \
-        web-install web-dev web-build web-test web-test-watch clean
+        web-install web-dev web-build web-test web-test-watch clean \
+        desktop-install desktop-dev desktop-build desktop-test
 
 run: db-up
 	go run -ldflags="$(LDFLAGS)" ./cmd/$(BINARY)
@@ -139,6 +140,27 @@ web-test: web-install
 
 web-test-watch:
 	cd $(WEB) && bunx vitest
+
+# Desktop shell (Tauri v2, Rust). It has no backend of its own: it opens the
+# console against a server the user points it at. `desktop-build` therefore
+# builds the console first — the shell embeds `backend/static` at compile time.
+DESKTOP := desktop
+
+desktop-install:
+	cd $(DESKTOP) && bun install
+
+# The console is embedded at compile time, so it has to exist before either
+# `tauri dev` or `tauri build` runs. Building it here rather than through
+# beforeDevCommand / beforeBuildCommand keeps the shell out of it: one command
+# that behaves the same on Linux, macOS and Windows.
+desktop-dev: desktop-install web-build
+	cd $(DESKTOP) && bun run dev
+
+desktop-build: desktop-install web-build
+	cd $(DESKTOP) && bun run build
+
+desktop-test: desktop-install
+	cd $(DESKTOP)/src-tauri && cargo test
 
 clean:
 	rm -rf bin $(STATIC) $(WEB)/dist
