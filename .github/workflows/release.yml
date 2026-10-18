@@ -260,39 +260,43 @@ jobs:
       - name: Package the portable archive (Linux, macOS)
         if: matrix.platform != 'windows'
         shell: bash
-        working-directory: desktop/src-tauri
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          # A --target build lands under target/<triple>/release, not
-          # target/release.
-          BIN_DIR="target/release"
-          if [ -n "${{ matrix.target }}" ]; then
-            BIN_DIR="target/${{ matrix.target }}/release"
-          fi
-          BUNDLE_DIR="$BIN_DIR/bundle"
+          # Where the build lands is the tauri CLI's business: `--target <triple>`
+          # puts it under target/<triple>/release, a native build under
+          # target/release, and which bundle kinds exist decides what sits in
+          # `bundle/`. Look the artefact up instead of reconstructing the path —
+          # a guessed path is what broke the aarch64 cell.
+          TARGET_ROOT="${GITHUB_WORKSPACE}/desktop/src-tauri/target"
           OUT="${GITHUB_WORKSPACE}/desktop-artifacts"
           mkdir -p "$OUT"
-
+          NAME="agenthub-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
           if [ "${{ matrix.platform }}" = "macos" ]; then
-            tar -czf "$OUT/agenthub-${VERSION}-macos-${{ matrix.arch }}.tar.gz" \
-              -C "$BUNDLE_DIR/macos" agenthub.app
-          else
-            # The binary is named after the cargo package, which is not the
-            # product name; accept either so renaming the package cannot break
-            # the release.
-            BIN=""
-            for candidate in agenthub agenthub-desktop; do
-              [ -f "$BIN_DIR/$candidate" ] && BIN="$candidate"
-            done
-            if [ -z "$BIN" ]; then
-              echo "::error::no desktop binary under $BIN_DIR" >&2
+            # `| head -1` can close the pipe early and SIGPIPE find; with
+            # pipefail that would fail the step for a reason that has nothing to
+            # do with the build, so the pipeline's status is not what decides.
+            APP="$(find "$TARGET_ROOT" -maxdepth 6 -type d -name '*.app' | head -1 || true)"
+            if [ -z "$APP" ]; then
+              echo "::error::no app bundle under $TARGET_ROOT" >&2
+              find "$TARGET_ROOT" -maxdepth 6 -type d | sort | head -40 >&2
               exit 1
             fi
-            tar -czf "$OUT/agenthub-${VERSION}-linux-${{ matrix.arch }}.tar.gz" \
-              -C "$BIN_DIR" "$BIN"
+            tar -czf "$OUT/${NAME}.tar.gz" -C "$(dirname "$APP")" "$(basename "$APP")"
+          else
+            # The binary is named after the cargo package, not the product name;
+            # anything executable without an extension is it.
+            BIN="$(find "$TARGET_ROOT" -maxdepth 5 -type f -name 'agenthub*' \
+              ! -name '*.*' -perm -u+x | head -1 || true)"
+            if [ -z "$BIN" ]; then
+              echo "::error::no desktop binary under $TARGET_ROOT" >&2
+              find "$TARGET_ROOT" -maxdepth 5 | sort | head -40 >&2
+              exit 1
+            fi
+            tar -czf "$OUT/${NAME}.tar.gz" -C "$(dirname "$BIN")" "$(basename "$BIN")"
           fi
+          ls -l "$OUT"
 
       - name: Package the portable archive (Windows)
         if: matrix.platform == 'windows'
@@ -302,22 +306,21 @@ jobs:
         run: |
           $out = "$env:GITHUB_WORKSPACE/desktop-artifacts"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          $exe = Get-ChildItem -Path "desktop/src-tauri/target/release" -Filter "agenthub*.exe" |
-            Where-Object { $_.Name -notlike "*.dll" } | Select-Object -First 1
-          if (-not $exe) { throw "no desktop executable under desktop/src-tauri/target/release" }
+          # Recurse for the same reason as the Unix step: never assume which
+          # target directory the CLI chose.
+          $exe = Get-ChildItem -Path "desktop/src-tauri/target" -Recurse -File `
+            -Filter "agenthub*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "no desktop executable under desktop/src-tauri/target" }
           Compress-Archive -Path $exe.FullName `
             -DestinationPath "$out/agenthub-$env:VERSION-windows-${{ matrix.arch }}.zip"
+          Get-ChildItem $out
 
       - name: Write the checksums (Linux, macOS)
         if: matrix.platform != 'windows'
         shell: bash
-        working-directory: desktop/src-tauri
         run: |
           set -euo pipefail
-          BIN_DIR="${GITHUB_WORKSPACE}/desktop/src-tauri/target/release"
-          if [ -n "${{ matrix.target }}" ]; then
-            BIN_DIR="${GITHUB_WORKSPACE}/desktop/src-tauri/target/${{ matrix.target }}/release"
-          fi
+          TARGET_ROOT="${GITHUB_WORKSPACE}/desktop/src-tauri/target"
           OUT="${GITHUB_WORKSPACE}/desktop-artifacts"
           # macOS ships shasum, Linux sha256sum; both print "<hash>  <file>".
           sum() {
@@ -327,12 +330,19 @@ jobs:
               (cd "$1" && shasum -a 256 "$2")
             fi
           }
-          # The installers keep the name tauri-action attached them under, so
-          # the sums in this file match the assets already on the release.
-          for file in "$BIN_DIR"/bundle/*/*.dmg "$BIN_DIR"/bundle/*/*.AppImage "$BIN_DIR"/bundle/*/*.deb; do
-            [ -f "$file" ] || continue
-            sum "$(dirname "$file")" "$(basename "$file")"
-          done > "$OUT/SHA256SUMS.txt"
+          # The installers keep the name tauri-action attached them under, so the
+          # sums in this file match the assets already on the release. They are
+          # found by name rather than by a guessed bundle directory.
+          : > "$OUT/SHA256SUMS.txt"
+          find "$TARGET_ROOT" -path '*/bundle/*' -type f \
+              \( -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \) -print \
+            | sort | while read -r file; do
+                sum "$(dirname "$file")" "$(basename "$file")" >> "$OUT/SHA256SUMS.txt"
+              done
+          if [ ! -s "$OUT/SHA256SUMS.txt" ]; then
+            echo "::error::no installer to checksum under $TARGET_ROOT" >&2
+            exit 1
+          fi
           (cd "$OUT" && sum "$OUT" agenthub-*.tar.gz >> SHA256SUMS.txt)
           cat "$OUT/SHA256SUMS.txt"
 
@@ -342,7 +352,7 @@ jobs:
         run: |
           $out = "$env:GITHUB_WORKSPACE/desktop-artifacts"
           $lines = @()
-          foreach ($file in Get-ChildItem -Path "desktop/src-tauri/target/release/bundle" -Recurse -File -Include *.msi) {
+          foreach ($file in Get-ChildItem -Path "desktop/src-tauri/target" -Recurse -File -Include *.msi) {
             $lines += "$((Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower())  $($file.Name)"
           }
           foreach ($file in Get-ChildItem -Path $out -File -Filter *.zip) {
