@@ -292,7 +292,6 @@
           </svg>
         </div>
         <div class="brand-name">agenthub</div>
-        <p class="brand-sub" id="subtitle"></p>
       </header>
 
       <section class="card" id="form-card">
@@ -446,7 +445,6 @@
         if (boot.page === 'about') {
           el('form-card').hidden = true
           el('about-card').hidden = false
-          el('subtitle').textContent = t('trayAbout')
           el('value-version').textContent = boot.version
           el('value-build').textContent = boot.commit
           el('value-server').textContent = boot.serverUrl || '—'
@@ -455,7 +453,6 @@
           }
           return
         }
-        el('subtitle').textContent = t('connectSubtitle')
         el('server').value = boot.serverUrl || ''
         el('insecure').checked = !!boot.insecure
         el('later').hidden = !!boot.configured

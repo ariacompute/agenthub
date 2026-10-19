@@ -33,10 +33,6 @@ pub const EN: &[(&str, &str)] = &[
     ("trayAbout", "About"),
     ("trayQuit", "Quit"),
     ("connectTitle", "Connect to agenthub"),
-    (
-        "connectSubtitle",
-        "Point this app at an agenthub server, and the console opens against it.",
-    ),
     ("fieldServer", "Server address"),
     ("fieldInsecure", "Ignore self-signed certificates"),
     (
@@ -70,7 +66,7 @@ pub const ZH: &[(&str, &str)] = &[
     ("trayAbout", "关于"),
     ("trayQuit", "退出"),
     ("connectTitle", "连接到 agenthub"),
-    ("connectSubtitle", "把这个应用指向一个 agenthub 服务端，控制台就会在该服务端上打开。"),
+
     ("fieldServer", "服务端地址"),
     ("fieldInsecure", "忽略自签证书"),
     ("fieldInsecureNote", "仅用于你自己网络中的服务端：开启后应用不再校验对方身份。"),
@@ -98,7 +94,7 @@ pub const ZH_TW: &[(&str, &str)] = &[
     ("trayAbout", "關於"),
     ("trayQuit", "結束"),
     ("connectTitle", "連線到 agenthub"),
-    ("connectSubtitle", "將這個應用指向一個 agenthub 伺服器，主控台就會在該伺服器上開啟。"),
+
     ("fieldServer", "伺服器位址"),
     ("fieldInsecure", "忽略自簽憑證"),
     ("fieldInsecureNote", "僅適用於你自己網路中的伺服器：開啟後應用不再驗證對方身分。"),
@@ -126,7 +122,7 @@ pub const ES: &[(&str, &str)] = &[
     ("trayAbout", "Acerca de"),
     ("trayQuit", "Salir"),
     ("connectTitle", "Conectarse a agenthub"),
-    ("connectSubtitle", "Apunta esta aplicación a un servidor agenthub y la consola se abrirá en él."),
+
     ("fieldServer", "Dirección del servidor"),
     ("fieldInsecure", "Ignorar certificados autofirmados"),
     (
@@ -160,7 +156,7 @@ pub const FR: &[(&str, &str)] = &[
     ("trayAbout", "À propos"),
     ("trayQuit", "Quitter"),
     ("connectTitle", "Se connecter à agenthub"),
-    ("connectSubtitle", "Pointez cette application vers un serveur agenthub : la console s'ouvre dessus."),
+
     ("fieldServer", "Adresse du serveur"),
     ("fieldInsecure", "Ignorer les certificats auto-signés"),
     (
@@ -194,10 +190,6 @@ pub const DE: &[(&str, &str)] = &[
     ("trayAbout", "Über"),
     ("trayQuit", "Beenden"),
     ("connectTitle", "Mit agenthub verbinden"),
-    (
-        "connectSubtitle",
-        "Verweise diese App auf einen agenthub-Server, dann öffnet sich die Konsole dagegen.",
-    ),
     ("fieldServer", "Serveradresse"),
     ("fieldInsecure", "Selbstsignierte Zertifikate ignorieren"),
     (
@@ -231,7 +223,7 @@ pub const IT: &[(&str, &str)] = &[
     ("trayAbout", "Informazioni"),
     ("trayQuit", "Esci"),
     ("connectTitle", "Connettersi ad agenthub"),
-    ("connectSubtitle", "Indirizza questa app a un server agenthub: la console si aprirà su di esso."),
+
     ("fieldServer", "Indirizzo del server"),
     ("fieldInsecure", "Ignora i certificati autofirmati"),
     (
@@ -265,7 +257,7 @@ pub const RU: &[(&str, &str)] = &[
     ("trayAbout", "О программе"),
     ("trayQuit", "Выйти"),
     ("connectTitle", "Подключиться к agenthub"),
-    ("connectSubtitle", "Укажите сервер agenthub — и консоль откроется на нём."),
+
     ("fieldServer", "Адрес сервера"),
     ("fieldInsecure", "Игнорировать самоподписанные сертификаты"),
     (
@@ -299,7 +291,7 @@ pub const JA: &[(&str, &str)] = &[
     ("trayAbout", "このアプリについて"),
     ("trayQuit", "終了"),
     ("connectTitle", "agenthub に接続"),
-    ("connectSubtitle", "agenthub サーバーを指定すると、そのサーバーに対してコンソールが開きます。"),
+
     ("fieldServer", "サーバーアドレス"),
     ("fieldInsecure", "自己署名証明書を無視する"),
     (
@@ -333,7 +325,7 @@ pub const KO: &[(&str, &str)] = &[
     ("trayAbout", "정보"),
     ("trayQuit", "종료"),
     ("connectTitle", "agenthub에 연결"),
-    ("connectSubtitle", "agenthub 서버를 지정하면 그 서버를 대상으로 콘솔이 열립니다."),
+
     ("fieldServer", "서버 주소"),
     ("fieldInsecure", "자체 서명 인증서 무시"),
     (
@@ -367,7 +359,7 @@ pub const PT: &[(&str, &str)] = &[
     ("trayAbout", "Sobre"),
     ("trayQuit", "Sair"),
     ("connectTitle", "Ligar ao agenthub"),
-    ("connectSubtitle", "Aponte esta aplicação a um servidor agenthub e a consola abre-se contra ele."),
+
     ("fieldServer", "Endereço do servidor"),
     ("fieldInsecure", "Ignorar certificados autoassinados"),
     (
@@ -401,7 +393,7 @@ pub const AR: &[(&str, &str)] = &[
     ("trayAbout", "حول"),
     ("trayQuit", "خروج"),
     ("connectTitle", "الاتصال بـ agenthub"),
-    ("connectSubtitle", "وجّه هذا التطبيق إلى خادم agenthub، وستفتح لوحة التحكم عليه."),
+
     ("fieldServer", "عنوان الخادم"),
     ("fieldInsecure", "تجاهل الشهادات الموقّعة ذاتيًا"),
     (
@@ -435,7 +427,7 @@ pub const HI: &[(&str, &str)] = &[
     ("trayAbout", "परिचय"),
     ("trayQuit", "बंद करें"),
     ("connectTitle", "agenthub से कनेक्ट करें"),
-    ("connectSubtitle", "इस ऐप को किसी agenthub सर्वर की ओर इंगित करें, कंसोल उसी पर खुलता है।"),
+
     ("fieldServer", "सर्वर पता"),
     ("fieldInsecure", "स्व-हस्ताक्षरित प्रमाणपत्र अनदेखा करें"),
     (
