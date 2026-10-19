@@ -133,7 +133,7 @@ func TestExportAgentCardAndMCP(t *testing.T) {
 	if _, err := reg.Upsert(&Entry{Kind: KindMCP, Name: "hr-mcp", Transport: TransportStreamableHTTP}); err != nil {
 		t.Fatal(err)
 	}
-	card := AgentCard(reg, "http://localhost:3500", "0.1.0", "0.3.0")
+	card := AgentCard(reg, "http://localhost:3500", "0.1.0", "1.0.0")
 	if len(card.Skills) != 2 {
 		t.Fatalf("skills = %+v", card.Skills)
 	}

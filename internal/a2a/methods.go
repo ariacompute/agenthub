@@ -2,7 +2,8 @@ package a2a
 
 import "strings"
 
-// A2A method names (v0.2) plus the v0.1 aliases kept for compatibility.
+// A2A method names (v1.0, unchanged since v0.2) plus the v0.1 aliases kept for
+// compatibility.
 const (
 	MethodMessageSend   = "message/send"
 	MethodMessageStream = "message/stream"
@@ -17,14 +18,15 @@ const (
 	MethodTasksSendSubscribe = "tasks/sendSubscribe"
 )
 
-// legacyMethods maps a v0.1 method name onto its v0.2 equivalent.
+// legacyMethods maps a v0.1 method name onto its v1.0 equivalent.
 var legacyMethods = map[string]string{
 	MethodTasksSend:          MethodMessageSend,
 	MethodTasksSendSubscribe: MethodMessageStream,
 }
 
-// Canonical resolves a method name. When legacy is false only v0.2 names are
-// accepted, which is how a strict deployment opts out of the aliases.
+// Canonical resolves a method name. When legacy is false only the current
+// (v1.0) names are accepted, which is how a strict deployment opts out of the
+// aliases.
 func Canonical(method string, legacy bool) (string, bool) {
 	method = strings.TrimSpace(method)
 	if method == "" {

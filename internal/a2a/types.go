@@ -123,7 +123,7 @@ func (m Message) Text() string {
 	return string(b)
 }
 
-// Context returns the A2A v0.2 context id, falling back to the v0.1 session id.
+// Context returns the A2A v1.0 context id, falling back to the v0.1 session id.
 func (m Message) Context() string {
 	if m.ContextID != "" {
 		return m.ContextID

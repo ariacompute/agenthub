@@ -27,7 +27,7 @@ func a2aServer(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/.well-known/agent-card.json":
-			_, _ = w.Write([]byte(`{"name":"adk-agent","version":"1.0.0","protocolVersion":"0.3.0","url":"` + "http://" + r.Host + `/a2a"}`))
+			_, _ = w.Write([]byte(`{"name":"adk-agent","version":"1.0.0","protocolVersion":"1.0.0","url":"` + "http://" + r.Host + `/a2a"}`))
 		case "/a2a":
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"agenthub-1","result":{"id":"t1","status":{"state":"completed"},"artifacts":[{"artifactId":"a1","name":"answer","parts":[{"kind":"text","text":"the real answer"}]}]}}`))
 		default:

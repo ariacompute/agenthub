@@ -20,7 +20,7 @@
   "kind_config": {
     "agent": {
       "card_url": "http://localhost:8000/.well-known/agent-card.json",
-      "protocol_version": "a2a/0.3",
+      "protocol_version": "a2a/1.0",
       "capabilities": ["streaming"],
       "skills": ["crew.kickoff"],
       "auth_scheme": "bearer"

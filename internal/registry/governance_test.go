@@ -92,7 +92,7 @@ func TestDiscoverableHidesUnapproved(t *testing.T) {
 	if got := len(MCPServerDescriptions(reg)); got != 1 {
 		t.Fatalf("exported servers = %d, want 1", got)
 	}
-	card := AgentCard(reg, "http://localhost", "0.1.0", "0.3.0")
+	card := AgentCard(reg, "http://localhost", "0.1.0", "1.0.0")
 	if len(card.Skills) != 1 || card.Skills[0].Name != "approved" {
 		t.Fatalf("card skills = %+v", card.Skills)
 	}
