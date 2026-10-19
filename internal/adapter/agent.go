@@ -2,7 +2,10 @@ package adapter
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -166,12 +169,22 @@ func (c *agentConnector) invokeA2A(ctx context.Context, req InvokeRequest) (Invo
 }
 
 func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt string) (string, string, error) {
-	params := a2a.MessageSendParams{Message: a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart(prompt))}
+	// The message is written in the 1.0 shape on purpose. agenthub's own wire
+	// format names the discriminator "type", and a 1.0 server validates "kind"
+	// as a required field — send only what this repo speaks and every remote
+	// agent answers "missing messageId" while the local tests pass, which is
+	// exactly the kind of false negative this client exists to avoid.
+	message := outboundMessage{
+		Kind:      "message",
+		Role:      a2a.RoleUser,
+		MessageID: newMessageID(),
+		Parts:     []outboundPart{textPart(prompt)},
+	}
 	body, err := json.Marshal(map[string]any{
 		"jsonrpc": a2a.JSONRPCVersion,
 		"id":      "agenthub-1",
 		"method":  a2a.MethodMessageSend,
-		"params":  params,
+		"params":  map[string]any{"message": message},
 	})
 	if err != nil {
 		return "", "", &httputil.Error{Code: CodeProviderMalformed}
@@ -212,9 +225,22 @@ func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt strin
 // what lets this client talk to somebody else's server instead of silently
 // dropping an answer it cannot classify.
 type sendPart struct {
-	Kind string `json:"kind"`
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Kind     string         `json:"kind"`
+	Type     string         `json:"type"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// isAnswer reports whether a part carries the agent's answer. ADK publishes the
+// model's reasoning as a part flagged adk_thought; echoing that back as the
+// reply would present thinking as output.
+func (p sendPart) isAnswer() bool {
+	if p.Metadata != nil {
+		if thought, ok := p.Metadata["adk_thought"]; ok && thought == true {
+			return false
+		}
+	}
+	return p.isText()
 }
 
 func (p sendPart) isText() bool {
@@ -222,6 +248,38 @@ func (p sendPart) isText() bool {
 		return p.Type == a2a.PartTypeText
 	}
 	return p.Kind == a2a.PartTypeText
+}
+
+// outboundPart is a part written the way a 1.0 server expects. Both
+// discriminators are sent — "kind" for the specification, "type" for agenthub's
+// own format — because the remote end may be either generation and guessing
+// wrong turns a real answer into "(no text part returned)".
+type outboundPart struct {
+	Kind string         `json:"kind"`
+	Type string         `json:"type,omitempty"`
+	Text string         `json:"text,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
+}
+
+// outboundMessage is the message payload of one message/send call.
+type outboundMessage struct {
+	Kind      string         `json:"kind"`
+	Role      string         `json:"role"`
+	MessageID string         `json:"messageId"`
+	Parts     []outboundPart `json:"parts"`
+}
+
+func textPart(text string) outboundPart {
+	return outboundPart{Kind: a2a.PartTypeText, Type: a2a.PartTypeText, Text: text}
+}
+
+// newMessageID mints the correlation id A2A 1.0 requires on every message.
+func newMessageID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("agenthub-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // textFromSendResult reads the agent's answer out of a message/send result, which
@@ -259,7 +317,7 @@ func textFromSendResult(raw json.RawMessage) (string, string, error) {
 
 func appendParts(b *strings.Builder, parts []sendPart) {
 	for _, p := range parts {
-		if p.isText() && strings.TrimSpace(p.Text) != "" {
+		if p.isAnswer() && strings.TrimSpace(p.Text) != "" {
 			b.WriteString(p.Text)
 		}
 	}
