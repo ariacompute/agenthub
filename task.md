@@ -42,12 +42,18 @@
 ### 4. 适配层（`internal/adapter`）
 
 13. [x] `connector.go`：`Connector` 接口 + `Options` + `For(kind)` 工厂 + 适配器错误码
-14. [x] `mock.go`：确定性基元（`digest`/`pick`/`truncate`/`artifact`/`boundedContext`/`mockHealth`）
+14. [x] `mock.go`：确定性基元（`digest`/`pick`/`truncate`/`artifact`/`boundedContext`/`metaString`）
+    + `MockProviderName` 溯源戳（离线产物一律标注 `provider: mock`）；原 `mockHealth` 已删除
 15. [x] `model.go`：`ModelProvider` + `ModelRouter`（provider 注册表 + 回退链）
 16. [x] `agent.go`：规划步骤 + **词级**审批判定（`approve`/`confirm`/`approval`；`approved` 不重挂）
 17. [x] `mcp.go`：传输无关的 `tools/list` + `tools/call` 协议转换
 18. [x] `skill.go`：触发 → 手册 → 步骤 → 报告
 19. [x] `cli.go`：白名单 → 超时 → 截断 → 结构化 JSON 回执（含 `truncated` 标记）
+19.1 [x] `probe.go`：健康实测——`probeHTTP`（2xx healthy / 401·403 degraded / 其它 unhealthy /
+     连不上报 error）+ 六类 `Health`（model `/models` → 必要时 1 token completion；agent 抓 Agent Card，
+     200 但非 card 记 degraded；mcp 发 `initialize`，stdio 记 unknown；skill/custom 取 endpoint；
+     cli 只做 `PATH` 查找，缺失 unhealthy、不在 allowlist degraded）；`orchestrator.go` 的 invoker
+     按调用结果落健康；无可访问目标一律 `unknown`
 
 ### 5. 编排层（`internal/hub`）
 

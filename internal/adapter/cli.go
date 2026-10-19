@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 
 	"agenthub/internal/a2a"
@@ -59,8 +60,39 @@ func (c *cliConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 	}, nil
 }
 
+// Health measures the two things that decide whether a CLI can run, without
+// running it: is the command on PATH, and would the allowlist let it through?
+// Both are facts about this machine, so a missing command is unhealthy and a
+// command the server will refuse is degraded — the binary is there, it just is
+// not usable.
 func (c *cliConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	return mockHealth(e), nil
+	command := strings.TrimSpace(entryCommand(e))
+	if command == "" {
+		// Without a command there is nothing to look for.
+		return nothingMeasured, nil
+	}
+	if _, err := exec.LookPath(command); err != nil {
+		return registry.HealthUnhealthy, nil
+	}
+	if !c.allowed(command) {
+		return registry.HealthDegraded, nil
+	}
+	return registry.HealthHealthy, nil
+}
+
+// entryCommand is the command a record declares: kind_config.cli first, then the
+// metadata the examples use. It deliberately does not fall back to the prompt,
+// which is what an invocation may do, because a probe has no prompt to read.
+func entryCommand(e *registry.Entry) string {
+	if e == nil {
+		return ""
+	}
+	if e.KindConfig != nil && e.KindConfig.CLI != nil {
+		if command := strings.TrimSpace(e.KindConfig.CLI.Command); command != "" {
+			return command
+		}
+	}
+	return strings.TrimSpace(metaString(e.Metadata, "command"))
 }
 
 func (c *cliConnector) allowed(command string) bool {

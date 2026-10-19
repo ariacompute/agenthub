@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"agenthub/internal/a2a"
-	"agenthub/internal/registry"
 )
 
 // Every mock connector is deterministic: the same request always produces the
@@ -100,21 +99,6 @@ func metaString(m map[string]string, key string) string {
 		return ""
 	}
 	return m[key]
-}
-
-// mockHealth derives a stable health for an entry. Real connectors replace this
-// with a probe; the mock keeps the same signature so the hub never branches.
-func mockHealth(e *registry.Entry) registry.Health {
-	if e == nil {
-		return registry.HealthUnknown
-	}
-	if v, err := registry.ParseHealth(metaString(e.Metadata, "mock_health")); err == nil && v != "" {
-		return v
-	}
-	if strings.TrimSpace(e.Endpoint) == "" {
-		return registry.HealthDegraded
-	}
-	return registry.HealthHealthy
 }
 
 // boundedContext applies the adapter timeout shared by mock and real connectors.

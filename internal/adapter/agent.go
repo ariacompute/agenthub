@@ -265,18 +265,29 @@ func appendParts(b *strings.Builder, parts []sendPart) {
 	}
 }
 
-// Health probes the Agent Card when the entry publishes one. This is the only
-// honest answer available: a card that cannot be fetched means the agent is not
-// there, however healthy the record claims to be. Without a card there is nothing
-// to probe and the connector keeps the stable mock value.
+// Health fetches the Agent Card the entry publishes. A card that cannot be
+// fetched means the agent is not there, however healthy the record claims to be.
+// An entry with no card is a non-A2A control: there is no A2A endpoint to call,
+// so the answer is unknown rather than a value the connector made up from the
+// endpoint column.
 func (c *agentConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	if strings.TrimSpace(c.cardURL) == "" {
-		return mockHealth(e), nil
+	cardURL := httpEndpoint(c.cardURL)
+	if cardURL == "" {
+		return nothingMeasured, nil
 	}
+	health, err := probeHTTP(ctx, http.MethodGet, cardURL, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	if health != registry.HealthHealthy {
+		return health, nil
+	}
+	// A 200 that is not a card is an agent that answered but cannot be used, so
+	// it lands on degraded instead of being called healthy on a status code.
 	ctx, cancel := boundedContext(ctx, c.timeout)
 	defer cancel()
 	if _, err := c.fetchCard(ctx); err != nil {
-		return registry.HealthUnhealthy, nil
+		return registry.HealthDegraded, nil
 	}
 	return registry.HealthHealthy, nil
 }

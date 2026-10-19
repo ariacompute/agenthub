@@ -978,3 +978,48 @@ func TestAdapterErrorMapping(t *testing.T) {
 		t.Fatal("rpc errors must pass through")
 	}
 }
+
+func TestInvocationRecordsTheHealthItProved(t *testing.T) {
+	model := &registry.Entry{Kind: registry.KindModel, Name: "demo-model"}
+	// A card that nothing serves: the call fails with resource_unreachable,
+	// which is exactly the observation the record has to show.
+	down := &registry.Entry{
+		Kind: registry.KindAgent,
+		Name: "down-agent",
+		KindConfig: &registry.KindConfig{
+			Agent: &registry.AgentConfig{CardURL: "http://127.0.0.1:1/.well-known/agent-card.json"},
+		},
+	}
+	h, reg, _ := newTestHub(t, model, down)
+
+	healthOf := func(id string) registry.Health {
+		t.Helper()
+		entry, ok := reg.Get(id)
+		if !ok {
+			t.Fatalf("entry %s vanished", id)
+		}
+		return entry.Health
+	}
+
+	// Both start unknown: the catalogue no longer declares its own health.
+	if got := healthOf(model.ID); got != registry.HealthUnknown {
+		t.Fatalf("model initial health = %q, want unknown", got)
+	}
+	if got := healthOf(down.ID); got != registry.HealthUnknown {
+		t.Fatalf("agent initial health = %q, want unknown", got)
+	}
+
+	if _, err := h.Send(context.Background(), sendParams("hello", map[string]any{"resourceId": model.ID})); err != nil {
+		t.Fatalf("send to the model: %v", err)
+	}
+	if got := healthOf(model.ID); got != registry.HealthHealthy {
+		t.Fatalf("model health after a successful call = %q, want healthy", got)
+	}
+
+	if _, err := h.Send(context.Background(), sendParams("hello", map[string]any{"resourceId": down.ID})); err == nil {
+		t.Fatal("send to the unreachable agent: want an error")
+	}
+	if got := healthOf(down.ID); got != registry.HealthUnhealthy {
+		t.Fatalf("agent health after a failed call = %q, want unhealthy", got)
+	}
+}

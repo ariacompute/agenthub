@@ -177,7 +177,12 @@ entry asks for one.
 ### Safety & Reliability
 
 - **Determinism**: same input, same output (derived from an input hash), no network, no
-  subprocess, and a deterministic `mockHealth` on health checks.
+  subprocess, and every offline result stamped `provider: mock`.
+- **Measured health**: health is no longer declared by a mock (`mockHealth` is gone). Each
+  connector probes what it will actually call — the model's `/models` (falling back to a one
+  token completion), an agent's Agent Card, MCP's `initialize`, a skill's or custom record's
+  endpoint, a CLI's `PATH` lookup — and a run records what it proved. Anything with nothing to
+  reach answers `unknown` instead of a value nobody measured.
 - **CLI four-step baseline**: allowlist pre-validation → single-shot timeout (15s
   default) → output truncation → structured JSON receipt; none of the four may be
   skipped.

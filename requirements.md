@@ -203,7 +203,9 @@ POST   /api/resources                          → 201 Entry（重复 id 或 (na
 GET    /api/resources/{id}                     → Entry | 404
 PUT    /api/resources/{id}                     → Entry | 404
 DELETE /api/resources/{id}                     → 204 | 404
-POST   /api/resources/{id}/health              → {health}
+POST   /api/resources/{id}/health              → {health}（运维人工判定）
+POST   /api/resources/{id}/probe               → {id, health, probed:true[, reason]}（实测：问资源自己的 connector；
+                                                 测不到时记 unhealthy 并回 reason；无可访问目标则 health=unknown）
 POST   /api/resources/{id}/status              → Entry（registry:curate；非法迁移 → 400）
 GET    /api/registries                         → {registries}（registries:manage）
 POST   /api/registries                         → 201 Namespace | 400（非法 slug）
@@ -271,7 +273,19 @@ GET    /healthz                                → 状态与计数（无鉴权�
 | skill | 触发 → 手册 → 步骤 → 报告 | artifact `skill.manual` |
 | cli | 白名单 → 超时 → 截断 → JSON 回执 | artifact `cli.receipt`（含 `truncated`） |
 
-所有 mock 必须：同输入同输出（按输入哈希派生）、不触网、不起进程、健康检查返回确定性 `mockHealth`。
+所有 mock 必须：同输入同输出（按输入哈希派生）、**调用路径**不触网、不起进程，且产物标注 `provider: mock`
+（否则伪造答案与真实答案逐字节无法区分）。
+
+**健康状态不由 mock 决定，只由实测决定**（`mockHealth` 已删除）：
+
+- `Health` 是测量：model 取 `/models`（无法定论时退到 `max_tokens:1` 的 chat completions）、agent 抓
+  Agent Card、mcp 发 JSON-RPC `initialize`、skill/custom 取 endpoint、cli 只做 `PATH` 查找（不执行）。
+  取不到答案 → `unhealthy`；401/403 或「200 但不是它该返回的东西」→ `degraded`。
+- 一次运行同样落健康：成功 `healthy`，`resource_unreachable`/`adapter_timeout` → `unhealthy`，
+  `provider_malformed`/`provider_unauthorized` → `degraded`；其余错误（allowlist 拒绝、参数错误）不动，
+  因为那不是可达性证据。
+- 确实没有可访问目标（无 card 的 agent、stdio 的 mcp、无命令的 cli、无 endpoint 的 skill/custom）
+  回答 `unknown`——在此编一个值正是健康状态不再做的事。
 
 Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启用：`api_key_env` **只存环境变量名**
 （本体不入库、不落日志），响应体限长，401/403 → `provider_unauthorized`、畸形响应 →

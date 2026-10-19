@@ -142,8 +142,11 @@ Agent 调用。
 
 ### 安全与可靠性
 
-- **确定性约束**：同输入同输出（按输入哈希派生）、不触网、不起进程，健康检查返回
-  确定性 `mockHealth`。
+- **确定性约束**：同输入同输出（按输入哈希派生）、不触网、不起进程，离线产物一律标注 `provider: mock`。
+- **健康状态改为实测**：不再由 mock 声明（`mockHealth` 已删除）。每类 connector 去测自己真正要调的东西——
+  model 的 `/models`（无法定论时退到 1 token 的 completion）、agent 的 Agent Card、mcp 的 `initialize`、
+  skill/custom 的 endpoint、cli 的 `PATH` 查找；一次运行则记录这次调用证实的结论。确实没有可访问目标时
+  回答 `unknown`，而不是填一个没人测过的值。
 - **CLI 四步底线**：白名单前置校验 → 单次超时（默认 15s）→ 输出截断 → 结构化 JSON 回执，
   四步缺一不可。
 - **artifact 累积**：支持 `append` / `lastChunk`，任务结束时按累积列表返回。

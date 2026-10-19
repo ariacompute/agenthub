@@ -63,6 +63,12 @@ export function setResourceHealth(id, health) {
   return request(`/api/resources/${encodeURIComponent(id)}/health`, { method: 'POST', ...body({ health }) })
 }
 
+// A probe asks the resource's own connector how the resource is doing and the
+// server stores the answer, so the health dot stops showing a guess.
+export function probeResource(id) {
+  return request(`/api/resources/${encodeURIComponent(id)}/probe`, { method: 'POST', ...body({}) })
+}
+
 // Curation: submitting, approving, rejecting or deprecating a record. The
 // reason is operator text about a record and travels with the transition only.
 export function setResourceStatus(id, status, reason = '') {

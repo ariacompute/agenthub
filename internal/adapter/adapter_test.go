@@ -113,24 +113,33 @@ func TestCLIAllowlistAndTruncation(t *testing.T) {
 }
 
 func TestHealthSignals(t *testing.T) {
-	withEndpoint := entryFor(registry.KindModel)
-	conn, _ := For(&withEndpoint, options())
-	health, err := conn.Health(context.Background(), &withEndpoint)
-	if err != nil || health != registry.HealthHealthy {
-		t.Fatalf("health = %v, %v", health, err)
+	// A model nobody calls is not measured: offline mode never touches the
+	// endpoint, so "unknown" is the only true answer — claiming healthy because
+	// a URL happens to be filled in is what a probe stopped doing.
+	offline := entryFor(registry.KindModel)
+	conn, _ := For(&offline, options())
+	if health, err := conn.Health(context.Background(), &offline); err != nil || health != registry.HealthUnknown {
+		t.Fatalf("offline model health = %v, %v; want unknown", health, err)
 	}
 
-	noEndpoint := registry.Entry{ID: "x", Kind: registry.KindModel, Name: "local"}
-	conn, _ = For(&noEndpoint, options())
-	if health, _ := conn.Health(context.Background(), &noEndpoint); health != registry.HealthDegraded {
-		t.Fatalf("health without endpoint = %v", health)
+	// A stdio MCP server, a skill with no endpoint and a CLI with no command
+	// give the probe nothing to reach, so they answer the same way.
+	stdio := registry.Entry{ID: "mcp-1", Kind: registry.KindMCP, Name: "stdio", Transport: registry.TransportStdio}
+	conn, _ = For(&stdio, options())
+	if health, _ := conn.Health(context.Background(), &stdio); health != registry.HealthUnknown {
+		t.Fatalf("stdio mcp health = %v; want unknown", health)
 	}
 
-	flagged := entryFor(registry.KindModel)
-	flagged.Metadata = map[string]string{"mock_health": string(registry.HealthUnhealthy)}
-	conn, _ = For(&flagged, options())
-	if health, _ := conn.Health(context.Background(), &flagged); health != registry.HealthUnhealthy {
-		t.Fatalf("flagged health = %v", health)
+	skill := registry.Entry{ID: "skill-1", Kind: registry.KindSkill, Name: "local"}
+	conn, _ = For(&skill, options())
+	if health, _ := conn.Health(context.Background(), &skill); health != registry.HealthUnknown {
+		t.Fatalf("skill without endpoint health = %v; want unknown", health)
+	}
+
+	bare := registry.Entry{ID: "cli-1", Kind: registry.KindCLI, Name: "bare"}
+	conn, _ = For(&bare, options())
+	if health, _ := conn.Health(context.Background(), &bare); health != registry.HealthUnknown {
+		t.Fatalf("cli without command health = %v; want unknown", health)
 	}
 }
 

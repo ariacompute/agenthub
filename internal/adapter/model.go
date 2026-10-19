@@ -1,9 +1,13 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 
 	"agenthub/internal/a2a"
+	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
 )
 
@@ -125,6 +129,51 @@ func (c *modelConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	}, nil
 }
 
+// Health asks the gateway the provider would call. An offline entry is not
+// probed: nothing calls its endpoint, so a network answer would describe an
+// address the adapter never uses.
 func (c *modelConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	return mockHealth(e), nil
+	if e == nil {
+		return nothingMeasured, nil
+	}
+	cfg := modelConfigOf(e)
+	if cfg.EffectiveProviderModeWith(c.defaultMode) != registry.ProviderModeOpenAICompatible {
+		return nothingMeasured, nil
+	}
+	base := httpEndpoint(cfg.EffectiveEndpoint(e))
+	if base == "" {
+		return nothingMeasured, nil
+	}
+	headers := bearerHeaders(cfg.APIKeyEnv)
+
+	// Listing models is free and every OpenAI compatible router serves it.
+	health, err := probeHTTP(ctx, http.MethodGet, base+"/models", headers, nil)
+	if err != nil {
+		return "", err
+	}
+	if health != registry.HealthUnhealthy {
+		return health, nil
+	}
+	// "unhealthy" can simply mean this router does not serve /models, so ask the
+	// endpoint the adapter really calls. One token is a fair price for an answer
+	// that is true, and it is bounded by max_tokens.
+	payload, err := json.Marshal(map[string]any{
+		"model":      cfg.EffectiveModelID(e),
+		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
+		"max_tokens": 1,
+	})
+	if err != nil {
+		return "", &httputil.Error{Code: CodeProviderMalformed}
+	}
+	headers["Content-Type"] = "application/json"
+	return probeHTTP(ctx, http.MethodPost, base+"/chat/completions", headers, bytes.NewReader(payload))
+}
+
+// modelConfigOf never returns nil: an entry that filled only the generic
+// columns still resolves through the instance wide provider mode.
+func modelConfigOf(e *registry.Entry) *registry.ModelConfig {
+	if e != nil && e.KindConfig != nil && e.KindConfig.Model != nil {
+		return e.KindConfig.Model
+	}
+	return &registry.ModelConfig{}
 }

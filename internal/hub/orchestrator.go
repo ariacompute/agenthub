@@ -436,8 +436,13 @@ func (h *Hub) invoker(emit Emit) Invoker {
 		}
 		res, err := conn.Invoke(ctx, req)
 		if err != nil {
+			// A call that did not come back is the strongest evidence there is:
+			// the card stopped showing "unknown" because something was measured,
+			// not because a record claimed to be fine.
+			h.recordHealth(entry.ID, healthFromInvoke(err))
 			return Outcome{}, err
 		}
+		h.recordHealth(entry.ID, registry.HealthHealthy)
 		for _, art := range res.Artifacts {
 			if _, err := h.store.AddArtifact(taskID, art); err != nil {
 				return Outcome{}, err
@@ -454,6 +459,36 @@ func (h *Hub) invoker(emit Emit) Invoker {
 			Prompt:        res.Prompt,
 		}, nil
 	}
+}
+
+// recordHealth stores what the last call proved about a resource. An empty
+// health means the outcome said nothing about reachability, so the previous
+// value stands: a rejected CLI command or a malformed prompt is not evidence
+// that the resource is down, and overwriting "healthy" with it would be a guess.
+func (h *Hub) recordHealth(id string, observed registry.Health) {
+	if h == nil || h.reg == nil || observed == "" {
+		return
+	}
+	if err := h.reg.SetHealth(id, observed); err != nil {
+		// A resource can vanish between the call and the write; that says
+		// nothing about the task, so it must never fail one.
+		slog.Debug("hub: health not recorded", "id", id, "error", err)
+	}
+}
+
+// healthFromInvoke translates an invocation failure into an observation:
+// unreachable or timed out is unhealthy, while a resource that answered but
+// could not be used (bad credentials, a malformed reply) is degraded. Anything
+// else — an invalid prompt, a command the allowlist refused — leaves the record
+// alone.
+func healthFromInvoke(err error) registry.Health {
+	switch httputil.AsError(err).Code {
+	case adapter.CodeResourceUnreachable, adapter.CodeAdapterTimeout:
+		return registry.HealthUnhealthy
+	case adapter.CodeProviderMalformed, adapter.CodeProviderUnauthorized:
+		return registry.HealthDegraded
+	}
+	return ""
 }
 
 func (h *Hub) flowFor(params a2a.MessageSendParams, resourceID string) ([]Step, error) {

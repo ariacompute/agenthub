@@ -127,18 +127,49 @@ func TestAgentHealthProbesTheCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h, err := conn2.Health(context.Background(), &down); err != nil || h != registry.HealthUnhealthy {
-		t.Fatalf("unreachable card = %v, %v; want unhealthy", h, err)
+	// A card nobody serves never produced an answer, so it is an error: the
+	// caller records unhealthy instead of keeping whatever the record said.
+	if h, err := conn2.Health(context.Background(), &down); err == nil {
+		t.Fatalf("unreachable card = %v, %v; want an error", h, err)
 	}
 
-	// No card, nothing to probe: the stable mock value stands.
-	noCard := agentEntry(nil)
-	conn3, err := For(&noCard, options())
+	// A card that demands credentials: the agent answered, it just refuses us.
+	locked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	lockedEntry := agentEntry(&registry.AgentConfig{CardURL: locked.URL + "/.well-known/agent-card.json"})
+	conn3, err := For(&lockedEntry, options())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h, err := conn3.Health(context.Background(), &noCard); err != nil || h != registry.HealthHealthy {
-		t.Fatalf("no card = %v, %v", h, err)
+	if h, err := conn3.Health(context.Background(), &lockedEntry); err != nil || h != registry.HealthDegraded {
+		t.Fatalf("401 card = %v, %v; want degraded", h, err)
+	}
+	locked.Close()
+
+	// A 200 that is not a card at all: answered, but unusable.
+	garbage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	}))
+	garbageEntry := agentEntry(&registry.AgentConfig{CardURL: garbage.URL + "/.well-known/agent-card.json"})
+	conn4, err := For(&garbageEntry, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := conn4.Health(context.Background(), &garbageEntry); err != nil || h != registry.HealthDegraded {
+		t.Fatalf("malformed card = %v, %v; want degraded", h, err)
+	}
+	garbage.Close()
+
+	// No card, nothing to probe: a non-A2A control has no A2A endpoint, so the
+	// answer is unknown rather than a value invented from the endpoint column.
+	noCard := agentEntry(nil)
+	conn5, err := For(&noCard, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := conn5.Health(context.Background(), &noCard); err != nil || h != registry.HealthUnknown {
+		t.Fatalf("no card = %v, %v; want unknown", h, err)
 	}
 }
 

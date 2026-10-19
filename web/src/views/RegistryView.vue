@@ -23,6 +23,7 @@ const query = ref('')
 const drawerOpen = ref(false)
 const editing = ref(null)
 const running = ref('')
+const probing = ref('')
 const askSave = ref(false)
 const baseline = ref(null)
 
@@ -227,7 +228,20 @@ async function tryRun(resource) {
   } catch (error) {
     console.error('agenthub: try run failed', error)
   } finally {
+    // The run itself is the measurement: the hub records healthy or unhealthy
+    // from what the call proved, so the list has to be re-read for the card's
+    // dot to show it instead of the stale "unknown".
+    await store.refreshResources()
     running.value = ''
+  }
+}
+
+async function probe(resource) {
+  probing.value = resource.id
+  try {
+    await store.probe(resource.id)
+  } finally {
+    probing.value = ''
   }
 }
 </script>
@@ -314,6 +328,14 @@ async function tryRun(resource) {
             @click="tryRun(resource)"
           >
             {{ t('actionTryRun') }}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            :disabled="probing === resource.id"
+            @click="probe(resource)"
+          >
+            {{ t('actionProbe') }}
           </button>
           <button class="btn btn-ghost" type="button" @click="openEdit(resource)">
             {{ shell.t('actionEdit') }}

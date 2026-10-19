@@ -226,9 +226,14 @@ listed in the corresponding JSON's `metadata.env_hint` as a reminder; no values 
   `TODO(real)` and only translate shapes. The MCP and CLI samples therefore express
   **configuration intent**, not something executable today.
 - **Samples never self-declare health**: none of the 41 samples sets `health` (omitted means
-  `unknown`), and none sets `metadata.mock_health`. The six CLI samples have no endpoint, so a
-  probe reports `degraded`. Health is only ever written by a probe
-  (`POST /api/resources/{id}/probe`).
+  `unknown`), and none sets `metadata.mock_health`. Health is written by a measurement and by
+  nothing else: `POST /api/resources/{id}/probe` asks the resource's own connector, and a run
+  records what the call proved. A probe only answers `unknown` where there is genuinely nothing
+  to reach — an agent with no Agent Card, a stdio MCP server, a CLI with no command, a skill
+  with no endpoint — because inventing a value there is what health stopped doing. An agent that
+  does publish a card is fetched for real: a 200 that parses is `healthy`, a credential refusal
+  or a 200 that is not a card is `degraded`, and a card nobody serves is `unhealthy`. A CLI probe looks the command up on
+  `PATH` without running it: missing is `unhealthy`, found but not allowlisted is `degraded`.
 - **Development/demo only**: do not copy these into production. For seeding and production policy
   see the `AGENTHUB_SEED_DEMO` section of the root `AGENTS.md`.
 - **Upstream licences** (per each repository's own LICENSE): ADK Apache-2.0, LangGraph MIT,

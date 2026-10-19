@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"net/http"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/registry"
@@ -49,6 +50,13 @@ func (c *skillConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	}, nil
 }
 
+// Health fetches the manual the way the connector will once it reads one. A
+// skill is process knowledge, not a service: with no endpoint there is nothing
+// to reach, so the answer is unknown rather than a healthy nobody checked.
 func (c *skillConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	return mockHealth(e), nil
+	url := endpointOf(e)
+	if url == "" {
+		return nothingMeasured, nil
+	}
+	return probeHTTP(ctx, http.MethodGet, url, nil, nil)
 }

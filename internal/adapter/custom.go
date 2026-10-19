@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"net/http"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/registry"
@@ -45,6 +46,12 @@ func (c *customConnector) Invoke(ctx context.Context, req InvokeRequest) (Invoke
 	}, nil
 }
 
+// Health asks the endpoint the declared schema is resolved against. A record
+// with no endpoint gives the probe nothing to call, so it stays unknown.
 func (c *customConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	return mockHealth(e), nil
+	url := endpointOf(e)
+	if url == "" {
+		return nothingMeasured, nil
+	}
+	return probeHTTP(ctx, http.MethodGet, url, nil, nil)
 }

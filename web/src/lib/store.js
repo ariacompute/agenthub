@@ -92,6 +92,19 @@ export const useHubStore = defineStore('hub', {
         return false
       }
     },
+    // A probe measures one resource and stores what it found; the list is
+    // re-read so the card's dot shows the measured value immediately.
+    async probe(id) {
+      try {
+        await api.probeResource(id)
+        await this.refreshResources()
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = error.code || 'internal_error'
+        return false
+      }
+    },
     async refreshRegistries() {
       try {
         const data = await api.listRegistries()

@@ -2,6 +2,8 @@ package adapter
 
 import (
 	"context"
+	"net/http"
+	"strings"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/registry"
@@ -50,6 +52,34 @@ func (c *mcpConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 	}, nil
 }
 
+// Health posts the request the protocol starts with over Streamable HTTP. A
+// stdio server is only reachable by launching it, and this connector never runs
+// a subprocess on its own, so there is nothing to measure and the answer stays
+// unknown rather than being invented.
 func (c *mcpConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	return mockHealth(e), nil
+	if e == nil {
+		return nothingMeasured, nil
+	}
+	cfg := &registry.MCPConfig{}
+	if e.KindConfig != nil && e.KindConfig.MCP != nil {
+		cfg = e.KindConfig.MCP
+	}
+	// The transport default mirrors Invoke: an entry that names none is treated
+	// as Streamable HTTP.
+	transport := strings.TrimSpace(cfg.Transport)
+	if transport == "" {
+		transport = string(registry.TransportStreamableHTTP)
+	}
+	url := httpEndpoint(cfg.URL)
+	if url == "" {
+		url = httpEndpoint(e.Endpoint)
+	}
+	if !strings.EqualFold(transport, string(registry.TransportStreamableHTTP)) || url == "" {
+		return nothingMeasured, nil
+	}
+	initialize := `{"jsonrpc":"2.0","id":"agenthub-probe","method":"initialize","params":{"protocolVersion":"1.0","capabilities":{},"clientInfo":{"name":"agenthub","version":"1"}}}`
+	return probeHTTP(ctx, http.MethodPost, url, map[string]string{
+		"Content-Type": "application/json",
+		"Accept":       "application/json, text/event-stream",
+	}, strings.NewReader(initialize))
 }

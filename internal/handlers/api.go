@@ -195,15 +195,23 @@ func (d Deps) handleResourceProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	health, err := conn.Health(r.Context(), entry)
+	// A probe that could not be answered is itself a measurement: the resource
+	// did not respond, so the record moves to unhealthy instead of keeping
+	// whatever it said before the probe.
+	reason := ""
 	if err != nil {
-		writeDomainErr(w, err)
-		return
+		health = registry.HealthUnhealthy
+		reason = string(httputil.AsError(err).Code)
 	}
 	if err := d.Reg.SetHealth(id, health); err != nil {
 		writeDomainErr(w, err)
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "health": string(health), "probed": true})
+	payload := map[string]any{"id": id, "health": string(health), "probed": true}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	httputil.WriteJSON(w, http.StatusOK, payload)
 }
 
 // adapterOptions mirrors the options the hub invokes with, so a probe measures
