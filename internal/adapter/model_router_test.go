@@ -183,6 +183,45 @@ func TestRouterRejectsMalformedCompletion(t *testing.T) {
 	}
 }
 
+// AGENTHUB_MODEL_ROUTER_MODE is the instance wide default: an entry that omits
+// provider_mode inherits it, an entry that names one keeps its own, and an
+// unset option stays offline instead of becoming a gateway call nobody asked for.
+func TestInstanceDefaultSelectsTheProviderChain(t *testing.T) {
+	srv := chatServer(t, func(model string, w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"served by ` + model + `"}}]}`))
+	})
+	// No ProviderMode: the instance decides.
+	inheriting := modelEntry(&registry.ModelConfig{Endpoint: srv.URL, ModelID: "inherited", TimeoutMS: 5000})
+
+	providerOf := func(t *testing.T, opts Options, e registry.Entry) any {
+		t.Helper()
+		conn, err := For(&e, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: "hello"})
+		if err != nil {
+			t.Fatalf("invoke: %v", err)
+		}
+		return res.Artifacts[0].Parts[0].Data["provider"]
+	}
+
+	if got := providerOf(t, Options{ModelRouterMode: registry.ProviderModeOpenAICompatible}, inheriting); got != "openai:inherited" {
+		t.Fatalf("inherited provider = %v, want the real one", got)
+	}
+	if got := providerOf(t, Options{ModelRouterMode: registry.ProviderModeMock}, inheriting); got != "mock" {
+		t.Fatalf("mock instance provider = %v, want mock", got)
+	}
+	if got := providerOf(t, Options{}, inheriting); got != "mock" {
+		t.Fatalf("unset mode provider = %v, want mock", got)
+	}
+	// The entry's own opt-out beats a global opt-in.
+	optingOut := modelEntry(&registry.ModelConfig{ProviderMode: registry.ProviderModeMock, Endpoint: srv.URL, ModelID: "ignored"})
+	if got := providerOf(t, Options{ModelRouterMode: registry.ProviderModeOpenAICompatible}, optingOut); got != "mock" {
+		t.Fatalf("entry opt-out provider = %v, want the entry's mock", got)
+	}
+}
+
 func TestRouterSendsCredentialFromEnvironmentOnly(t *testing.T) {
 	var auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

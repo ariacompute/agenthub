@@ -52,7 +52,11 @@ func NewModelRouter() *ModelRouter {
 
 // NewModelRouterFor builds the router a registered model resource asks for:
 // router mode produces a real provider plus one provider per fallback target.
-func NewModelRouterFor(e *registry.Entry) *ModelRouter { return newModelRouterFor(e) }
+// instanceDefault is the mode entries inherit when they do not name one, so an
+// adapter built without it keeps the offline behaviour.
+func NewModelRouterFor(e *registry.Entry, instanceDefault string) *ModelRouter {
+	return newModelRouterFor(e, instanceDefault)
+}
 
 // Generate walks the fallback chain until one provider answers.
 func (r *ModelRouter) Generate(ctx context.Context, prompt string) (string, error) {
@@ -87,13 +91,16 @@ func (mockUnavailable) Error() string { return "no_model_provider" }
 
 type modelConnector struct {
 	router *ModelRouter
+	// defaultMode is kept so a connector built without a router can rebuild one
+	// against the same instance wide provider mode.
+	defaultMode string
 }
 
 func (c *modelConnector) Kind() registry.Kind { return registry.KindModel }
 
 func (c *modelConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeResult, error) {
 	if c.router == nil {
-		c.router = newModelRouterFor(&req.Entry)
+		c.router = newModelRouterFor(&req.Entry, c.defaultMode)
 	}
 	if len(c.router.providers) == 0 {
 		c.router = NewModelRouter()

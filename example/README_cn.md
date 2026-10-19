@@ -123,7 +123,8 @@ skills.sh 由 Vercel Labs 维护（源码 `vercel-labs/skills`），`npx skills 
 
 ### Model
 
-`test.log` 里的 `https://gateway.ariacompute.com`。见下一节的密钥策略。
+base url 是 `https://gateway.ariacompute.com/**v1**`：适配器只给「不以 `/chat/completions` 结尾」的地址补 `/chat/completions`，
+不带 `/v1` 前缀会打到网关的 405。见下一节的密钥策略。
 
 ## 4. 密钥与 allowlist
 

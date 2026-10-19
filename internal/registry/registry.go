@@ -225,6 +225,10 @@ type Registry struct {
 	namespaces map[string]*Namespace
 	store      ResourceStore
 	nsStore    NamespaceStore
+	// modelProviderMode is the instance wide default for model entries that do
+	// not name a provider mode themselves (AGENTHUB_MODEL_ROUTER_MODE). It is
+	// set at wiring time and never mutated afterwards, so reads need no lock.
+	modelProviderMode string
 }
 
 // New builds an empty, in-memory registry.
@@ -265,6 +269,29 @@ func (r *Registry) WithNamespaceStore(ns NamespaceStore) *Registry {
 	return r
 }
 
+// WithModelRouterMode attaches the instance wide provider mode model entries
+// inherit when they do not name one (AGENTHUB_MODEL_ROUTER_MODE). Same shape as
+// WithNamespaceStore: wiring order decides when the value is known.
+func (r *Registry) WithModelRouterMode(mode string) *Registry {
+	r.mu.Lock()
+	r.modelProviderMode = mode
+	r.mu.Unlock()
+	return r
+}
+
+// effectiveModelProviderMode is the value Upsert validates against. An unset or
+// unknown mode degrades to DefaultModelProviderMode, so a misconfigured
+// environment can never turn every model entry into a gateway call.
+func (r *Registry) effectiveModelProviderMode() string {
+	if r == nil {
+		return DefaultModelProviderMode
+	}
+	if mode := strings.ToLower(strings.TrimSpace(r.modelProviderMode)); knownProviderMode(mode) {
+		return mode
+	}
+	return DefaultModelProviderMode
+}
+
 // Upsert validates and stores an entry, generating an id when absent.
 //
 // Validation is generic (kind, health, transport, name) plus per-kind (the
@@ -289,7 +316,7 @@ func (r *Registry) Upsert(in *Entry) (*Entry, error) {
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, &httputil.Error{Code: CodeInvalidEntry}
 	}
-	if err := ValidateKind(in); err != nil {
+	if err := ValidateKindWithMode(in, r.effectiveModelProviderMode()); err != nil {
 		return nil, err
 	}
 	ns, err := ParseNamespaceID(in.Namespace)

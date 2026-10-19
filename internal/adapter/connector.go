@@ -28,6 +28,9 @@ type Options struct {
 	CLITimeout     time.Duration
 	CLIAllowlist   []string
 	MaxOutputBytes int
+	// ModelRouterMode is the instance wide provider mode (AGENTHUB_MODEL_ROUTER_MODE)
+	// model entries inherit when they do not name one themselves.
+	ModelRouterMode string
 }
 
 // InvokeRequest is one call to a registered resource.
@@ -66,7 +69,8 @@ func For(e *registry.Entry, opts Options) (Connector, error) {
 	case registry.KindModel:
 		// A model resource carries its own provider chain: offline mock by
 		// default, a real router with fallbacks when configured that way.
-		return &modelConnector{router: newModelRouterFor(e)}, nil
+		mode := defaultMode(opts)
+		return &modelConnector{router: newModelRouterFor(e, mode), defaultMode: mode}, nil
 	case registry.KindAgent:
 		return &agentConnector{}, nil
 	case registry.KindMCP:

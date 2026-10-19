@@ -140,19 +140,32 @@ func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, e
 	return "", &httputil.Error{Code: CodeProviderMalformed}
 }
 
-// newModelRouterFor builds the provider chain a model entry asks for.
+// defaultMode normalises the instance wide provider mode (AGENTHUB_MODEL_ROUTER_MODE)
+// coming from the options: empty or unknown degrades to the offline default, so a
+// typo in the environment keeps every model entry offline instead of turning it
+// into a gateway call nobody configured.
+func defaultMode(opts Options) string {
+	if opts.ModelRouterMode != "" {
+		return opts.ModelRouterMode
+	}
+	return registry.DefaultModelProviderMode
+}
+
+// newModelRouterFor builds the provider chain a model entry asks for. instanceDefault
+// is the provider mode entries inherit when they do not name one
+// (AGENTHUB_MODEL_ROUTER_MODE); the entry's own value still wins.
 //
 // Mock mode stays entirely offline. Router mode puts the configured endpoint
 // first and appends one provider per fallback target, so a router that fronts
 // several models degrades down the list instead of failing outright. The mock is
 // only appended when the operator asked for it explicitly: silently answering
 // with a mock after a real provider failed would fabricate a completion.
-func newModelRouterFor(e *registry.Entry) *ModelRouter {
+func newModelRouterFor(e *registry.Entry, instanceDefault string) *ModelRouter {
 	if e == nil || e.KindConfig == nil || e.KindConfig.Model == nil {
 		return NewModelRouter()
 	}
 	cfg := e.KindConfig.Model
-	if cfg.EffectiveProviderMode() != registry.ProviderModeOpenAICompatible {
+	if cfg.EffectiveProviderModeWith(instanceDefault) != registry.ProviderModeOpenAICompatible {
 		return NewModelRouter()
 	}
 	endpoint := cfg.EffectiveEndpoint(e)

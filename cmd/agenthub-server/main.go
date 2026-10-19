@@ -98,7 +98,8 @@ func main() {
 	// The catalogue: resources plus the namespaces they belong to. Loading the
 	// namespaces once at boot is what lets "does this record need review?" be
 	// answered in memory on every registration.
-	reg := registry.NewWithStores(store.NewResourceStore(db), store.NewNamespaceStore(db))
+	reg := registry.NewWithStores(store.NewResourceStore(db), store.NewNamespaceStore(db)).
+		WithModelRouterMode(cfg.ModelRouterMode)
 	if err := reg.LoadNamespaces(context.Background()); err != nil {
 		slog.Error("registry: load namespaces", "error", err)
 		os.Exit(1)
@@ -113,9 +114,10 @@ func main() {
 	}
 
 	opts := adapter.Options{
-		CLITimeout:     cfg.CLITimeout,
-		CLIAllowlist:   cfg.CLIAllowlist,
-		MaxOutputBytes: cfg.MaxOutputBytes,
+		CLITimeout:      cfg.CLITimeout,
+		CLIAllowlist:    cfg.CLIAllowlist,
+		MaxOutputBytes:  cfg.MaxOutputBytes,
+		ModelRouterMode: cfg.ModelRouterMode,
 	}
 	pusher := &hub.MockNotifier{Repo: store.NewPushRepository(db)}
 	h := hub.New(cfg, reg, opts, pusher, hub.Persistence{

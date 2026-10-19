@@ -131,14 +131,46 @@ type CustomConfig struct {
 	Schema string `json:"schema,omitempty"`
 }
 
+// DefaultModelProviderMode is the provider mode an entry inherits when neither
+// it nor the instance names one. Staying offline by default is deliberate: an
+// entry that silently became "real" would start calling a gateway nobody
+// configured for it.
+const DefaultModelProviderMode = ProviderModeMock
+
 // EffectiveProviderMode returns the provider mode, defaulting to the offline
 // mock so an entry registered before the field existed keeps behaving exactly
 // as it did.
 func (c *ModelConfig) EffectiveProviderMode() string {
-	if c == nil || strings.TrimSpace(c.ProviderMode) == "" {
+	return c.EffectiveProviderModeWith(DefaultModelProviderMode)
+}
+
+// EffectiveProviderModeWith resolves the provider mode against the instance wide
+// default from AGENTHUB_MODEL_ROUTER_MODE. The entry's own value always wins, so
+// a global opt-in can never override a per-entry opt-out. An instance default
+// outside the vocabulary is ignored rather than propagated: that keeps the
+// "entry informed by config" fallback offline instead of turning into whatever
+// typo arrived in the environment.
+func (c *ModelConfig) EffectiveProviderModeWith(instanceDefault string) string {
+	if c == nil {
 		return ProviderModeMock
 	}
-	return strings.ToLower(strings.TrimSpace(c.ProviderMode))
+	if mode := strings.ToLower(strings.TrimSpace(c.ProviderMode)); mode != "" {
+		return mode
+	}
+	if mode := strings.ToLower(strings.TrimSpace(instanceDefault)); knownProviderMode(mode) {
+		return mode
+	}
+	return ProviderModeMock
+}
+
+// knownProviderMode reports whether mode is one of ProviderModes.
+func knownProviderMode(mode string) bool {
+	for _, m := range ProviderModes {
+		if mode == m {
+			return true
+		}
+	}
+	return false
 }
 
 // EffectiveTransport resolves the MCP transport: the kind config wins, the
@@ -186,6 +218,13 @@ func (c *ModelConfig) EffectiveModelID(e *Entry) string {
 // is always valid: the generic columns alone are enough to register a resource,
 // which is what every entry created before this existed looks like.
 func ValidateKind(e *Entry) error {
+	return ValidateKindWithMode(e, DefaultModelProviderMode)
+}
+
+// ValidateKindWithMode is ValidateKind resolved against the instance wide
+// provider mode from AGENTHUB_MODEL_ROUTER_MODE, so an entry that omits the
+// field is validated exactly as the instance intends to run it.
+func ValidateKindWithMode(e *Entry, instanceDefault string) error {
 	if e == nil {
 		return &httputil.Error{Code: CodeInvalidEntry}
 	}
@@ -194,7 +233,7 @@ func ValidateKind(e *Entry) error {
 	}
 	switch e.Kind {
 	case KindModel:
-		return validateModel(e.KindConfig.Model)
+		return validateModel(e.KindConfig.Model, instanceDefault)
 	case KindAgent:
 		return validateAgent(e.KindConfig.Agent)
 	case KindMCP:
@@ -214,11 +253,11 @@ func kindConfigErr(field string) error {
 	return newFieldError(CodeInvalidKindConfig, field)
 }
 
-func validateModel(c *ModelConfig) error {
+func validateModel(c *ModelConfig, instanceDefault string) error {
 	if c == nil {
 		return nil
 	}
-	mode := c.EffectiveProviderMode()
+	mode := c.EffectiveProviderModeWith(instanceDefault)
 	known := false
 	for _, m := range ProviderModes {
 		if mode == m {

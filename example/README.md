@@ -137,7 +137,9 @@ agent's own layout; on Windows it needs the same `cmd /c` wrapper.
 
 ### Model
 
-`https://gateway.ariacompute.com` from `test.log`. See the next section for the credential policy.
+Base URL https://gateway.ariacompute.com/**v1**: the adapter only appends `/chat/completions`
+to an address that does not already end in it, so a base URL without `/v1` lands on the gateway's
+405. See the next section for the credential policy.
 
 ## 4. Credentials & allowlist
 

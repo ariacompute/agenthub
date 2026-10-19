@@ -105,6 +105,26 @@ func TestSetHealthAndCounts(t *testing.T) {
 	}
 }
 
+// WithModelRouterMode carries the instance default into Upsert, so a record is
+// validated the way the instance actually intends to run it.
+func TestRegistryModelRouterModeReachesValidation(t *testing.T) {
+	entry := func() *Entry {
+		return &Entry{Kind: KindModel, Name: "m", Version: "1.0.0",
+			KindConfig: &KindConfig{Model: &ModelConfig{ModelID: "gpt-4o-mini"}}}
+	}
+
+	if _, err := New().Upsert(entry()); err != nil {
+		t.Fatalf("default instance: %v", err)
+	}
+	if _, err := New().WithModelRouterMode(ProviderModeOpenAICompatible).Upsert(entry()); err == nil {
+		t.Fatal("an openai_compatible instance must reject a model without an endpoint")
+	}
+	// An unknown mode must degrade to the offline default rather than propagate.
+	if _, err := New().WithModelRouterMode("anthropic").Upsert(entry()); err != nil {
+		t.Fatalf("unknown mode must degrade to the offline default: %v", err)
+	}
+}
+
 func TestExportAgentCardAndMCP(t *testing.T) {
 	reg := New()
 	if _, err := reg.Upsert(&Entry{Kind: KindModel, Name: "afm", Transport: "", Tags: []string{"llm"}}); err != nil {

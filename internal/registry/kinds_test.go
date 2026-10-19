@@ -228,6 +228,47 @@ func TestKindConfigEffectiveFields(t *testing.T) {
 	}
 }
 
+// AGENTHUB_MODEL_ROUTER_MODE is the instance wide fallback: an entry that omits
+// provider_mode inherits it, an entry that names one keeps its own, and a mode
+// outside the vocabulary degrades to the offline default rather than turning
+// every model entry into a gateway call.
+func TestModelProviderModeInstanceDefault(t *testing.T) {
+	var nilModel *ModelConfig
+	if got := nilModel.EffectiveProviderModeWith(ProviderModeOpenAICompatible); got != ProviderModeMock {
+		t.Fatalf("nil model = %q, want mock", got)
+	}
+	if got := (&ModelConfig{}).EffectiveProviderModeWith(ProviderModeOpenAICompatible); got != ProviderModeOpenAICompatible {
+		t.Fatalf("inherited = %q, want openai_compatible", got)
+	}
+	if got := (&ModelConfig{ProviderMode: "Mock"}).EffectiveProviderModeWith(ProviderModeOpenAICompatible); got != ProviderModeMock {
+		t.Fatalf("entry opt-out = %q, want the entry's own mock", got)
+	}
+	if got := (&ModelConfig{}).EffectiveProviderModeWith(""); got != ProviderModeMock {
+		t.Fatalf("unset default = %q, want mock", got)
+	}
+	if got := (&ModelConfig{}).EffectiveProviderModeWith("anthropic"); got != ProviderModeMock {
+		t.Fatalf("unknown default = %q, want mock", got)
+	}
+
+	// Validation resolves the same way, so a record is checked the way the
+	// instance intends to run it: offline instances tolerate a model block with
+	// no endpoint, gateway instances do not.
+	withoutEndpoint := func() *Entry {
+		return &Entry{Kind: KindModel, Name: "m", Version: "1.0.0",
+			KindConfig: &KindConfig{Model: &ModelConfig{ModelID: "gpt-4o-mini"}}}
+	}
+	if err := ValidateKindWithMode(withoutEndpoint(), ProviderModeMock); err != nil {
+		t.Fatalf("offline instance: %v", err)
+	}
+	if err := ValidateKindWithMode(withoutEndpoint(), ProviderModeOpenAICompatible); err == nil {
+		t.Fatal("an openai_compatible instance must require an endpoint")
+	}
+	// The package entry point keeps its historical behaviour: offline by default.
+	if err := ValidateKind(withoutEndpoint()); err != nil {
+		t.Fatalf("ValidateKind must stay offline by default: %v", err)
+	}
+}
+
 func TestIsHTTPURL(t *testing.T) {
 	for _, s := range []string{"https://registry.test/servers", "http://127.0.0.1:8080/x"} {
 		if !isHTTPURL(s) {
