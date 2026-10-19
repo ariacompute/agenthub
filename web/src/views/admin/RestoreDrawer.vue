@@ -5,9 +5,10 @@
 // does three things before it lets anybody through: it shows what will be
 // loaded, it spells out the guardrails, and it makes the operator type the
 // checkpoint id — the last chance to notice the wrong row.
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useCopy, enumLabel } from '../../lib/use-copy.js'
 import { formatBytes, formatDuration, formatRows, formatTime } from '../../lib/format.js'
+import { useEscape } from '../../lib/use-dismiss.js'
 import { RotateCcw, X } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -42,15 +43,14 @@ function close() {
   emit('close')
 }
 
-function onKey(event) {
-  if (event.key === 'Escape') close()
-}
+// Escape through the shared stack rather than a listener of its own: the
+// "type the id to confirm" box is the only thing in it, so nothing can be
+// half edited and there is nothing to ask about.
+useEscape(() => !props.busy, close)
 
 onMounted(() => {
-  document.addEventListener('keydown', onKey)
   input.value?.focus()
 })
-onUnmounted(() => document.removeEventListener('keydown', onKey))
 </script>
 
 <template>

@@ -656,6 +656,17 @@ textarea:focus {
   }
 }
 
+/* The row of buttons at the foot of a drawer or a prompt. Shared, because
+   every overlay in the console ends the same way — and because the Esc hint
+   has to sit on that row in all of them. */
+.drawer-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-block-start: 18px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

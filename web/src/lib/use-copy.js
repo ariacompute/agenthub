@@ -7,6 +7,8 @@ import { computed, ref } from 'vue'
 import { isRTL, isValidLang, matchLang } from './languages.js'
 import { shellCopy } from './copy/shell-copy.js'
 import { registryCopy } from './copy/registry-copy.js'
+import { registriesCopy } from './copy/registries-copy.js'
+import { sourcesCopy } from './copy/sources-copy.js'
 import { traceCopy } from './copy/trace-copy.js'
 import { topologyCopy } from './copy/topology-copy.js'
 import { authCopy } from './copy/auth-copy.js'
@@ -20,6 +22,8 @@ export const STORAGE_KEY = 'agenthub.lang'
 const COPIES = {
   shell: shellCopy,
   registry: registryCopy,
+  registries: registriesCopy,
+  sources: sourcesCopy,
   trace: traceCopy,
   topology: topologyCopy,
   auth: authCopy,

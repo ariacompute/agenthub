@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue'
 import { LANGUAGES } from '../lib/languages.js'
 import { setLang, useCopy, useLang } from '../lib/use-copy.js'
+import { useEscape } from '../lib/use-dismiss.js'
 import { Globe } from 'lucide-vue-next'
 
 const lang = useLang()
@@ -15,6 +16,15 @@ function choose(code) {
   setLang(code)
   open.value = false
 }
+
+// The menu floats over the page, so it closes the way an overlay does. There
+// is nothing to save in it — picking a language applies immediately.
+useEscape(
+  () => open.value,
+  () => {
+    open.value = false
+  },
+)
 </script>
 
 <template>

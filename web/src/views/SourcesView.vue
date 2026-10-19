@@ -9,6 +9,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { errorMessage } from '../lib/errors.js'
+import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
+import UnsavedPrompt from '../components/UnsavedPrompt.vue'
 import { Plus, RefreshCw } from 'lucide-vue-next'
 
 const store = useHubStore()
@@ -16,6 +18,8 @@ const { t } = useCopy('sources')
 const shell = useCopy('shell')
 
 const drawerOpen = ref(false)
+const askSave = ref(false)
+const baseline = ref(null)
 const syncing = ref('')
 const lastResult = ref(null)
 
@@ -50,7 +54,33 @@ function openCreate() {
     fixture: true,
     enabled: true,
   })
+  baseline.value = snapshot(form)
   drawerOpen.value = true
+}
+
+function closeDrawer() {
+  drawerOpen.value = false
+  askSave.value = false
+  baseline.value = null
+}
+
+// Escape, the backdrop and the cancel button are one gesture with three
+// entry points; only an edited form is worth interrupting for.
+function requestClose() {
+  if (isDirty(baseline.value, form)) {
+    askSave.value = true
+    return
+  }
+  closeDrawer()
+}
+
+useEscape(() => drawerOpen.value, requestClose)
+
+// Saving from the prompt is the same save; the prompt steps aside so a
+// failure is reported by the drawer's own error banner.
+async function saveAndClose() {
+  askSave.value = false
+  await submit()
 }
 
 async function submit() {
@@ -65,7 +95,7 @@ async function submit() {
     fixture: form.fixture,
     enabled: form.enabled,
   })
-  if (ok) drawerOpen.value = false
+  if (ok) closeDrawer()
 }
 
 async function sync(source) {
@@ -148,7 +178,7 @@ function syncSummary(source) {
     </div>
     <div v-else class="empty">{{ t('empty') }}</div>
 
-    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
       <form class="card drawer" @submit.prevent="submit">
         <div class="page-head">
           <h2>{{ t('drawerTitle') }}</h2>
@@ -197,14 +227,24 @@ function syncSummary(source) {
           <input v-model="form.enabled" type="checkbox" />
           <span>{{ t('fieldEnabled') }}</span>
         </label>
-        <div style="display: flex; gap: 8px; margin-top: 8px">
+        <div class="drawer-actions">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
-          <button class="btn btn-ghost" type="button" @click="drawerOpen = false">
+          <button class="btn btn-ghost" type="button" @click="requestClose">
             {{ shell.t('actionCancel') }}
           </button>
+          <span class="muted note">{{ shell.t('escHint') }}</span>
         </div>
       </form>
     </div>
+
+    <UnsavedPrompt
+      v-if="askSave"
+      :title="shell.t('unsavedTitle')"
+      :body="shell.t('unsavedBody')"
+      @save="saveAndClose"
+      @discard="closeDrawer"
+      @cancel="askSave = false"
+    />
   </section>
 </template>
 

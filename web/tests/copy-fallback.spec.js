@@ -3,6 +3,8 @@ import { LANGUAGES } from '../src/lib/languages.js'
 import { resolve } from '../src/lib/use-copy.js'
 import { shellCopy } from '../src/lib/copy/shell-copy.js'
 import { registryCopy } from '../src/lib/copy/registry-copy.js'
+import { registriesCopy } from '../src/lib/copy/registries-copy.js'
+import { sourcesCopy } from '../src/lib/copy/sources-copy.js'
 import { traceCopy } from '../src/lib/copy/trace-copy.js'
 import { topologyCopy } from '../src/lib/copy/topology-copy.js'
 import { errorsCopy } from '../src/lib/copy/errors-copy.js'
@@ -13,6 +15,8 @@ import { backupCopy } from '../src/lib/copy/backup-copy.js'
 const PROSE = {
   shell: shellCopy,
   registry: registryCopy,
+  registries: registriesCopy,
+  sources: sourcesCopy,
   trace: traceCopy,
   topology: topologyCopy,
   auth: authCopy,

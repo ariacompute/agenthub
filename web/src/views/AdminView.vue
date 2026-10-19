@@ -4,6 +4,8 @@ import { useAuthStore, PERMISSIONS } from '../lib/auth-store.js'
 import { useHubStore } from '../lib/store.js'
 import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { errorMessage } from '../lib/errors.js'
+import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
+import UnsavedPrompt from '../components/UnsavedPrompt.vue'
 import { KeyRound, Plus, Shield, Trash2, UserPlus, Users, DatabaseBackup } from 'lucide-vue-next'
 import BackupsPanel from './admin/BackupsPanel.vue'
 
@@ -18,6 +20,8 @@ const query = ref('')
 const drawerOpen = ref(false)
 const editing = ref(null)
 const confirmDelete = ref(null)
+const askSave = ref(false)
+const baseline = ref(null)
 const matrix = ref({})
 
 const form = reactive({
@@ -101,6 +105,7 @@ function resetMatrix() {
 function openCreate() {
   editing.value = null
   Object.assign(form, { id: '', email: '', name: '', password: '', status: 'active', roles: [], groups: [] })
+  baseline.value = snapshot(form)
   drawerOpen.value = true
 }
 
@@ -115,7 +120,43 @@ function openEdit(user) {
     roles: [...(user.roles ?? [])],
     groups: [...(user.groups ?? [])],
   })
+  baseline.value = snapshot(form)
   drawerOpen.value = true
+}
+
+function closeDrawer() {
+  drawerOpen.value = false
+  askSave.value = false
+  baseline.value = null
+}
+
+// One gesture, three entry points: Escape, the backdrop and Cancel all ask
+// here, and only when the form actually changed.
+function requestClose() {
+  if (isDirty(baseline.value, form)) {
+    askSave.value = true
+    return
+  }
+  closeDrawer()
+}
+
+useEscape(() => drawerOpen.value, requestClose)
+
+// The delete confirmation holds no editable state, so Escape simply dismisses
+// it — asking before closing a box that only has Confirm and Cancel would be
+// a question about nothing.
+useEscape(
+  () => confirmDelete.value !== null,
+  () => {
+    confirmDelete.value = null
+  },
+)
+
+// Saving from the prompt is the same save; the prompt steps aside so a
+// failure is reported by the drawer's own error banner.
+async function saveAndClose() {
+  askSave.value = false
+  await submitUser()
 }
 
 async function submitUser() {
@@ -130,7 +171,7 @@ async function submitUser() {
   const ok = editing.value
     ? await auth.updateUser(editing.value.id, payload)
     : await auth.createUser({ ...payload, password: form.password })
-  if (ok) drawerOpen.value = false
+  if (ok) closeDrawer()
 }
 
 async function remove(user) {
@@ -399,7 +440,7 @@ watch(query, (value) => {
     <BackupsPanel v-if="tab === 'backups'" />
 
     <!-- ---------- user drawer ---------- -->
-    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
       <form class="drawer card" @submit.prevent="submitUser">
         <div class="page-head">
           <h2>{{ t('drawerTitle') }}</h2>
@@ -448,12 +489,22 @@ watch(query, (value) => {
 
         <div class="drawer-actions">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
-          <button class="btn btn-ghost" type="button" @click="drawerOpen = false">
+          <button class="btn btn-ghost" type="button" @click="requestClose">
             {{ shell.t('actionCancel') }}
           </button>
+          <span class="muted note">{{ shell.t('escHint') }}</span>
         </div>
       </form>
     </div>
+
+    <UnsavedPrompt
+      v-if="askSave"
+      :title="shell.t('unsavedTitle')"
+      :body="shell.t('unsavedBody')"
+      @save="saveAndClose"
+      @discard="closeDrawer"
+      @cancel="askSave = false"
+    />
 
     <!-- ---------- confirm ---------- -->
     <div v-if="confirmDelete" class="drawer-backdrop" @click.self="confirmDelete = null">
@@ -645,12 +696,6 @@ watch(query, (value) => {
   gap: 12px;
   align-items: end;
   margin-block: 14px;
-}
-
-.drawer-actions {
-  display: flex;
-  gap: 10px;
-  margin-block-start: 18px;
 }
 
 @media (max-width: 1023px) {

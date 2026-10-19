@@ -8,6 +8,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { errorMessage } from '../lib/errors.js'
+import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
+import UnsavedPrompt from '../components/UnsavedPrompt.vue'
 import { Plus } from 'lucide-vue-next'
 
 const store = useHubStore()
@@ -15,6 +17,8 @@ const { t } = useCopy('registries')
 const shell = useCopy('shell')
 
 const drawerOpen = ref(false)
+const askSave = ref(false)
+const baseline = ref(null)
 const form = reactive({ id: '', name: '', description: '', autoApprove: true })
 
 const errorMessageText = computed(() => errorMessage(store.errorCode))
@@ -26,7 +30,33 @@ onMounted(() => {
 
 function openCreate() {
   Object.assign(form, { id: '', name: '', description: '', autoApprove: true })
+  baseline.value = snapshot(form)
   drawerOpen.value = true
+}
+
+function closeDrawer() {
+  drawerOpen.value = false
+  askSave.value = false
+  baseline.value = null
+}
+
+// Escape, the backdrop and the cancel button all land here; only a form that
+// was actually edited earns the prompt.
+function requestClose() {
+  if (isDirty(baseline.value, form)) {
+    askSave.value = true
+    return
+  }
+  closeDrawer()
+}
+
+useEscape(() => drawerOpen.value, requestClose)
+
+// Saving from the prompt is the same save; the prompt steps aside so a
+// failure is reported by the drawer's own error banner.
+async function saveAndClose() {
+  askSave.value = false
+  await submit()
 }
 
 async function submit() {
@@ -36,7 +66,7 @@ async function submit() {
     description: form.description.trim(),
     auto_approve: form.autoApprove,
   })
-  if (ok) drawerOpen.value = false
+  if (ok) closeDrawer()
 }
 
 async function destroy(namespace) {
@@ -123,7 +153,7 @@ async function reject(record) {
     </div>
     <div v-else class="empty">{{ t('queueEmpty') }}</div>
 
-    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
       <form class="card drawer" @submit.prevent="submit">
         <div class="page-head">
           <h2>{{ t('drawerTitle') }}</h2>
@@ -145,14 +175,24 @@ async function reject(record) {
           <span>{{ t('autoApprove') }}</span>
         </label>
         <p class="muted note">{{ t('autoApproveHint') }}</p>
-        <div style="display: flex; gap: 8px; margin-top: 8px">
+        <div class="drawer-actions">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
-          <button class="btn btn-ghost" type="button" @click="drawerOpen = false">
+          <button class="btn btn-ghost" type="button" @click="requestClose">
             {{ shell.t('actionCancel') }}
           </button>
+          <span class="muted note">{{ shell.t('escHint') }}</span>
         </div>
       </form>
     </div>
+
+    <UnsavedPrompt
+      v-if="askSave"
+      :title="shell.t('unsavedTitle')"
+      :body="shell.t('unsavedBody')"
+      @save="saveAndClose"
+      @discard="closeDrawer"
+      @cancel="askSave = false"
+    />
   </section>
 </template>
 

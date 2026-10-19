@@ -19,6 +19,9 @@ export const PERMISSIONS = [
   'grants:manage',
   'sessions:manage',
   'backups:manage',
+  'registries:manage',
+  'registry:curate',
+  'sources:manage',
 ]
 
 function code(error) {

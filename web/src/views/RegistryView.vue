@@ -5,7 +5,9 @@ import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { useHubStore, KINDS } from '../lib/store.js'
 import { errorMessage } from '../lib/errors.js'
 import { streamTask } from '../lib/api.js'
+import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
 import ResourceKindForm from '../components/ResourceKindForm.vue'
+import UnsavedPrompt from '../components/UnsavedPrompt.vue'
 import StateDot from '../components/StateDot.vue'
 import { BookOpen, Bot, Boxes, Cpu, Plug, Plus, Search, Terminal } from 'lucide-vue-next'
 
@@ -21,6 +23,8 @@ const query = ref('')
 const drawerOpen = ref(false)
 const editing = ref(null)
 const running = ref('')
+const askSave = ref(false)
+const baseline = ref(null)
 
 const KIND_ICONS = { model: Cpu, agent: Bot, mcp: Plug, skill: BookOpen, cli: Terminal, custom: Boxes }
 
@@ -111,6 +115,7 @@ function resetForm() {
 function openCreate() {
   editing.value = null
   resetForm()
+  baseline.value = snapshot(form)
   drawerOpen.value = true
 }
 
@@ -131,8 +136,28 @@ function openEdit(resource) {
     health: resource.health ?? 'healthy',
     kindConfig: resource.kind_config ?? {},
   })
+  baseline.value = snapshot(form)
   drawerOpen.value = true
 }
+
+function closeDrawer() {
+  drawerOpen.value = false
+  askSave.value = false
+  baseline.value = null
+}
+
+// Closing is the same gesture wherever it starts — Escape, the backdrop, the
+// cancel button — so all three funnel through here and only differ in whether
+// they are allowed to ask first.
+function requestClose() {
+  if (isDirty(baseline.value, form)) {
+    askSave.value = true
+    return
+  }
+  closeDrawer()
+}
+
+useEscape(() => drawerOpen.value, requestClose)
 
 function splitList(value) {
   return value
@@ -160,9 +185,16 @@ function payload() {
   return out
 }
 
+// Saving from the prompt is the same save; the prompt steps aside so a
+// failure is reported by the drawer's own error banner.
+async function saveAndClose() {
+  askSave.value = false
+  await submit()
+}
+
 async function submit() {
   const ok = editing.value ? await store.update(editing.value.id, payload()) : await store.register(payload())
-  if (ok) drawerOpen.value = false
+  if (ok) closeDrawer()
 }
 
 async function destroy(resource) {
@@ -312,7 +344,7 @@ async function tryRun(resource) {
       <span class="mono">{{ t('healthLabel') }}: {{ JSON.stringify(store.healthCounts) }}</span>
     </div>
 
-    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
       <form class="card drawer" @submit.prevent="submit">
         <div class="page-head">
           <h2>{{ t('drawerTitle') }}</h2>
@@ -376,14 +408,24 @@ async function tryRun(resource) {
         <h3 class="section-title">{{ t('sectionKindConfig') }}</h3>
         <ResourceKindForm v-model="form.kindConfig" :kind="form.kind" />
 
-        <div style="display: flex; gap: 8px; margin-top: 8px">
+        <div class="drawer-actions">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
-          <button class="btn btn-ghost" type="button" @click="drawerOpen = false">
+          <button class="btn btn-ghost" type="button" @click="requestClose">
             {{ shell.t('actionCancel') }}
           </button>
+          <span class="muted note">{{ shell.t('escHint') }}</span>
         </div>
       </form>
     </div>
+
+    <UnsavedPrompt
+      v-if="askSave"
+      :title="shell.t('unsavedTitle')"
+      :body="shell.t('unsavedBody')"
+      @save="saveAndClose"
+      @discard="closeDrawer"
+      @cancel="askSave = false"
+    />
   </section>
 </template>
 
