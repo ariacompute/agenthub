@@ -662,3 +662,39 @@ func TestStaticFallback(t *testing.T) {
 		t.Fatalf("code = %q, want not_found", body.Code)
 	}
 }
+
+// The probe endpoint is a measurement, not a judgement: it asks the resource's
+// own connector and stores what came back. An agent whose Agent Card cannot be
+// fetched is reported unhealthy even though the record may claim otherwise.
+func TestResourceProbeRecordsTheMeasuredHealth(t *testing.T) {
+	// Nothing listens on this port, so the card fetch fails.
+	down := &registry.Entry{
+		Kind: registry.KindAgent, Name: "adk", Endpoint: "http://agent.test",
+		KindConfig: &registry.KindConfig{Agent: &registry.AgentConfig{
+			CardURL: "http://127.0.0.1:1/.well-known/agent-card.json",
+		}},
+	}
+	d := testDeps(t, openConfig(""), down)
+	w := do(t, Register(d), http.MethodPost, "/api/resources/"+down.ID+"/probe", "", nil)
+	res := w.Result()
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("probe status = %d", res.StatusCode)
+	}
+	var body struct {
+		Health string `json:"health"`
+		Probed bool   `json:"probed"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Health != string(registry.HealthUnhealthy) {
+		t.Fatalf("health = %q, want unhealthy", body.Health)
+	}
+	if !body.Probed {
+		t.Fatal("probed = false, want the flag to say the value was measured")
+	}
+	if got, _ := d.Reg.Get(down.ID); got.Health != registry.HealthUnhealthy {
+		t.Fatalf("stored health = %q, want the probe to be persisted", got.Health)
+	}
+}

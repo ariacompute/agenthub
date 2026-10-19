@@ -34,13 +34,14 @@ func (c *customConnector) Invoke(ctx context.Context, req InvokeRequest) (Invoke
 	data := map[string]any{
 		"kind":     string(registry.KindCustom),
 		"resource": req.Entry.Name,
+		"provider": MockProviderName,
 		"schema":   schema,
 		"digest":   digest(req.Prompt)[:16],
 	}
 	return InvokeResult{
 		Text:      out,
 		Parts:     []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
-		Artifacts: []a2a.Artifact{artifact("custom.schema", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindCustom))},
+		Artifacts: []a2a.Artifact{artifact("custom.schema", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindCustom), "provider", MockProviderName)},
 	}, nil
 }
 

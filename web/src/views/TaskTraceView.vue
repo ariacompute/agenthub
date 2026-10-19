@@ -128,6 +128,13 @@ async function copyRaw(text) {
 function rawOf(artifact) {
   return JSON.stringify(artifact, null, 2)
 }
+
+// An offline adapter stamps provider=mock on what it produces. Without this the
+// console presents a fabricated result exactly like a real one, so a task against
+// an agent nobody deployed reads "Completed" with nothing to contradict it.
+function isMock(artifact) {
+  return artifact?.metadata?.provider === 'mock'
+}
 </script>
 
 <template>
@@ -209,6 +216,9 @@ function rawOf(artifact) {
             <div class="tl-title" style="margin-bottom: 8px">
               <strong>{{ artifact.name }}</strong>
               <span class="chip mono">{{ artifact.artifactId }}</span>
+              <span v-if="isMock(artifact)" class="chip mock-chip" :title="t('mockHint')">
+                {{ t('mockBadge') }}
+              </span>
               <button class="btn btn-ghost" type="button" @click="copyRaw(rawOf(artifact))">
                 <Copy :size="14" />
                 {{ copied ? t('copyDone') : shell.t('actionCopy') }}

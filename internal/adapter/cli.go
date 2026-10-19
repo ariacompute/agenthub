@@ -45,6 +45,7 @@ func (c *cliConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 	data := map[string]any{
 		"kind":      string(registry.KindCLI),
 		"resource":  req.Entry.Name,
+		"provider":  MockProviderName,
 		"command":   command,
 		"args":      args,
 		"exit_code": 0,
@@ -54,7 +55,7 @@ func (c *cliConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 	return InvokeResult{
 		Text:      out,
 		Parts:     []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
-		Artifacts: []a2a.Artifact{artifact("cli.receipt", 0, []a2a.Part{a2a.NewDataPart(data)}, "command", command, "truncated", boolString(truncated))},
+		Artifacts: []a2a.Artifact{artifact("cli.receipt", 0, []a2a.Part{a2a.NewDataPart(data)}, "command", command, "truncated", boolString(truncated), "provider", MockProviderName)},
 	}, nil
 }
 

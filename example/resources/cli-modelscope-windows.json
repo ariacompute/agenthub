@@ -9,10 +9,8 @@
   "repository": "https://github.com/modelscope/modelscope",
   "tags": ["cli"],
   "capabilities": ["download", "upload", "server"],
-  "health": "healthy",
   "metadata": {
     "command": "modelscope",
-    "mock_health": "healthy",
     "install": "python -m venv .venv && .venv\\Scripts\\activate && pip install modelscope",
     "path_hint": "%APPDATA%\\Python\\Python<ver>\\Scripts\\modelscope.exe 或 .venv\\Scripts\\modelscope.exe",
     "env_hint": "MODELSCOPE_API_TOKEN（服务端进程环境变量）",

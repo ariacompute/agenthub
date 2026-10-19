@@ -187,7 +187,8 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
 - **adapter 现状**：只有 model 的 `openai_compatible` 是真实实现（`internal/adapter/model_openai.go`）；
   agent / mcp / skill / cli 的 connector 仍是 `TODO(real)`，只做形状翻译。
   因此 MCP / CLI 示例表达的是**配置意图**，不是「今天就能执行」。
-- **无 endpoint 会被判 `degraded`**：CLI 三例没有 endpoint，用 `metadata.mock_health: "healthy"` 钉住显示值。
+- **示例不自我声明健康**：41 份示例都不写 `health`（省略即 `unknown`），也不写 `metadata.mock_health`；
+  CLI 六例没有 endpoint，探测后按无 endpoint 判 `degraded`。健康值只由探测（`POST /api/resources/{id}/probe`）写入。
 - **仅用于开发/演示**：不要照抄到生产；种子与生产策略见根目录 `AGENTS.md` 的 `AGENTHUB_SEED_DEMO` 一节。
 - **上游许可证**（以各自仓库 LICENSE 为准）：ADK Apache-2.0、LangGraph MIT、CrewAI MIT、pi MIT、
   deepseek-harness MIT、github-mcp-server MIT、@modelcontextprotocol/server-slack MIT、@stripe/mcp MIT、

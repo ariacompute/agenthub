@@ -11,7 +11,6 @@
   "tags": ["agent"],
   "capabilities": ["crew.kickoff", "flow.run"],
   "auth_schemes": ["bearer"],
-  "health": "healthy",
   "metadata": {
     "install": "python3 -m venv .venv && source .venv/bin/activate && pip install \"crewai[a2a]\" && crewai create crew my_crew",
     "start": "python server.py  # crew.kickoff() → A2A server on :8000",

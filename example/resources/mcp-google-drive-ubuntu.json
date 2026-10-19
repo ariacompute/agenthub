@@ -11,7 +11,6 @@
   "repository": "https://github.com/endrec/google_workspace_mcp",
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
-  "health": "healthy",
   "metadata": {
     "install": "pip install -U uv 或用 astral 安装脚本；uvx workspace-mcp --help",
     "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET（凭据与 token 缓存默认落在 ~/.config/ 下）",

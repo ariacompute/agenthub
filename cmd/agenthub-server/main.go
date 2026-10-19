@@ -118,6 +118,7 @@ func main() {
 		CLIAllowlist:    cfg.CLIAllowlist,
 		MaxOutputBytes:  cfg.MaxOutputBytes,
 		ModelRouterMode: cfg.ModelRouterMode,
+		AgentTimeout:    cfg.AgentTimeout,
 	}
 	pusher := &hub.MockNotifier{Repo: store.NewPushRepository(db)}
 	h := hub.New(cfg, reg, opts, pusher, hub.Persistence{

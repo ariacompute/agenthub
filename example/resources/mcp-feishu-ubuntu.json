@@ -11,7 +11,6 @@
   "repository": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_installation",
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
-  "health": "healthy",
   "metadata": {
     "install": "无需安装（npx 现取现用）；也可 npm install @larksuiteoapi/lark-mcp -g",
     "env_hint": "应用凭证以 -a <app_id> -s <app_secret> 传入，示例用占位符，真实值见 README",

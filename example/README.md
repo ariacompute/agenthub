@@ -209,8 +209,10 @@ listed in the corresponding JSON's `metadata.env_hint` as a reminder; no values 
   (`internal/adapter/model_openai.go`); the agent / mcp / skill / cli connectors are still
   `TODO(real)` and only translate shapes. The MCP and CLI samples therefore express
   **configuration intent**, not something executable today.
-- **No endpoint means `degraded`**: the three CLI samples have no endpoint, so they pin their
-  displayed state with `metadata.mock_health: "healthy"`.
+- **Samples never self-declare health**: none of the 41 samples sets `health` (omitted means
+  `unknown`), and none sets `metadata.mock_health`. The six CLI samples have no endpoint, so a
+  probe reports `degraded`. Health is only ever written by a probe
+  (`POST /api/resources/{id}/probe`).
 - **Development/demo only**: do not copy these into production. For seeding and production policy
   see the `AGENTHUB_SEED_DEMO` section of the root `AGENTS.md`.
 - **Upstream licences** (per each repository's own LICENSE): ADK Apache-2.0, LangGraph MIT,

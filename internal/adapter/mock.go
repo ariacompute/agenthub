@@ -14,6 +14,12 @@ import (
 // Every mock connector is deterministic: the same request always produces the
 // same bytes, which keeps the whole test suite assertion-friendly and stable
 // under -race.
+//
+// MockProviderName is the provenance every offline connector stamps on its
+// result. Without it a fabricated answer is byte-for-byte as convincing as a
+// real one, which is how a task against an agent nobody deployed could read
+// "completed" with nothing to contradict it.
+const MockProviderName = "mock"
 
 func digest(s string) string {
 	h := fnv.New64a()

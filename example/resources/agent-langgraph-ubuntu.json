@@ -11,7 +11,6 @@
   "tags": ["agent"],
   "capabilities": ["threads", "runs", "assistants"],
   "auth_schemes": ["bearer"],
-  "health": "healthy",
   "metadata": {
     "install": "git clone https://github.com/a2aproject/a2a-samples.git && cd a2a-samples/samples/python/agents/langgraph && curl -LsSf https://astral.sh/uv/install.sh | sh && uv sync",
     "start": "uv run app --host 127.0.0.1 --port 10000",

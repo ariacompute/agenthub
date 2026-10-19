@@ -9,10 +9,8 @@
   "repository": "https://github.com/modelscope/modelscope",
   "tags": ["cli"],
   "capabilities": ["download", "upload", "server"],
-  "health": "healthy",
   "metadata": {
     "command": "modelscope",
-    "mock_health": "healthy",
     "install": "python3 -m venv .venv && source .venv/bin/activate && pip install modelscope（上传另需 git + git-lfs）",
     "path_hint": "~/.local/bin/modelscope",
     "env_hint": "MODELSCOPE_API_TOKEN（modelscope login 后写入，或服务端进程环境变量）",

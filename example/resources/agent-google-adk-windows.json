@@ -11,7 +11,6 @@
   "tags": ["agent"],
   "capabilities": ["run", "run_sse"],
   "auth_schemes": ["bearer"],
-  "health": "healthy",
   "metadata": {
     "install": "python -m venv .venv && .venv\\Scripts\\activate && pip install \"google-adk[a2a]\"",
     "start": "uvicorn a2a_agent:a2a_app --host localhost --port 8001",

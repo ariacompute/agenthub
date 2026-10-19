@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agenthub/internal/a2a"
+	"agenthub/internal/adapter"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
@@ -174,6 +175,49 @@ func (d Deps) handleResourceHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"health": string(health)})
+}
+
+// handleResourceProbe asks the resource's own connector how the resource is
+// doing and stores the answer. Unlike the health endpoint, which records an
+// operator's judgement, this one is a measurement: an agent that publishes an
+// Agent Card is fetched, and a card that cannot be fetched means the agent is not
+// there however healthy the record claims to be.
+func (d Deps) handleResourceProbe(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	entry, ok := d.Reg.Get(id)
+	if !ok || !d.canAccess(r, id, true) {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
+		return
+	}
+	conn, err := adapter.For(entry, d.adapterOptions())
+	if err != nil {
+		writeDomainErr(w, err)
+		return
+	}
+	health, err := conn.Health(r.Context(), entry)
+	if err != nil {
+		writeDomainErr(w, err)
+		return
+	}
+	if err := d.Reg.SetHealth(id, health); err != nil {
+		writeDomainErr(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "health": string(health), "probed": true})
+}
+
+// adapterOptions mirrors the options the hub invokes with, so a probe measures
+// the same limits a real call will be subject to.
+func (d Deps) adapterOptions() adapter.Options {
+	opts := adapter.Options{}
+	if d.Cfg != nil {
+		opts.CLITimeout = d.Cfg.CLITimeout
+		opts.CLIAllowlist = d.Cfg.CLIAllowlist
+		opts.MaxOutputBytes = d.Cfg.MaxOutputBytes
+		opts.ModelRouterMode = d.Cfg.ModelRouterMode
+		opts.AgentTimeout = d.Cfg.AgentTimeout
+	}
+	return opts
 }
 
 func (d Deps) handleListTasks(w http.ResponseWriter, r *http.Request) {

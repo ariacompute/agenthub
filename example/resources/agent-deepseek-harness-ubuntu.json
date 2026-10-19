@@ -11,7 +11,6 @@
   "tags": ["agent", "non-a2a"],
   "capabilities": ["sessions", "plugins"],
   "auth_schemes": ["bearer"],
-  "health": "healthy",
   "metadata": {
     "install": "npx @deepseek-harness/dsh（源码：pnpm install && pnpm run build）",
     "start": "npx @deepseek-harness/dsh web",

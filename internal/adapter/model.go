@@ -25,7 +25,7 @@ type ModelProvider interface {
 // than prose so the console can display raw artifacts without localisation.
 type mockModelProvider struct{}
 
-func (mockModelProvider) Name() string { return "mock" }
+func (mockModelProvider) Name() string { return MockProviderName }
 
 func (mockModelProvider) Generate(ctx context.Context, prompt string) (string, error) {
 	if err := ctx.Err(); err != nil {

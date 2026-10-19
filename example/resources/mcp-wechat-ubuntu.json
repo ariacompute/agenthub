@@ -11,7 +11,6 @@
   "repository": "https://github.com/JingxuanC/wechat-mcp",
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
-  "health": "healthy",
   "metadata": {
     "install": "git clone https://github.com/JingxuanC/wechat-mcp && cd wechat-mcp && make build",
     "start": "./bin/wechat-mcp（扫码页面默认 http://127.0.0.1:9765，--web off 可关闭）",

@@ -11,7 +11,6 @@
   "repository": "https://open.dingtalk.com/document/ai-dev/advanced-configuration",
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
-  "health": "healthy",
   "metadata": {
     "install": "无需安装（npx 现取现用）",
     "env_hint": "DINGTALK_Client_ID, DINGTALK_Client_Secret, ACTIVE_PROFILES（如 dingtalk-contacts,dingtalk-calendar）",

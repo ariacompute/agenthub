@@ -98,6 +98,7 @@ type Config struct {
 	MaxParallel     int
 	CLITimeout      time.Duration
 	CLIAllowlist    []string
+	AgentTimeout    time.Duration
 	MaxOutputBytes  int
 	EventBuffer     int
 	PushEnabled     bool
@@ -177,6 +178,7 @@ func Load() (*Config, error) {
 		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
 		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
 		CLIAllowlist:   envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
+		AgentTimeout:   envDur("AGENTHUB_AGENT_TIMEOUT", 15*time.Second),
 		MaxOutputBytes: envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
 		EventBuffer:    envInt("AGENTHUB_EVENT_BUFFER", 512),
 		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
@@ -247,6 +249,8 @@ func (c *Config) Validate() error {
 	if c.CLITimeout <= 0 {
 		return fmt.Errorf("AGENTHUB_CLI_TIMEOUT must be positive")
 	}
+	// AgentTimeout is deliberately not required: zero is a legitimate "unset" for
+	// a config built by hand, and the adapter substitutes its own default.
 	if c.MaxOutputBytes < 1 {
 		return fmt.Errorf("AGENTHUB_MAX_OUTPUT_BYTES must be positive")
 	}

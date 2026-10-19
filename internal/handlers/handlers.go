@@ -80,6 +80,7 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("PUT /api/resources/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleUpdateResource))
 	mux.HandleFunc("DELETE /api/resources/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleDeleteResource))
 	mux.HandleFunc("POST /api/resources/{id}/health", d.requirePermission(authz.PermResourcesWrite, d.handleResourceHealth))
+	mux.HandleFunc("POST /api/resources/{id}/probe", d.requirePermission(authz.PermResourcesWrite, d.handleResourceProbe))
 	// Curation: submitting, approving, rejecting or deprecating one record is a
 	// decision about what everybody may find, so it is not resources:write.
 	mux.HandleFunc("POST /api/resources/{id}/status", d.requirePermission(authz.PermRegistryCurate, d.handleSetResourceStatus))

@@ -35,6 +35,7 @@ func (c *mcpConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 	data := map[string]any{
 		"kind":      string(registry.KindMCP),
 		"resource":  req.Entry.Name,
+		"provider":  MockProviderName,
 		"transport": transport,
 		"tools":     tools,
 		"call":      map[string]any{"tool": selected["name"], "arguments": map[string]any{"query": req.Prompt}, "result": map[string]any{"ok": true}},
@@ -43,8 +44,8 @@ func (c *mcpConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 		Text:  out,
 		Parts: []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
 		Artifacts: []a2a.Artifact{
-			artifact("mcp.tools", 0, []a2a.Part{a2a.NewDataPart(map[string]any{"tools": tools})}, "kind", string(registry.KindMCP)),
-			artifact("mcp.call", 1, []a2a.Part{a2a.NewDataPart(data["call"].(map[string]any))}, "transport", transport),
+			artifact("mcp.tools", 0, []a2a.Part{a2a.NewDataPart(map[string]any{"tools": tools})}, "kind", string(registry.KindMCP), "provider", MockProviderName),
+			artifact("mcp.call", 1, []a2a.Part{a2a.NewDataPart(data["call"].(map[string]any))}, "transport", transport, "provider", MockProviderName),
 		},
 	}, nil
 }

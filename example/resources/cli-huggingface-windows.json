@@ -9,10 +9,8 @@
   "repository": "https://github.com/huggingface/huggingface_hub",
   "tags": ["cli"],
   "capabilities": ["auth", "download", "upload"],
-  "health": "healthy",
   "metadata": {
     "command": "hf",
-    "mock_health": "healthy",
     "install": "python -m venv .venv && .venv\\Scripts\\activate && pip install -U \"huggingface_hub[cli]\"",
     "path_hint": "%APPDATA%\\Python\\Python<ver>\\Scripts\\hf.exe 或 .venv\\Scripts\\hf.exe",
     "env_hint": "HF_TOKEN（服务端进程环境变量）",

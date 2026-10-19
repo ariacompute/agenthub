@@ -11,7 +11,6 @@
   "repository": "https://github.com/endrec/google_workspace_mcp",
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
-  "health": "healthy",
   "metadata": {
     "install": "winget install astral-sh.uv；uvx workspace-mcp --help",
     "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET（凭据与 token 缓存落在 %USERPROFILE%\\.config\\ 下）",

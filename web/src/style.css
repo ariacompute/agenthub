@@ -415,6 +415,14 @@ textarea:focus {
   font-weight: 600;
 }
 
+/* Marks a result produced by an offline adapter. It has to look different from
+   the ordinary chips: the whole point is that it is not a real answer. */
+.mock-chip {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-2);
+}
+
 .mono {
   font-family: var(--font-mono);
   font-size: 12px;

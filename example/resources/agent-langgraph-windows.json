@@ -11,7 +11,6 @@
   "tags": ["agent"],
   "capabilities": ["threads", "runs", "assistants"],
   "auth_schemes": ["bearer"],
-  "health": "healthy",
   "metadata": {
     "install": "git clone https://github.com/a2aproject/a2a-samples.git; cd a2a-samples\\samples\\python\\agents\\langgraph; powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"; uv sync",
     "start": "uv run app --host localhost --port 10000",

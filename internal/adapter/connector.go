@@ -8,6 +8,8 @@ package adapter
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"time"
 
 	"agenthub/internal/a2a"
@@ -31,7 +33,13 @@ type Options struct {
 	// ModelRouterMode is the instance wide provider mode (AGENTHUB_MODEL_ROUTER_MODE)
 	// model entries inherit when they do not name one themselves.
 	ModelRouterMode string
+	// AgentTimeout bounds one Agent Card fetch plus one message/send.
+	AgentTimeout time.Duration
 }
+
+// DefaultAgentTimeout applies when no timeout is configured, so a card fetch can
+// never hang a task indefinitely.
+const DefaultAgentTimeout = 15 * time.Second
 
 // InvokeRequest is one call to a registered resource.
 type InvokeRequest struct {
@@ -72,7 +80,17 @@ func For(e *registry.Entry, opts Options) (Connector, error) {
 		mode := defaultMode(opts)
 		return &modelConnector{router: newModelRouterFor(e, mode), defaultMode: mode}, nil
 	case registry.KindAgent:
-		return &agentConnector{}, nil
+		// An entry that publishes an Agent Card is called for real; one that does
+		// not has no endpoint to speak to and stays on the offline mock.
+		timeout := opts.AgentTimeout
+		if timeout <= 0 {
+			timeout = DefaultAgentTimeout
+		}
+		cardURL := ""
+		if e.KindConfig != nil && e.KindConfig.Agent != nil {
+			cardURL = strings.TrimSpace(e.KindConfig.Agent.CardURL)
+		}
+		return &agentConnector{cardURL: cardURL, client: &http.Client{Timeout: timeout}, timeout: timeout}, nil
 	case registry.KindMCP:
 		return &mcpConnector{}, nil
 	case registry.KindSkill:

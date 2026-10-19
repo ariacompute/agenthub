@@ -10,7 +10,6 @@
   "repository": "https://github.com/anthropics/skills",
   "tags": ["skill"],
   "capabilities": ["extract_text", "fill_form"],
-  "health": "healthy",
   "metadata": {
     "install": "git clone https://github.com/anthropics/skills C:\\Users\\<user>\\skills",
     "path_hint": "C:\\Users\\<user>\\skills\\pdf\\SKILL.md（把 <user> 换成你的用户名）",

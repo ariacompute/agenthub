@@ -35,6 +35,7 @@ func (c *skillConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	data := map[string]any{
 		"kind":     string(registry.KindSkill),
 		"resource": req.Entry.Name,
+		"provider": MockProviderName,
 		"version":  req.Entry.Version,
 		"trigger":  req.Prompt,
 		"steps":    steps,
@@ -44,7 +45,7 @@ func (c *skillConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	return InvokeResult{
 		Text:      out,
 		Parts:     []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
-		Artifacts: []a2a.Artifact{artifact("skill.manual", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindSkill))},
+		Artifacts: []a2a.Artifact{artifact("skill.manual", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindSkill), "provider", MockProviderName)},
 	}, nil
 }
 

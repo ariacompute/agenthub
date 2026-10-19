@@ -9,10 +9,8 @@
   "repository": "https://github.com/cli/cli",
   "tags": ["cli"],
   "capabilities": ["status", "log"],
-  "health": "healthy",
   "metadata": {
     "command": "gh",
-    "mock_health": "healthy",
     "install": "winget install --id GitHub.cli",
     "path_hint": "C:\\Program Files\\GitHub CLI\\gh.exe",
     "docs": "https://cli.github.com/"
