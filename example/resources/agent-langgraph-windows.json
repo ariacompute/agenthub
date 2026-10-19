@@ -1,0 +1,31 @@
+{
+  "id": "example-agent-langgraph-windows",
+  "kind": "agent",
+  "namespace": "example-windows",
+  "name": "langgraph",
+  "display_name": "LangGraph（Windows）",
+  "description": "LangGraph agent 经 A2A 官方样例 a2aproject/a2a-samples（samples/python/agents/langgraph）暴露，JSON-RPC 端点与 Agent Card 同源。Windows 用 PowerShell 安装 uv 并显式绑定 --host localhost --port 10000。",
+  "endpoint": "http://localhost:10000",
+  "version": "1.0.0",
+  "repository": "https://github.com/langchain-ai/langgraph",
+  "tags": ["agent"],
+  "capabilities": ["threads", "runs", "assistants"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "install": "git clone https://github.com/a2aproject/a2a-samples.git; cd a2a-samples\\samples\\python\\agents\\langgraph; powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"; uv sync",
+    "start": "uv run app --host localhost --port 10000",
+    "port": "10000",
+    "sample_path": "samples/python/agents/langgraph",
+    "docs": "https://github.com/a2aproject/a2a-samples/tree/main/samples/python/agents/langgraph"
+  },
+  "kind_config": {
+    "agent": {
+      "card_url": "http://localhost:10000/.well-known/agent-card.json",
+      "protocol_version": "a2a/0.3",
+      "capabilities": ["streaming", "pushNotifications"],
+      "skills": ["threads", "runs"],
+      "auth_scheme": "bearer"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "example-skill-skillssh-find-skills-windows",
+  "kind": "skill",
+  "namespace": "example-windows",
+  "name": "find-skills",
+  "display_name": "skills.sh：find-skills（Windows）",
+  "description": "skills.sh 是 Vercel Labs 维护的开放 Agent Skills 目录（源码 vercel-labs/skills）。Windows 上 npx 需包一层 cmd /c；npx skills 会帮你抹平 Claude Code / Codex / Cursor / Copilot / Gemini 各自的 skills 目录差异。",
+  "source_id": "skills.sh",
+  "endpoint": "file:///C:/Users/<user>/<project>/.agents/skills/find-skills",
+  "version": "1.0.0",
+  "repository": "https://github.com/vercel-labs/skills",
+  "tags": ["skill"],
+  "capabilities": ["find_skills", "add_skill"],
+  "health": "healthy",
+  "metadata": {
+    "install": "cmd /c npx skills add vercel-labs/skills",
+    "discover": "cmd /c npx skills find",
+    "path_hint": "C:\\Users\\<user>\\<project>\\.agents\\skills\\find-skills\\SKILL.md",
+    "docs": "https://www.skills.sh"
+  },
+  "kind_config": {
+    "skill": {
+      "version": "1.0.0",
+      "repository": "https://github.com/vercel-labs/skills",
+      "package": "vercel-labs/skills",
+      "triggers": ["找 skill", "安装 skill"],
+      "steps": ["cmd /c npx skills find", "cmd /c npx skills add <owner/repo>"],
+      "tools": ["find_skills", "add_skill"],
+      "docs": "SKILL.md"
+    }
+  }
+}

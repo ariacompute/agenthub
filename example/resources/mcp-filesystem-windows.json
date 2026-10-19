@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-filesystem-windows",
+  "kind": "mcp",
+  "namespace": "example-windows",
+  "name": "filesystem",
+  "display_name": "MCP Filesystem（Windows）",
+  "description": "Model Context Protocol 官方 reference server。Windows 上 npx 必须包一层 cmd /c（官方 README 明文要求），否则 MCP 客户端无法创建子进程。",
+  "endpoint": "stdio://filesystem",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/modelcontextprotocol/servers",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（npx 现取现用）",
+    "path_hint": "C:\\Users\\<user>\\docs（把 <user> 换成你的用户名）",
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\<user>\\docs"],
+      "tool_allowlist": ["read_file", "write_file", "list_directory", "search_files"]
+    }
+  }
+}

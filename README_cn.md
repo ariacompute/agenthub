@@ -37,7 +37,7 @@ curl localhost:3500/.well-known/agent.json
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
 registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=true` 才会得到下面示例所依赖的
-五条 `demo-*` 资源。
+五条 `demo-*` 资源，也可以直接灌 [`example/`](example/README.md) 里那份真实目录。
 
 ### 版本打标
 
@@ -47,6 +47,34 @@ registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=t
 **`version@commit`**（如 `v0.2.0@1a2b3c4`），构建偏离干净 tag 时另起一行显示 `+3 dirty`
 之类的偏离说明。未打标的构建上报哨兵值 `dev`，不冒充发布号；镜像经 `VERSION` / `COMMIT` /
 `DISTANCE` / `DIRTY` 构建参数传入同一取值（`make docker-build`）。
+
+## 示例
+
+[`example/`](example/README.md) 提供一份可直接灌进运行实例的真实目录：**41 份完整
+`registry.Entry` 载荷**加一个可重复执行的装载脚本，五类资产各有 Windows 与 Ubuntu 两套形态。
+
+```bash
+cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
+                         # 并填 AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
+./example/load.sh        # 按 uname -s 选平台
+./example/load.sh --all  # 两个平台都灌
+```
+
+| 类别 | 注册了什么 |
+| --- | --- |
+| model | OpenAI 兼容网关；凭据既不进 JSON 也不进库——`kind_config.model.api_key_env` 只存环境变量名，真实值由服务端在调用时读取 |
+| agent | Google ADK、LangGraph、CrewAI、Pi、DeepSeek Harness |
+| mcp | 官方 filesystem server，外加 GitHub、Google Drive、Google Docs、Gmail、Slack、Stripe、微信、钉钉、飞书 |
+| skill | `anthropics/skills` 与 [skills.sh](https://www.skills.sh) |
+| cli | `gh`、`hf`（HuggingFace）、`modelscope` |
+
+两个平台各落一个命名空间（`example-ubuntu` / `example-windows`），因为去重启用键是
+`(namespace, name, version)`。装载脚本先 POST、命中去重键再回退 PUT（`PUT` 不是 upsert），
+因此可反复执行。
+
+`example/README.md` 另附载荷契约（21 个可用键、`kind` / `transport` / `health` / `status` 四类枚举、
+`kind_config`）、每类上游项目的 Windows/Ubuntu 安装与启动命令，以及两个最容易踩的配置项：
+网关的 `AGENTHUB_EXAMPLE_API_KEY` 与 CLI 的 `AGENTHUB_CLI_ALLOWLIST`。
 
 ## 部署
 

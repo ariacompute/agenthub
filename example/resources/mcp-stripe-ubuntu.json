@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-stripe-ubuntu",
+  "kind": "mcp",
+  "namespace": "example-ubuntu",
+  "name": "stripe",
+  "display_name": "Stripe MCP（Ubuntu，本地 npx）",
+  "description": "Stripe 官方 @stripe/mcp。密钥经服务端进程环境提供（STRIPE_SECRET_KEY），不写进 args、不写进 JSON；另有远程形态 https://mcp.stripe.com（OAuth），见 README。",
+  "endpoint": "stdio://stripe",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/stripe/ai",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（npx 现取现用）",
+    "env_hint": "STRIPE_SECRET_KEY（服务端进程环境变量；也可写成 args --api-key=…，但那样密钥会进库）",
+    "docs": "https://docs.stripe.com/mcp"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@stripe/mcp", "--tools=all"],
+      "tool_allowlist": ["create_customer", "list_customers", "create_payment_link", "list_payment_intents"]
+    }
+  }
+}

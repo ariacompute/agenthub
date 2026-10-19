@@ -44,7 +44,7 @@ var Dirty = "false"
 
 // ProtocolVersion is the A2A revision implemented by internal/a2a. It tracks the
 // protocol, not the build, so it is never stamped and stays a const.
-const ProtocolVersion = "0.2.0"
+const ProtocolVersion = "0.3.0"
 
 // Build returns the "version@commit" string the console and logs show, e.g.
 // "v0.2.0@1a2b3c4". It degrades to the version alone when the build carried no

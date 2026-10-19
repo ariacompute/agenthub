@@ -1,0 +1,30 @@
+{
+  "id": "example-cli-modelscope-windows",
+  "kind": "cli",
+  "namespace": "example-windows",
+  "name": "modelscope",
+  "display_name": "ModelScope CLI（Windows）",
+  "description": "魔搭 ModelScope CLI。Windows 下控制台脚本落在 Scripts\\modelscope.exe；若 command 写成绝对路径，AGENTHUB_CLI_ALLOWLIST 要写成同样的整串。",
+  "version": "1.0.0",
+  "repository": "https://github.com/modelscope/modelscope",
+  "tags": ["cli"],
+  "capabilities": ["download", "upload", "server"],
+  "health": "healthy",
+  "metadata": {
+    "command": "modelscope",
+    "mock_health": "healthy",
+    "install": "python -m venv .venv && .venv\\Scripts\\activate && pip install modelscope",
+    "path_hint": "%APPDATA%\\Python\\Python<ver>\\Scripts\\modelscope.exe 或 .venv\\Scripts\\modelscope.exe",
+    "env_hint": "MODELSCOPE_API_TOKEN（服务端进程环境变量）",
+    "docs": "https://www.modelscope.cn/docs/sdk/cli"
+  },
+  "kind_config": {
+    "cli": {
+      "command": "modelscope",
+      "allowlist": ["download", "upload", "login", "create", "server"],
+      "timeout_ms": 15000,
+      "max_output_bytes": 65536,
+      "work_dir": "C:\\Users\\<user>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "example-cli-modelscope-ubuntu",
+  "kind": "cli",
+  "namespace": "example-ubuntu",
+  "name": "modelscope",
+  "display_name": "ModelScope CLI（Ubuntu）",
+  "description": "魔搭 ModelScope CLI：pip install modelscope 后即用 modelscope 命令。子命令：login / download / upload / create / scan-cache / clear-cache / llamafile / server / plugin / skills / modelcard / pipeline。上传还需 git 与 git-lfs。",
+  "version": "1.0.0",
+  "repository": "https://github.com/modelscope/modelscope",
+  "tags": ["cli"],
+  "capabilities": ["download", "upload", "server"],
+  "health": "healthy",
+  "metadata": {
+    "command": "modelscope",
+    "mock_health": "healthy",
+    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install modelscope（上传另需 git + git-lfs）",
+    "path_hint": "~/.local/bin/modelscope",
+    "env_hint": "MODELSCOPE_API_TOKEN（modelscope login 后写入，或服务端进程环境变量）",
+    "docs": "https://www.modelscope.cn/docs/sdk/cli"
+  },
+  "kind_config": {
+    "cli": {
+      "command": "modelscope",
+      "allowlist": ["download", "upload", "login", "create", "server"],
+      "timeout_ms": 15000,
+      "max_output_bytes": 65536
+    }
+  }
+}

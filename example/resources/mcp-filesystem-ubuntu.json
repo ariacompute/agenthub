@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-filesystem-ubuntu",
+  "kind": "mcp",
+  "namespace": "example-ubuntu",
+  "name": "filesystem",
+  "display_name": "MCP Filesystem（Ubuntu）",
+  "description": "Model Context Protocol 官方 reference server：把本地目录以 stdio MCP server 暴露出来。npx 直接跑，无需 Docker。",
+  "endpoint": "stdio://filesystem",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/modelcontextprotocol/servers",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（npx 现取现用）",
+    "path_hint": "/home/<user>/docs（把 <user> 换成你的用户名）",
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/<user>/docs"],
+      "tool_allowlist": ["read_file", "write_file", "list_directory", "search_files"]
+    }
+  }
+}

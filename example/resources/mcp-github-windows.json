@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-github-windows",
+  "kind": "mcp",
+  "namespace": "example-windows",
+  "name": "github",
+  "display_name": "GitHub MCP Server（Windows，官方远程 HTTP）",
+  "description": "GitHub 官方远程 MCP 端点 https://api.githubcopilot.com/mcp/，走 OAuth，streamable-http 传输。同一 server 的两种接入形态在两个平台都能用，这里拆开是为了同时演示 stdio 与 streamable-http。",
+  "endpoint": "https://api.githubcopilot.com/mcp/",
+  "transport": "streamable-http",
+  "version": "1.0.0",
+  "repository": "https://github.com/github/github-mcp-server",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "auth_schemes": ["oauth"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（远程端点，浏览器完成 OAuth 授权）",
+    "docs": "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "streamable-http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth_schemes": ["oauth"],
+      "tool_allowlist": ["get_issue", "create_issue", "list_pull_requests", "search_code"]
+    }
+  }
+}

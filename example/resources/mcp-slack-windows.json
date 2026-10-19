@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-slack-windows",
+  "kind": "mcp",
+  "namespace": "example-windows",
+  "name": "slack",
+  "display_name": "Slack MCP（Windows）",
+  "description": "Anthropic 官方 Slack MCP server。Windows 上 npx 必须包一层 cmd /c（官方 MCP README 明文要求）。",
+  "endpoint": "stdio://slack",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/modelcontextprotocol/servers",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（npx 现取现用）",
+    "env_hint": "SLACK_BOT_TOKEN, SLACK_TEAM_ID（服务端进程环境变量，不要写进 JSON）",
+    "docs": "https://www.npmjs.com/package/@modelcontextprotocol/server-slack"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-slack"],
+      "tool_allowlist": ["slack_list_channels", "slack_post_message", "slack_reply_to_thread"]
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "example-agent-langgraph-ubuntu",
+  "kind": "agent",
+  "namespace": "example-ubuntu",
+  "name": "langgraph",
+  "display_name": "LangGraph（Ubuntu）",
+  "description": "LangGraph agent 经 A2A 官方样例 a2aproject/a2a-samples（samples/python/agents/langgraph）暴露：a2a-sdk 的 A2AStarletteApplication 在 /.well-known/agent-card.json 发 Agent Card，JSON-RPC 端点与 card 同源。默认端口 10000，需 Python 3.12+ 与 uv。",
+  "endpoint": "http://127.0.0.1:10000",
+  "version": "1.0.0",
+  "repository": "https://github.com/langchain-ai/langgraph",
+  "tags": ["agent"],
+  "capabilities": ["threads", "runs", "assistants"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "install": "git clone https://github.com/a2aproject/a2a-samples.git && cd a2a-samples/samples/python/agents/langgraph && curl -LsSf https://astral.sh/uv/install.sh | sh && uv sync",
+    "start": "uv run app --host 127.0.0.1 --port 10000",
+    "port": "10000",
+    "sample_path": "samples/python/agents/langgraph",
+    "docs": "https://github.com/a2aproject/a2a-samples/tree/main/samples/python/agents/langgraph"
+  },
+  "kind_config": {
+    "agent": {
+      "card_url": "http://127.0.0.1:10000/.well-known/agent-card.json",
+      "protocol_version": "a2a/0.3",
+      "capabilities": ["streaming", "pushNotifications"],
+      "skills": ["threads", "runs"],
+      "auth_scheme": "bearer"
+    }
+  }
+}

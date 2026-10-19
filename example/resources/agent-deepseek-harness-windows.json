@@ -1,0 +1,29 @@
+{
+  "id": "example-agent-deepseek-harness-windows",
+  "kind": "agent",
+  "namespace": "example-windows",
+  "name": "deepseek-harness",
+  "display_name": "DeepSeek Harness / dsh（Windows，非 A2A 对照组）",
+  "description": "DeepSeek AI 开源的 agent harness（dsh）。Windows 上经 PowerShell 用 npm 包；命令与 Ubuntu 一致，差异只在 Node 安装方式与路径。默认 Web UI http://127.0.0.1:3080。官方不实现 A2A、不发 Agent Card。本例作为「非 A2A 资产如何登记」的对照组保留。",
+  "endpoint": "http://localhost:3080",
+  "version": "1.0.0",
+  "repository": "https://github.com/deepseek-ai/deepseek-harness",
+  "tags": ["agent", "non-a2a"],
+  "capabilities": ["sessions", "plugins"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "install": "winget install OpenJS.NodeJS.LTS  # 或 nvm-windows，需 Node.js 22.19+",
+    "start": "npx @deepseek-harness/dsh web",
+    "port": "3080",
+    "docs": "https://deepseek-harness.github.io/deepseek-harness/",
+    "a2a": "unsupported — the Web UI on :3080 is not an A2A server; see example/README_cn.md for how the control group is marked"
+  },
+  "kind_config": {
+    "agent": {
+      "capabilities": ["streaming"],
+      "skills": ["sessions"],
+      "auth_scheme": "bearer"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "example-agent-google-adk-ubuntu",
+  "kind": "agent",
+  "namespace": "example-ubuntu",
+  "name": "google-adk",
+  "display_name": "Google ADK（Ubuntu）",
+  "description": "Google Agent Development Kit，用官方 to_a2a(root_agent, port=8001) 包成 A2A server：uvicorn 起服务时自动在 /.well-known/agent-card.json 发布 Agent Card（官方标注 experimental）。",
+  "endpoint": "http://127.0.0.1:8001",
+  "version": "1.0.0",
+  "repository": "https://github.com/google/adk-python",
+  "tags": ["agent"],
+  "capabilities": ["run", "run_sse"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install \"google-adk[a2a]\"",
+    "start": "uvicorn a2a_agent:a2a_app --host 127.0.0.1 --port 8001",
+    "port": "8001",
+    "docs": "https://adk.dev/a2a/quickstart-exposing/"
+  },
+  "kind_config": {
+    "agent": {
+      "card_url": "http://127.0.0.1:8001/.well-known/agent-card.json",
+      "protocol_version": "a2a/0.3",
+      "capabilities": ["streaming"],
+      "skills": ["run"],
+      "auth_scheme": "bearer"
+    }
+  }
+}

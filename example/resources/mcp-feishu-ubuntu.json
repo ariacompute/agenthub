@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-feishu-ubuntu",
+  "kind": "mcp",
+  "namespace": "example-ubuntu",
+  "name": "feishu",
+  "display_name": "飞书 OpenAPI MCP（Ubuntu）",
+  "description": "飞书开放平台官方 @larksuiteoapi/lark-mcp：把飞书 OpenAPI 封装成 MCP 工具，--oauth 走应用授权。Lark 海外版另加 -d https://open.larksuite.com/。",
+  "endpoint": "stdio://lark",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_installation",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（npx 现取现用）；也可 npm install @larksuiteoapi/lark-mcp -g",
+    "env_hint": "应用凭证以 -a <app_id> -s <app_secret> 传入，示例用占位符，真实值见 README",
+    "docs": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_installation"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@larksuiteoapi/lark-mcp", "mcp", "-a", "<app_id>", "-s", "<app_secret>", "--oauth"],
+      "tool_allowlist": ["docx_get_document_content", "im_send_message", "bitable_list_records"]
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "example-mcp-wechat-ubuntu",
+  "kind": "mcp",
+  "namespace": "example-ubuntu",
+  "name": "wechat",
+  "display_name": "微信 MCP（Ubuntu，iLink 协议）",
+  "description": "微信没有官方发布的 MCP server；腾讯 2026 开放的是 iLink / ClawBot 个人 Bot 协议（ilinkai.weixin.qq.com）。本例采用基于该协议的社区封装 wechat-mcp（Go 静态二进制、纯标准库、MIT、stdio）：扫码绑定后收发消息。",
+  "endpoint": "stdio://wechat",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/JingxuanC/wechat-mcp",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "git clone https://github.com/JingxuanC/wechat-mcp && cd wechat-mcp && make build",
+    "start": "./bin/wechat-mcp（扫码页面默认 http://127.0.0.1:9765，--web off 可关闭）",
+    "env_hint": "WECHAT_MCP_STATE（可选，覆盖状态文件路径；默认 $XDG_CONFIG_HOME/wechat-mcp/state.json）",
+    "path_hint": "/home/<user>/wechat-mcp/bin/wechat-mcp（把 <user> 换成你的用户名）",
+    "docs": "https://github.com/JingxuanC/wechat-mcp"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "/home/<user>/wechat-mcp/bin/wechat-mcp",
+      "args": [],
+      "tool_allowlist": ["wechat_get_qrcode", "wechat_qr_poll", "wechat_send_message", "wechat_recent_messages"]
+    }
+  }
+}

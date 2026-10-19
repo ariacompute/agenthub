@@ -327,14 +327,14 @@ else
 	pass "healthz reports commit $COMMIT"
 fi
 expect 'healthz reports the database up' up "$(jget database)"
-expect 'healthz carries the A2A protocol version' 0.2.0 "$(jget protocolVersion)"
+expect 'healthz carries the A2A protocol version' 0.3.0 "$(jget protocolVersion)"
 expect_match 'healthz lists the A2A methods' 'message/send' "$(jget methods)"
 LEGACY=$(jget legacyMethods)
 
 http GET /.well-known/agent.json
 expect 'agent card responds 200' 200 "$STATUS"
 expect 'agent card name' agenthub "$(jget name)"
-expect 'agent card protocol version' 0.2.0 "$(jget protocolVersion)"
+expect 'agent card protocol version' 0.3.0 "$(jget protocolVersion)"
 expect_match 'agent card url honours the request host' "$BASE_URL" "$(jget url)"
 if [ "$(jlen skills)" -gt 0 ]; then
 	pass "agent card exposes $(jlen skills) seeded skills"

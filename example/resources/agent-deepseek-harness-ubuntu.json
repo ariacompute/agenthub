@@ -1,0 +1,29 @@
+{
+  "id": "example-agent-deepseek-harness-ubuntu",
+  "kind": "agent",
+  "namespace": "example-ubuntu",
+  "name": "deepseek-harness",
+  "display_name": "DeepSeek Harness / dsh（Ubuntu，非 A2A 对照组）",
+  "description": "DeepSeek AI 开源的 agent harness（dsh），everything-is-a-plugin 架构、基于 Cordis。官方 README：npx @deepseek-harness/dsh web 起 Web UI，默认 http://127.0.0.1:3080，--no-open 可不开浏览器。官方不实现 A2A、不发 Agent Card（Web UI 与 A2A JSON-RPC 是两回事）。处于 developer preview，API 可能破坏性变更。本例作为「非 A2A 资产如何登记」的对照组保留。",
+  "endpoint": "http://127.0.0.1:3080",
+  "version": "1.0.0",
+  "repository": "https://github.com/deepseek-ai/deepseek-harness",
+  "tags": ["agent", "non-a2a"],
+  "capabilities": ["sessions", "plugins"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "install": "npx @deepseek-harness/dsh（源码：pnpm install && pnpm run build）",
+    "start": "npx @deepseek-harness/dsh web",
+    "port": "3080",
+    "docs": "https://deepseek-harness.github.io/deepseek-harness/",
+    "a2a": "unsupported — the Web UI on :3080 is not an A2A server; see example/README_cn.md for how the control group is marked"
+  },
+  "kind_config": {
+    "agent": {
+      "capabilities": ["streaming"],
+      "skills": ["sessions"],
+      "auth_scheme": "bearer"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "example-skill-skillssh-find-skills-ubuntu",
+  "kind": "skill",
+  "namespace": "example-ubuntu",
+  "name": "find-skills",
+  "display_name": "skills.sh：find-skills（Ubuntu）",
+  "description": "skills.sh 是 Vercel Labs 维护的开放 Agent Skills 目录（源码 vercel-labs/skills）。npx skills add <owner/repo> 一条命令安装到项目根 .agents/skills/<name>/；多数 agent 读这个共享目录。find-skills 是目录上安装量最高的 skill，本身即「发现其他 skill」的元 skill。",
+  "source_id": "skills.sh",
+  "endpoint": "file:///home/<user>/<project>/.agents/skills/find-skills",
+  "version": "1.0.0",
+  "repository": "https://github.com/vercel-labs/skills",
+  "tags": ["skill"],
+  "capabilities": ["find_skills", "add_skill"],
+  "health": "healthy",
+  "metadata": {
+    "install": "npx skills add vercel-labs/skills",
+    "discover": "npx skills find",
+    "path_hint": "/home/<user>/<project>/.agents/skills/find-skills/SKILL.md",
+    "docs": "https://www.skills.sh"
+  },
+  "kind_config": {
+    "skill": {
+      "version": "1.0.0",
+      "repository": "https://github.com/vercel-labs/skills",
+      "package": "vercel-labs/skills",
+      "triggers": ["找 skill", "安装 skill"],
+      "steps": ["npx skills find", "npx skills add <owner/repo>"],
+      "tools": ["find_skills", "add_skill"],
+      "docs": "SKILL.md"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-dingtalk-ubuntu",
+  "kind": "mcp",
+  "namespace": "example-ubuntu",
+  "name": "dingtalk",
+  "display_name": "钉钉 MCP（Ubuntu）",
+  "description": "钉钉开放平台官方 dingtalk-mcp：通讯录、日程、待办、机器人发消息等。用 ACTIVE_PROFILES 控制模块加载，默认只加载通讯录。",
+  "endpoint": "stdio://dingtalk",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://open.dingtalk.com/document/ai-dev/advanced-configuration",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "无需安装（npx 现取现用）",
+    "env_hint": "DINGTALK_Client_ID, DINGTALK_Client_Secret, ACTIVE_PROFILES（如 dingtalk-contacts,dingtalk-calendar）",
+    "docs": "https://open.dingtalk.com/document/aipass/install-and-use-the-dingtalk-calendar-mcp"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "dingtalk-mcp@latest"],
+      "tool_allowlist": ["get_contacts", "send_robot_message", "create_calendar_event", "create_todo"]
+    }
+  }
+}

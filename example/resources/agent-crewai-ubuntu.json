@@ -1,0 +1,30 @@
+{
+  "id": "example-agent-crewai-ubuntu",
+  "kind": "agent",
+  "namespace": "example-ubuntu",
+  "name": "crewai",
+  "display_name": "CrewAI（Ubuntu）",
+  "description": "CrewAI 原生 A2A server：给 Agent 传 a2a=A2AServerConfig(url=\"http://127.0.0.1:8000\")，crew.kickoff() 启动时即在 /.well-known/agent-card.json 发 Agent Card，并接受 A2A JSON-RPC 任务（与 A2AClientConfig 同为双向一等公民）。",
+  "endpoint": "http://127.0.0.1:8000",
+  "version": "1.0.0",
+  "repository": "https://github.com/crewAIInc/crewAI",
+  "tags": ["agent"],
+  "capabilities": ["crew.kickoff", "flow.run"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install \"crewai[a2a]\" && crewai create crew my_crew",
+    "start": "python server.py  # crew.kickoff() → A2A server on :8000",
+    "port": "8000",
+    "docs": "https://docs.crewai.com/en/learn/a2a-agent-delegation"
+  },
+  "kind_config": {
+    "agent": {
+      "card_url": "http://127.0.0.1:8000/.well-known/agent-card.json",
+      "protocol_version": "a2a/0.3",
+      "capabilities": ["streaming"],
+      "skills": ["crew.kickoff"],
+      "auth_scheme": "bearer"
+    }
+  }
+}

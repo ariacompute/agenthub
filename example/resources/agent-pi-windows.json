@@ -1,0 +1,29 @@
+{
+  "id": "example-agent-pi-windows",
+  "kind": "agent",
+  "namespace": "example-windows",
+  "name": "pi",
+  "display_name": "Pi（Windows，非 A2A 对照组）",
+  "description": "pi：极简、可扩展的 agent harness。Windows 用官方 PowerShell 安装器（irm https://pi.dev/install.ps1 | iex），需 Node.js 22.19+。官方不实现 A2A、不发 Agent Card；程序化集成走 --mode rpc（stdin/stdout 上的 JSONL）。本例作为「非 A2A 资产如何登记」的对照组保留。",
+  "endpoint": "stdio://pi",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/earendil-works/pi",
+  "tags": ["agent", "non-a2a"],
+  "capabilities": ["rpc.prompt", "session/new", "session/fork"],
+  "health": "healthy",
+  "metadata": {
+    "install": "powershell -c \"irm https://pi.dev/install.ps1 | iex\"（或用 winget 装 Node.js 22.19+）",
+    "start": "cd /path/to/project && pi --mode rpc --no-session",
+    "docs": "https://pi.dev/docs/latest",
+    "a2a": "unsupported — no Agent Card is published; see example/README_cn.md for how the control group is marked",
+    "env_hint": "provider 凭据在 Pi 内用 /login 配置，不写进 JSON"
+  },
+  "kind_config": {
+    "agent": {
+      "capabilities": ["streaming"],
+      "skills": ["rpc.prompt"],
+      "auth_scheme": "none"
+    }
+  }
+}

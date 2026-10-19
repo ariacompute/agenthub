@@ -1,0 +1,28 @@
+{
+  "id": "example-model-gateway",
+  "kind": "model",
+  "namespace": "example",
+  "name": "aria-gateway",
+  "display_name": "Aria Gateway（OpenAI 兼容）",
+  "description": "Aria 网关的 OpenAI 兼容 chat completions 端点，来自 test.log。凭证只以环境变量名出现：api_key_env 指向服务端进程环境里的 AGENTHUB_EXAMPLE_API_KEY，真实 key 既不进这份 JSON 也不进库。",
+  "endpoint": "https://gateway.ariacompute.com",
+  "version": "1.0.0",
+  "repository": "https://gateway.ariacompute.com",
+  "tags": ["gateway"],
+  "capabilities": ["chat.completions"],
+  "auth_schemes": ["bearer"],
+  "health": "healthy",
+  "metadata": {
+    "docs": "https://gateway.ariacompute.com",
+    "env_hint": "AGENTHUB_EXAMPLE_API_KEY（服务端进程环境变量，见 README）"
+  },
+  "kind_config": {
+    "model": {
+      "provider_mode": "openai_compatible",
+      "endpoint": "https://gateway.ariacompute.com",
+      "model_id": "__AGENTHUB_EXAMPLE_MODEL_ID__",
+      "api_key_env": "AGENTHUB_EXAMPLE_API_KEY",
+      "timeout_ms": 30000
+    }
+  }
+}

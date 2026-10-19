@@ -1,0 +1,29 @@
+{
+  "id": "example-cli-gh-windows",
+  "kind": "cli",
+  "namespace": "example-windows",
+  "name": "gh",
+  "display_name": "GitHub CLI（Windows）",
+  "description": "GitHub CLI（cli/cli，MIT）。Windows 用 winget 安装，真实路径 C:\\Program Files\\GitHub CLI\\gh.exe；若 command 写成这个绝对路径，AGENTHUB_CLI_ALLOWLIST 也要写成同样的整串（EqualFold 整串匹配）。",
+  "version": "1.0.0",
+  "repository": "https://github.com/cli/cli",
+  "tags": ["cli"],
+  "capabilities": ["status", "log"],
+  "health": "healthy",
+  "metadata": {
+    "command": "gh",
+    "mock_health": "healthy",
+    "install": "winget install --id GitHub.cli",
+    "path_hint": "C:\\Program Files\\GitHub CLI\\gh.exe",
+    "docs": "https://cli.github.com/"
+  },
+  "kind_config": {
+    "cli": {
+      "command": "gh",
+      "allowlist": ["repo", "issue", "pr", "auth", "api"],
+      "timeout_ms": 15000,
+      "max_output_bytes": 65536,
+      "work_dir": "C:\\Users\\<user>"
+    }
+  }
+}

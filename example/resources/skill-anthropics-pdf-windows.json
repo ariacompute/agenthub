@@ -1,0 +1,30 @@
+{
+  "id": "example-skill-anthropics-pdf-windows",
+  "kind": "skill",
+  "namespace": "example-windows",
+  "name": "pdf",
+  "display_name": "Anthropic 官方 pdf skill（Windows）",
+  "description": "anthropics/skills 仓库里的 pdf skill：一个 skill 就是含 SKILL.md 的目录。Windows 下 endpoint 用盘符形式 file:///C:/...。",
+  "endpoint": "file:///C:/Users/<user>/skills/pdf",
+  "version": "1.0.0",
+  "repository": "https://github.com/anthropics/skills",
+  "tags": ["skill"],
+  "capabilities": ["extract_text", "fill_form"],
+  "health": "healthy",
+  "metadata": {
+    "install": "git clone https://github.com/anthropics/skills C:\\Users\\<user>\\skills",
+    "path_hint": "C:\\Users\\<user>\\skills\\pdf\\SKILL.md（把 <user> 换成你的用户名）",
+    "docs": "https://github.com/anthropics/skills"
+  },
+  "kind_config": {
+    "skill": {
+      "version": "1.0.0",
+      "repository": "https://github.com/anthropics/skills",
+      "package": "skills/pdf",
+      "triggers": ["pdf", "表单填写"],
+      "steps": ["读 SKILL.md", "extract_text", "fill_form"],
+      "tools": ["extract_text", "fill_form"],
+      "docs": "SKILL.md"
+    }
+  }
+}

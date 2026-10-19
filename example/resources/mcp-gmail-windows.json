@@ -1,0 +1,28 @@
+{
+  "id": "example-mcp-gmail-windows",
+  "kind": "mcp",
+  "namespace": "example-windows",
+  "name": "gmail",
+  "display_name": "Gmail MCP（Windows）",
+  "description": "workspace-mcp 限定 --tools gmail。Windows 命令与 Ubuntu 相同，差异只在 OAuth 凭据与 token 缓存路径。",
+  "endpoint": "stdio://gmail",
+  "transport": "stdio",
+  "version": "1.0.0",
+  "repository": "https://github.com/endrec/google_workspace_mcp",
+  "tags": ["mcp"],
+  "capabilities": ["tools/list", "tools/call"],
+  "health": "healthy",
+  "metadata": {
+    "install": "winget install astral-sh.uv；uvx workspace-mcp --help",
+    "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET",
+    "docs": "https://workspacemcp.com/quick-start"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["workspace-mcp", "--tool-tier", "core", "--tools", "gmail"],
+      "tool_allowlist": ["search_gmail_messages", "send_gmail_message", "create_gmail_draft"]
+    }
+  }
+}

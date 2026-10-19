@@ -1,0 +1,30 @@
+{
+  "id": "example-cli-huggingface-windows",
+  "kind": "cli",
+  "namespace": "example-windows",
+  "name": "hf",
+  "display_name": "HuggingFace CLI（Windows）",
+  "description": "huggingface_hub 自带的 CLI，新版命令名是 hf。Windows 下控制台脚本落在 Scripts\\hf.exe；若 command 写成绝对路径，AGENTHUB_CLI_ALLOWLIST 要写成同样的整串。",
+  "version": "1.0.0",
+  "repository": "https://github.com/huggingface/huggingface_hub",
+  "tags": ["cli"],
+  "capabilities": ["auth", "download", "upload"],
+  "health": "healthy",
+  "metadata": {
+    "command": "hf",
+    "mock_health": "healthy",
+    "install": "python -m venv .venv && .venv\\Scripts\\activate && pip install -U \"huggingface_hub[cli]\"",
+    "path_hint": "%APPDATA%\\Python\\Python<ver>\\Scripts\\hf.exe 或 .venv\\Scripts\\hf.exe",
+    "env_hint": "HF_TOKEN（服务端进程环境变量）",
+    "docs": "https://huggingface.co/docs/huggingface_hub/guides/cli"
+  },
+  "kind_config": {
+    "cli": {
+      "command": "hf",
+      "allowlist": ["download", "upload", "repo", "auth", "cache", "version"],
+      "timeout_ms": 15000,
+      "max_output_bytes": 65536,
+      "work_dir": "C:\\Users\\<user>"
+    }
+  }
+}

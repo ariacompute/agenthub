@@ -43,7 +43,8 @@ Console: `make web-dev` (development) or `make web-build && make run` (the bundl
 by the Go process).
 
 The registry starts **empty** — nothing is seeded. Set `AGENTHUB_SEED_DEMO=true` to get the five
-`demo-*` resources the examples below talk to.
+`demo-*` resources the examples below talk to, or load [`example/`](example/README.md) to fill it
+with a realistic catalogue.
 
 ### Version stamping
 
@@ -55,6 +56,36 @@ bottom-left corner of the sidebar, with a second line such as `+3 dirty` wheneve
 build is not exactly a clean tag. An unstamped build reports the `dev` sentinel instead
 of pretending to be a release. Images take the same values through the `VERSION` /
 `COMMIT` / `DISTANCE` / `DIRTY` build args (`make docker-build`).
+
+## Examples
+
+[`example/`](example/README.md) registers a realistic catalogue straight from the repository: 41
+complete `registry.Entry` payloads plus a re-runnable loader, covering all five kinds in both a
+Windows and an Ubuntu shape.
+
+```bash
+cp .env.example .env     # then set AGENTHUB_EXAMPLE_ENABLED=true and
+                         # AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
+./example/load.sh        # picks the platform from uname -s
+./example/load.sh --all  # both platforms
+```
+
+| Kind | What it registers |
+| --- | --- |
+| model | an OpenAI-compatible gateway; the credential never reaches the JSON or the database — `kind_config.model.api_key_env` names the environment variable and the server reads the value at call time |
+| agent | Google ADK, LangGraph, CrewAI, Pi and DeepSeek Harness |
+| mcp | the official filesystem server plus GitHub, Google Drive, Google Docs, Gmail, Slack, Stripe, WeChat, DingTalk and Feishu |
+| skill | `anthropics/skills` and [skills.sh](https://www.skills.sh) |
+| cli | `gh`, `hf` (HuggingFace) and `modelscope` |
+
+Each platform lands in its own namespace (`example-ubuntu`, `example-windows`) because the dedup key
+is `(namespace, name, version)`. The loader POSTs first and falls back to PUT when the record already
+exists — PUT is not an upsert — so it is safe to re-run.
+
+`example/README.md` also documents the payload contract (the 21 accepted keys, the `kind` /
+`transport` / `health` / `status` enums and `kind_config`), the upstream install and start commands
+per platform, and the two settings people trip over: `AGENTHUB_EXAMPLE_API_KEY` for the gateway and
+`AGENTHUB_CLI_ALLOWLIST` for the CLI commands.
 
 ## Deployment
 
