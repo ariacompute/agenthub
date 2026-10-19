@@ -269,6 +269,116 @@ func TestModelProviderModeInstanceDefault(t *testing.T) {
 	}
 }
 
+// MaxTokens caps a completion: an explicit value is used as is, zero or negative
+// means "keep the default", and a negative one is rejected at registration time.
+func TestModelMaxTokens(t *testing.T) {
+	var nilModel *ModelConfig
+	if got := nilModel.EffectiveMaxTokens(); got != DefaultModelMaxTokens {
+		t.Fatalf("nil = %d, want %d", got, DefaultModelMaxTokens)
+	}
+	if got := (&ModelConfig{}).EffectiveMaxTokens(); got != DefaultModelMaxTokens {
+		t.Fatalf("unset = %d, want %d", got, DefaultModelMaxTokens)
+	}
+	if got := (&ModelConfig{MaxTokens: -5}).EffectiveMaxTokens(); got != DefaultModelMaxTokens {
+		t.Fatalf("negative = %d, want %d", got, DefaultModelMaxTokens)
+	}
+	if got := (&ModelConfig{MaxTokens: 128}).EffectiveMaxTokens(); got != 128 {
+		t.Fatalf("explicit = %d, want 128", got)
+	}
+
+	entry := func(tokens int) *Entry {
+		return &Entry{Kind: KindModel, Name: "m",
+			KindConfig: &KindConfig{Model: &ModelConfig{
+				ProviderMode: ProviderModeOpenAICompatible, Endpoint: "https://router.test",
+				ModelID: "m", MaxTokens: tokens}}}
+	}
+	if err := ValidateKind(entry(128)); err != nil {
+		t.Fatalf("positive max_tokens: %v", err)
+	}
+	if err := ValidateKind(entry(-1)); err == nil {
+		t.Fatal("a negative max_tokens must be rejected")
+	}
+}
+
+// The endpoint is validated the way the adapter resolves it: kind_config.model
+// first, then the entry's own endpoint. An entry that only fills the generic
+// column must therefore register, because that is the address it will be called
+// on — and an entry with no address anywhere must still be refused.
+func TestModelEndpointFallsBackToTheEntry(t *testing.T) {
+	model := func(cfg *ModelConfig) *KindConfig { return &KindConfig{Model: cfg} }
+
+	// Only the generic column carries the address.
+	inherited := &Entry{Kind: KindModel, Name: "m", Endpoint: "https://router.test/v1",
+		KindConfig: model(&ModelConfig{ProviderMode: ProviderModeOpenAICompatible, ModelID: "gpt-4o-mini"})}
+	if err := ValidateKind(inherited); err != nil {
+		t.Fatalf("entry endpoint must satisfy validation: %v", err)
+	}
+
+	// The block wins when both are present, and it is the one checked.
+	blockWins := &Entry{Kind: KindModel, Name: "m", Endpoint: "https://router.test/v1",
+		KindConfig: model(&ModelConfig{ProviderMode: ProviderModeOpenAICompatible, ModelID: "gpt-4o-mini",
+			Endpoint: "stdio://not-http"})}
+	if err := ValidateKind(blockWins); err == nil {
+		t.Fatal("the block's endpoint must be the one validated")
+	}
+
+	// A non-HTTP address inherited from the entry is still refused.
+	nonHTTP := &Entry{Kind: KindModel, Name: "m", Endpoint: "stdio://pi",
+		KindConfig: model(&ModelConfig{ProviderMode: ProviderModeOpenAICompatible, ModelID: "gpt-4o-mini"})}
+	if err := ValidateKind(nonHTTP); err == nil {
+		t.Fatal("a non-HTTP entry endpoint must be refused")
+	}
+
+	// No address anywhere.
+	missing := &Entry{Kind: KindModel, Name: "m",
+		KindConfig: model(&ModelConfig{ProviderMode: ProviderModeOpenAICompatible, ModelID: "gpt-4o-mini"})}
+	if err := ValidateKind(missing); err == nil {
+		t.Fatal("an entry without any endpoint must be refused")
+	}
+
+	// Offline entries never needed an address and still do not.
+	offline := &Entry{Kind: KindModel, Name: "m",
+		KindConfig: model(&ModelConfig{ProviderMode: ProviderModeMock})}
+	if err := ValidateKind(offline); err != nil {
+		t.Fatalf("mock mode: %v", err)
+	}
+}
+
+// Same rule for the model id: the adapter falls back to the entry version and
+// then its name, so validation accepts what the call will actually carry. An
+// entry with neither is refused.
+func TestModelIDFallsBackToTheEntry(t *testing.T) {
+	entry := func(version, name string) *Entry {
+		return &Entry{Kind: KindModel, Name: name, Version: version, Endpoint: "https://router.test/v1",
+			KindConfig: &KindConfig{Model: &ModelConfig{ProviderMode: ProviderModeOpenAICompatible}}}
+	}
+	if err := ValidateKind(entry("gpt-4o-mini", "m")); err != nil {
+		t.Fatalf("version fallback: %v", err)
+	}
+	if err := ValidateKind(entry("", "m")); err != nil {
+		t.Fatalf("name fallback: %v", err)
+	}
+	if err := ValidateKind(entry("", "")); err == nil {
+		t.Fatal("an entry with no model id anywhere must be refused")
+	}
+
+	// A whitespace-only model_id behaves like an unset one: the fallback still
+	// applies, both here and at call time, so the version is what gets sent.
+	blank := &Entry{Kind: KindModel, Name: "m", Version: "gpt-4o-mini", Endpoint: "https://router.test/v1",
+		KindConfig: &KindConfig{Model: &ModelConfig{ProviderMode: ProviderModeOpenAICompatible, ModelID: "  "}}}
+	if err := ValidateKind(blank); err != nil {
+		t.Fatalf("a blank model_id falls back like an unset one: %v", err)
+	}
+
+	// The block wins when it names one — even a name the fallback would not have
+	// produced, which is the whole point of letting it override.
+	explicit := &Entry{Kind: KindModel, Name: "m", Version: "1.0.0", Endpoint: "https://router.test/v1",
+		KindConfig: &KindConfig{Model: &ModelConfig{ProviderMode: ProviderModeOpenAICompatible, ModelID: "gpt-4o-mini"}}}
+	if err := ValidateKind(explicit); err != nil {
+		t.Fatalf("explicit model_id: %v", err)
+	}
+}
+
 func TestIsHTTPURL(t *testing.T) {
 	for _, s := range []string{"https://registry.test/servers", "http://127.0.0.1:8080/x"} {
 		if !isHTTPURL(s) {

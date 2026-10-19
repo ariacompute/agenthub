@@ -44,11 +44,13 @@ type openAIProvider struct {
 	model     string
 	apiKeyEnv string
 	client    *http.Client
+	maxTokens int
 }
 
 // newOpenAIProvider builds a provider. apiKeyEnv names the environment variable
-// holding the credential: the secret itself is never stored or logged.
-func newOpenAIProvider(name, endpoint, model, apiKeyEnv string, timeout time.Duration) *openAIProvider {
+// holding the credential: the secret itself is never stored or logged. maxTokens
+// is the completion budget; <= 0 keeps the built-in default.
+func newOpenAIProvider(name, endpoint, model, apiKeyEnv string, timeout time.Duration, maxTokens int) *openAIProvider {
 	if timeout <= 0 {
 		timeout = DefaultModelTimeout
 	}
@@ -58,6 +60,7 @@ func newOpenAIProvider(name, endpoint, model, apiKeyEnv string, timeout time.Dur
 		model:     model,
 		apiKeyEnv: strings.TrimSpace(apiKeyEnv),
 		client:    &http.Client{Timeout: timeout},
+		maxTokens: maxTokens,
 	}
 }
 
@@ -76,6 +79,15 @@ func completionsURL(endpoint string) string {
 
 func (p *openAIProvider) Name() string { return p.name }
 
+// effectiveMaxTokens falls back to the shared default so a provider built
+// without a budget keeps asking for the same one it always did.
+func (p *openAIProvider) effectiveMaxTokens() int {
+	if p != nil && p.maxTokens > 0 {
+		return p.maxTokens
+	}
+	return registry.DefaultModelMaxTokens
+}
+
 func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, error) {
 	if p == nil || p.endpoint == "" {
 		return "", &httputil.Error{Code: CodeResourceUnreachable}
@@ -87,7 +99,7 @@ func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, e
 		"model":      p.model,
 		"stream":     false,
 		"messages":   []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens": 1024,
+		"max_tokens": p.effectiveMaxTokens(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -122,6 +134,10 @@ func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, e
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
+				// Reasoning models answer in reasoning_content and leave content
+				// empty, so the visible text has to be read from there.
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
 			} `json:"message"`
 			Text string `json:"text"`
 		} `json:"choices"`
@@ -132,6 +148,12 @@ func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, e
 	for _, c := range parsed.Choices {
 		if strings.TrimSpace(c.Message.Content) != "" {
 			return c.Message.Content, nil
+		}
+		if strings.TrimSpace(c.Message.ReasoningContent) != "" {
+			return c.Message.ReasoningContent, nil
+		}
+		if strings.TrimSpace(c.Message.Reasoning) != "" {
+			return c.Message.Reasoning, nil
 		}
 		if strings.TrimSpace(c.Text) != "" {
 			return c.Text, nil
@@ -172,15 +194,16 @@ func newModelRouterFor(e *registry.Entry, instanceDefault string) *ModelRouter {
 	if endpoint == "" {
 		return NewModelRouter()
 	}
+	maxTokens := cfg.EffectiveMaxTokens()
 	providers := []ModelProvider{
-		newOpenAIProvider("openai:"+cfg.EffectiveModelID(e), endpoint, cfg.EffectiveModelID(e), cfg.APIKeyEnv, time.Duration(cfg.TimeoutMS)*time.Millisecond),
+		newOpenAIProvider("openai:"+cfg.EffectiveModelID(e), endpoint, cfg.EffectiveModelID(e), cfg.APIKeyEnv, time.Duration(cfg.TimeoutMS)*time.Millisecond, maxTokens),
 	}
 	for _, t := range cfg.Targets {
 		model := strings.TrimSpace(t.Model)
 		if model == "" || model == cfg.EffectiveModelID(e) {
 			continue
 		}
-		providers = append(providers, newOpenAIProvider("openai:"+t.Name, endpoint, model, cfg.APIKeyEnv, time.Duration(cfg.TimeoutMS)*time.Millisecond))
+		providers = append(providers, newOpenAIProvider("openai:"+t.Name, endpoint, model, cfg.APIKeyEnv, time.Duration(cfg.TimeoutMS)*time.Millisecond, maxTokens))
 	}
 	if cfg.FallbackMock {
 		providers = append(providers, mockModelProvider{})

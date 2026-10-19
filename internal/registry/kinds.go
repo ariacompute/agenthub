@@ -73,6 +73,10 @@ type ModelConfig struct {
 	APIKeyEnv string        `json:"api_key_env,omitempty"`
 	Targets   []ModelTarget `json:"targets,omitempty"`
 	TimeoutMS int           `json:"timeout_ms,omitempty"`
+	// MaxTokens caps the completion. Reasoning models spend most of the budget
+	// thinking, so this is the knob that trades answer length for latency when a
+	// provider is too slow to answer inside timeout_ms.
+	MaxTokens int `json:"max_tokens,omitempty"`
 	// FallbackMock appends the offline provider at the end of the chain. It is
 	// off by default on purpose: answering a failed real call with a mock
 	// completion would be a fabricated result, so it has to be switched on
@@ -214,6 +218,19 @@ func (c *ModelConfig) EffectiveModelID(e *Entry) string {
 	return ""
 }
 
+// DefaultModelMaxTokens caps a completion when the entry does not name one.
+const DefaultModelMaxTokens = 1024
+
+// EffectiveMaxTokens is the completion budget for one call. Zero or negative
+// means "use the default", so an entry registered before the field existed keeps
+// the behaviour it always had.
+func (c *ModelConfig) EffectiveMaxTokens() int {
+	if c != nil && c.MaxTokens > 0 {
+		return c.MaxTokens
+	}
+	return DefaultModelMaxTokens
+}
+
 // ValidateKind checks the per-kind configuration block of an entry. A nil block
 // is always valid: the generic columns alone are enough to register a resource,
 // which is what every entry created before this existed looks like.
@@ -233,7 +250,7 @@ func ValidateKindWithMode(e *Entry, instanceDefault string) error {
 	}
 	switch e.Kind {
 	case KindModel:
-		return validateModel(e.KindConfig.Model, instanceDefault)
+		return validateModel(e.KindConfig.Model, e, instanceDefault)
 	case KindAgent:
 		return validateAgent(e.KindConfig.Agent)
 	case KindMCP:
@@ -253,7 +270,11 @@ func kindConfigErr(field string) error {
 	return newFieldError(CodeInvalidKindConfig, field)
 }
 
-func validateModel(c *ModelConfig, instanceDefault string) error {
+// validateModel checks the model block. Endpoint and model id are resolved the
+// way the adapter will — kind_config.model first, then the entry's own endpoint
+// and version/name — so a record is accepted or rejected for the values it will
+// actually be called with rather than for the one place they may be written.
+func validateModel(c *ModelConfig, e *Entry, instanceDefault string) error {
 	if c == nil {
 		return nil
 	}
@@ -269,13 +290,14 @@ func validateModel(c *ModelConfig, instanceDefault string) error {
 		return kindConfigErr("provider_mode")
 	}
 	if mode == ProviderModeOpenAICompatible {
-		if strings.TrimSpace(c.Endpoint) == "" {
+		endpoint := c.EffectiveEndpoint(e)
+		if strings.TrimSpace(endpoint) == "" {
 			return kindConfigErr("endpoint")
 		}
-		if !isHTTPURL(c.Endpoint) {
+		if !isHTTPURL(endpoint) {
 			return kindConfigErr("endpoint")
 		}
-		if strings.TrimSpace(c.ModelID) == "" {
+		if strings.TrimSpace(c.EffectiveModelID(e)) == "" {
 			return kindConfigErr("model_id")
 		}
 	}
@@ -284,6 +306,9 @@ func validateModel(c *ModelConfig, instanceDefault string) error {
 	}
 	if c.TimeoutMS < 0 {
 		return kindConfigErr("timeout_ms")
+	}
+	if c.MaxTokens < 0 {
+		return kindConfigErr("max_tokens")
 	}
 	for _, t := range c.Targets {
 		if strings.TrimSpace(t.Name) == "" {

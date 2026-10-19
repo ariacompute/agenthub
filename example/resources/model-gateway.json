@@ -22,7 +22,7 @@
       "endpoint": "https://gateway.ariacompute.com/v1",
       "model_id": "__AGENTHUB_EXAMPLE_MODEL_ID__",
       "api_key_env": "AGENTHUB_EXAMPLE_API_KEY",
-      "timeout_ms": 30000
+      "timeout_ms": 120000
     }
   }
 }

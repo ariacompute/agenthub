@@ -186,6 +186,87 @@ func TestRouterRejectsMalformedCompletion(t *testing.T) {
 // AGENTHUB_MODEL_ROUTER_MODE is the instance wide default: an entry that omits
 // provider_mode inherits it, an entry that names one keeps its own, and an
 // unset option stays offline instead of becoming a gateway call nobody asked for.
+// A reasoning model returns its visible answer in reasoning_content and leaves
+// content empty. Reading only content would report model_provider_malformed for
+// a call that actually succeeded.
+func TestReasoningAnswerIsReadBack(t *testing.T) {
+	srv := chatServer(t, func(model string, w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"","reasoning_content":"the answer"}}]}`))
+	})
+	e := modelEntry(&registry.ModelConfig{ProviderMode: registry.ProviderModeOpenAICompatible, Endpoint: srv.URL, ModelID: "reasoning", TimeoutMS: 5000})
+	conn, err := For(&e, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if got := res.Text; got != "the answer" {
+		t.Fatalf("text = %q, want the reasoning content", got)
+	}
+
+	// reasoning (without _content) is the other shape gateways use.
+	srv2 := chatServer(t, func(model string, w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"reasoning":"fallback shape"}}]}`))
+	})
+	e2 := modelEntry(&registry.ModelConfig{ProviderMode: registry.ProviderModeOpenAICompatible, Endpoint: srv2.URL, ModelID: "reasoning", TimeoutMS: 5000})
+	conn2, err := For(&e2, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2, err := conn2.Invoke(context.Background(), InvokeRequest{ResourceID: e2.ID, Entry: e2, Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if got := res2.Text; got != "fallback shape" {
+		t.Fatalf("text = %q, want the reasoning field", got)
+	}
+}
+
+// The completion budget comes from the entry so a slow reasoning model can be
+// traded down for latency; unset keeps the built-in default.
+func TestMaxTokensComesFromTheEntry(t *testing.T) {
+	var got int
+	recording := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = decodeJSONBody(r, &body)
+		if v, ok := body["max_tokens"].(float64); ok {
+			got = int(v)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	t.Cleanup(recording.Close)
+
+	// Explicit budget.
+	e := modelEntry(&registry.ModelConfig{ProviderMode: registry.ProviderModeOpenAICompatible, Endpoint: recording.URL, ModelID: "m", TimeoutMS: 5000, MaxTokens: 128})
+	conn, err := For(&e, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: "hello"}); err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if got != 128 {
+		t.Fatalf("max_tokens = %d, want 128", got)
+	}
+
+	// Unset keeps the default.
+	got = 0
+	e2 := modelEntry(&registry.ModelConfig{ProviderMode: registry.ProviderModeOpenAICompatible, Endpoint: recording.URL, ModelID: "m", TimeoutMS: 5000})
+	conn2, err := For(&e2, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn2.Invoke(context.Background(), InvokeRequest{ResourceID: e2.ID, Entry: e2, Prompt: "hello"}); err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if got != registry.DefaultModelMaxTokens {
+		t.Fatalf("max_tokens = %d, want the default %d", got, registry.DefaultModelMaxTokens)
+	}
+}
+
 func TestInstanceDefaultSelectsTheProviderChain(t *testing.T) {
 	srv := chatServer(t, func(model string, w http.ResponseWriter) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"served by ` + model + `"}}]}`))
