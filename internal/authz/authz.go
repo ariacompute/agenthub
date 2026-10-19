@@ -67,6 +67,13 @@ const (
 	PermGrantsManage   = "grants:manage"
 	PermSessionsManage = "sessions:manage"
 	PermBackupsManage  = "backups:manage"
+	// Registry governance. Registering a resource and publishing it are
+	// different acts, so they are different permissions: resources:write says
+	// "you may add a record", registry:curate says "you may decide whether
+	// anyone can find it".
+	PermRegistriesManage = "registries:manage"
+	PermRegistryCurate   = "registry:curate"
+	PermSourcesManage    = "sources:manage"
 )
 
 // AllPermissions is the full grantable set, in the order the admin matrix shows
@@ -81,6 +88,9 @@ var AllPermissions = []string{
 	PermGrantsManage,
 	PermSessionsManage,
 	PermBackupsManage,
+	PermRegistriesManage,
+	PermRegistryCurate,
+	PermSourcesManage,
 }
 
 // Principal kinds and grant levels of a ResourceGrant.

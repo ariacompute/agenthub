@@ -44,7 +44,7 @@ ALPINE_MIRROR ?=
 DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable
 export DATABASE_URL
 
-.PHONY: run build test test-integration vet fmt version up down ports \
+.PHONY: run build test test-integration test-cover vet fmt version up down ports \
         docker-build compose-build \
         db-up db-down db-psql \
         web-install web-dev web-build web-test web-test-watch clean \
@@ -63,6 +63,14 @@ test:
 # Integration only, against the compose database (or $DATABASE_URL).
 test-integration:
 	go test -race -count=1 -run Integration ./tests/...
+
+# Per package coverage. The store package needs DATABASE_URL to measure: its
+# cases skip without one, which is honest but leaves the number near zero.
+test-cover:
+	go test -count=1 -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+	@printf '\nper package:\n'
+	@go test -count=1 -cover ./... | grep -v 'no test files' || true
 
 vet:
 	go vet ./...
@@ -167,4 +175,4 @@ desktop-test: desktop-install
 	cd $(DESKTOP)/src-tauri && cargo test
 
 clean:
-	rm -rf bin $(STATIC) $(WEB)/dist
+	rm -rf bin $(STATIC) $(WEB)/dist coverage.out

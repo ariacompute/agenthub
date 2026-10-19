@@ -411,6 +411,82 @@ expect 'a request without a session is rejected' 401 "$STATUS"
 expect 'the rejection carries unauthenticated' unauthenticated "$(jget code)"
 
 # ---------------------------------------------------------------------------
+# control plane: registry governance (namespaces, approval, upstream sync)
+# ---------------------------------------------------------------------------
+
+section 'control plane: registry governance'
+
+CURATED_NS="test-api-ns-$(date +%s)"
+
+http POST /api/registries "$(printf '{"id":"%s","name":"Curated","description":"test-api","auto_approve":false}' "$CURATED_NS")"
+expect 'create namespace returns 201' 201 "$STATUS"
+expect 'the namespace keeps its id' "$CURATED_NS" "$(jget id)"
+expect 'auto_approve round trips as false' false "$(jget auto_approve)"
+http GET /api/registries
+expect_match 'the new namespace is listed' "$CURATED_NS" "$(cat "$BODY")"
+http POST /api/registries '{"id":"Not A Slug","name":"x"}'
+expect 'a namespace id that is not a slug is rejected' 400 "$STATUS"
+expect 'the rejection explains itself' invalid_namespace "$(jget code)"
+http DELETE "/api/registries/default"
+expect 'the default namespace cannot be deleted' 400 "$STATUS"
+
+# A record in a curated namespace starts as a draft: it must not appear in the
+# catalogue a consumer sees until a curator approves it.
+CURATED_ID="test-api-curated-$(date +%s)"
+http POST /api/resources "$(printf '{"id":"%s","kind":"skill","name":"curated skill","version":"1.0.0","namespace":"%s"}' "$CURATED_ID" "$CURATED_NS")"
+expect 'register into a curated namespace returns 201' 201 "$STATUS"
+expect 'a new record starts as a draft' draft "$(jget status)"
+http GET "/api/resources?namespace=$CURATED_NS&status=approved"
+expect_no 'a draft is not part of the approved catalogue' "$CURATED_ID" "$(cat "$BODY")"
+http POST "/api/resources/$CURATED_ID/status" '{"status":"approved"}'
+expect 'draft -> approved is refused' 400 "$STATUS"
+expect 'the refusal explains itself' invalid_status_transition "$(jget code)"
+http POST "/api/resources/$CURATED_ID/status" '{"status":"pending"}'
+expect 'submit for review returns 200' 200 "$STATUS"
+expect 'the record is pending' pending "$(jget status)"
+http GET /api/registries/approvals
+expect_match 'the pending record is in the curator queue' "$CURATED_ID" "$(cat "$BODY")"
+http POST "/api/resources/$CURATED_ID/status" '{"status":"approved"}'
+expect 'approve returns 200' 200 "$STATUS"
+http GET "/api/resources?namespace=$CURATED_NS&status=approved"
+expect_match 'the approved record is discoverable' "$CURATED_ID" "$(cat "$BODY")"
+
+# The dedup key is (namespace, name, version): the same name at a new version is
+# a new record, the same name at the same version is not.
+http POST /api/resources "$(printf '{"kind":"skill","name":"curated skill","version":"2.0.0","namespace":"%s"}' "$CURATED_NS")"
+expect 'the same name at a new version is accepted' 201 "$STATUS"
+CURATED_V2_ID=$(jget id)
+http POST /api/resources "$(printf '{"kind":"skill","name":"curated skill","version":"1.0.0","namespace":"%s"}' "$CURATED_NS")"
+expect 'the dedup key rejects a repeat' 400 "$STATUS"
+expect_match 'the rejection names the conflict' 'resource_already_exists' "$(jget code)"
+
+# An upstream registry source. The fixture flag keeps it offline, so this
+# section never reaches the network.
+SRC_ID="test-api-src-$(date +%s)"
+http POST /api/registry-sources "$(printf '{"id":"%s","kind":"mcp","name":"test-api source","url":"https://registry.test/servers","namespace":"%s","fixture":true,"enabled":true}' "$SRC_ID" "$CURATED_NS")"
+expect 'create source returns 201' 201 "$STATUS"
+expect 'a fresh source claims no sync' '' "$(jget last_sync_status)"
+http POST "/api/registry-sources/$SRC_ID/sync" '{}'
+expect 'sync returns 200' 200 "$STATUS"
+expect 'the sync reports success' ok "$(jget status)"
+expect_match 'the fixture imported its records' '3' "$(jget imported)"
+http POST "/api/registry-sources/$SRC_ID/sync" '{}'
+expect 'a second sync returns 200' 200 "$STATUS"
+expect 'a second sync imports nothing new' '0' "$(jget imported)"
+expect_match 'a second sync refreshes instead' '3' "$(jget updated)"
+http GET /api/registry-sources
+expect_match 'the sync outcome is recorded' 'ok' "$(jget sources.0.last_sync_status)"
+
+http DELETE "/api/registry-sources/$SRC_ID"
+expect 'delete source returns 204' 204 "$STATUS"
+http DELETE "/api/resources/$CURATED_ID"
+expect 'delete curated resource returns 204' 204 "$STATUS"
+http DELETE "/api/resources/$CURATED_V2_ID"
+expect 'delete the second version returns 204' 204 "$STATUS"
+http DELETE "/api/registries/$CURATED_NS"
+expect 'delete namespace returns 204' 204 "$STATUS"
+
+# ---------------------------------------------------------------------------
 # exports
 # ---------------------------------------------------------------------------
 

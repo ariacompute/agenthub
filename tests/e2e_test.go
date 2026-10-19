@@ -68,6 +68,8 @@ func newHarness(t *testing.T) *harness {
 		{Kind: registry.KindMCP, Name: "demo-mcp", Endpoint: "stdio://demo", Transport: registry.TransportStdio, Capabilities: []string{"tools/list"}, Health: registry.HealthHealthy},
 		{Kind: registry.KindSkill, Name: "demo-skill", Version: "2.1.0", Capabilities: []string{"search"}, Health: registry.HealthDegraded},
 		{Kind: registry.KindCLI, Name: "demo-cli", Capabilities: []string{"echo"}, Metadata: map[string]string{"command": "echo"}, Health: registry.HealthHealthy},
+		{Kind: registry.KindCustom, Name: "demo-custom", Endpoint: "http://schema", Version: "1.0.0", Health: registry.HealthHealthy,
+			KindConfig: &registry.KindConfig{Custom: &registry.CustomConfig{Schema: `{"type":"object"}`}}},
 	}
 	for _, e := range seed {
 		stored, err := reg.Upsert(e)
@@ -235,7 +237,7 @@ func TestE2EAgentCardAndHealthz(t *testing.T) {
 	if !strings.HasPrefix(card.URL, h.server.URL) {
 		t.Fatalf("card url = %q, want %q prefix", card.URL, h.server.URL)
 	}
-	if len(card.Skills) != 5 {
+	if len(card.Skills) != len(registry.Kinds) {
 		t.Fatalf("skills = %d, want one per resource", len(card.Skills))
 	}
 	if !card.Capabilities.Streaming || !card.Capabilities.PushNotifications {
@@ -260,7 +262,7 @@ func TestE2EAgentCardAndHealthz(t *testing.T) {
 			t.Fatalf("resources = %+v, want one %s", health.Resources, kind)
 		}
 	}
-	if health.Health["healthy"] != 4 || health.Health["degraded"] != 1 {
+	if health.Health["healthy"] != 5 || health.Health["degraded"] != 1 {
 		t.Fatalf("health counts = %+v", health.Health)
 	}
 	// The e2e harness runs without an identity layer, and says so: identities

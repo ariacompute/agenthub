@@ -41,6 +41,10 @@ type Deps struct {
 	// endpoints report the feature as disabled rather than failing: an
 	// instance with no backup volume is a supported configuration.
 	Backups *backup.Service
+	// Sources is the upstream registry synchronisation service. It stays nil
+	// when the instance does not federate any external catalogue, which is the
+	// default and must keep working.
+	Sources *registry.SourceService
 }
 
 // Register builds the router.
@@ -76,6 +80,23 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("PUT /api/resources/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleUpdateResource))
 	mux.HandleFunc("DELETE /api/resources/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleDeleteResource))
 	mux.HandleFunc("POST /api/resources/{id}/health", d.requirePermission(authz.PermResourcesWrite, d.handleResourceHealth))
+	// Curation: submitting, approving, rejecting or deprecating one record is a
+	// decision about what everybody may find, so it is not resources:write.
+	mux.HandleFunc("POST /api/resources/{id}/status", d.requirePermission(authz.PermRegistryCurate, d.handleSetResourceStatus))
+
+	// Registry namespaces and the curator's queue.
+	mux.HandleFunc("GET /api/registries", d.requirePermission(authz.PermRegistriesManage, d.handleListNamespaces))
+	mux.HandleFunc("POST /api/registries", d.requirePermission(authz.PermRegistriesManage, d.handleCreateNamespace))
+	mux.HandleFunc("PUT /api/registries/{id}", d.requirePermission(authz.PermRegistriesManage, d.handleUpdateNamespace))
+	mux.HandleFunc("DELETE /api/registries/{id}", d.requirePermission(authz.PermRegistriesManage, d.handleDeleteNamespace))
+	mux.HandleFunc("GET /api/registries/approvals", d.requirePermission(authz.PermRegistryCurate, d.handleListApprovals))
+
+	// Upstream registries and their synchronisation.
+	mux.HandleFunc("GET /api/registry-sources", d.requirePermission(authz.PermSourcesManage, d.handleListSources))
+	mux.HandleFunc("POST /api/registry-sources", d.requirePermission(authz.PermSourcesManage, d.handleCreateSource))
+	mux.HandleFunc("PUT /api/registry-sources/{id}", d.requirePermission(authz.PermSourcesManage, d.handleUpdateSource))
+	mux.HandleFunc("DELETE /api/registry-sources/{id}", d.requirePermission(authz.PermSourcesManage, d.handleDeleteSource))
+	mux.HandleFunc("POST /api/registry-sources/{id}/sync", d.requirePermission(authz.PermSourcesManage, d.handleSyncSource))
 
 	mux.HandleFunc("GET /api/tasks", d.requirePermission(authz.PermTasksRead, d.handleListTasks))
 	mux.HandleFunc("GET /api/tasks/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetTask))

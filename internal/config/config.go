@@ -14,6 +14,7 @@ import (
 
 	"agenthub/internal/auth"
 	"agenthub/internal/backup"
+	"agenthub/internal/registry"
 )
 
 // Version is the agenthub release reported by /healthz and the Agent Card. It
@@ -113,6 +114,24 @@ type Config struct {
 	BackupCron      string
 	BackupKeepLast  int
 	BackupMaxAge    int
+	// Upstream registry synchronisation.
+	//
+	// RegistrySyncEnabled starts the background puller; the console can still
+	// trigger a source by hand when it is off, which is the default posture
+	// most deployments want.
+	RegistrySyncEnabled bool
+	// RegistrySyncInterval is how often the background puller runs. It is a
+	// plain interval rather than a per-source cron: a schedule on a source is
+	// honoured by the puller, and an instance with one policy is easier to
+	// reason about than one timer per source.
+	RegistrySyncInterval time.Duration
+	// RegistrySyncFixture forces every source onto the offline client, whatever
+	// the source itself says. It is the air-gapped switch: no agenthub process
+	// opens a connection to an upstream registry while it is on.
+	RegistrySyncFixture bool
+	// ModelRouterMode is the provider mode a model resource defaults to when it
+	// declares none: "mock" keeps an instance without credentials usable.
+	ModelRouterMode string
 	// OAuth providers. A provider without credentials is simply absent from the
 	// login page, so an instance without any of them stays self contained.
 	OAuth auth.OAuthConfig
@@ -173,6 +192,16 @@ func Load() (*Config, error) {
 		BackupCron:      envStr("AGENTHUB_BACKUP_CRON", ""),
 		BackupKeepLast:  envInt("AGENTHUB_BACKUP_KEEP_LAST", 7),
 		BackupMaxAge:    envInt("AGENTHUB_BACKUP_MAX_AGE_DAYS", 30),
+		// Synchronisation is off by default: an instance must not start
+		// reaching out to an upstream registry until an operator configured
+		// one and decided how often to pull it.
+		RegistrySyncEnabled:  envBool("AGENTHUB_REGISTRY_SYNC_ENABLED", false),
+		RegistrySyncInterval: envDur("AGENTHUB_REGISTRY_SYNC_INTERVAL", time.Hour),
+		// On by default: turning synchronisation on must not silently turn
+		// outbound traffic on with it. An operator who wants a real upstream
+		// registry sets this to false explicitly.
+		RegistrySyncFixture: envBool("AGENTHUB_REGISTRY_SYNC_FIXTURE", true),
+		ModelRouterMode:     envStr("AGENTHUB_MODEL_ROUTER_MODE", registry.ProviderModeMock),
 		OAuth: auth.OAuthConfig{
 			Enabled: envBool("AGENTHUB_OAUTH_ENABLED", true),
 			Google: auth.ProviderConfig{
@@ -255,6 +284,22 @@ func (c *Config) Validate() error {
 		if err := c.BackupSchedule().Validate(); err != nil {
 			return fmt.Errorf("backup schedule is invalid: %w", err)
 		}
+	}
+	// The interval only matters when the background puller is on; leaving it
+	// unset on an instance that never synchronises is not a misconfiguration.
+	if c.RegistrySyncEnabled && c.RegistrySyncInterval <= 0 {
+		return fmt.Errorf("AGENTHUB_REGISTRY_SYNC_INTERVAL must be positive when AGENTHUB_REGISTRY_SYNC_ENABLED is true")
+	}
+	// An unset mode is the offline mock: a caller that built the struct
+	// directly instead of going through Load must not be rejected for it.
+	if strings.TrimSpace(c.ModelRouterMode) == "" {
+		c.ModelRouterMode = registry.ProviderModeMock
+	}
+	switch c.ModelRouterMode {
+	case registry.ProviderModeMock, registry.ProviderModeOpenAICompatible:
+	default:
+		return fmt.Errorf("AGENTHUB_MODEL_ROUTER_MODE must be %q or %q, got %q",
+			registry.ProviderModeMock, registry.ProviderModeOpenAICompatible, c.ModelRouterMode)
 	}
 	return nil
 }

@@ -64,7 +64,9 @@ func For(e *registry.Entry, opts Options) (Connector, error) {
 	}
 	switch e.Kind {
 	case registry.KindModel:
-		return &modelConnector{}, nil
+		// A model resource carries its own provider chain: offline mock by
+		// default, a real router with fallbacks when configured that way.
+		return &modelConnector{router: newModelRouterFor(e)}, nil
 	case registry.KindAgent:
 		return &agentConnector{}, nil
 	case registry.KindMCP:
@@ -73,6 +75,8 @@ func For(e *registry.Entry, opts Options) (Connector, error) {
 		return &skillConnector{}, nil
 	case registry.KindCLI:
 		return &cliConnector{opts: opts}, nil
+	case registry.KindCustom:
+		return &customConnector{}, nil
 	default:
 		return nil, &httputil.Error{Code: CodeUnknownKind}
 	}

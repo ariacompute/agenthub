@@ -124,12 +124,128 @@
     `bunx vitest run` 22 passed、`make build` 产出 `backend/static` 与 `bin/agenthub-server`
 50. [x] 文档同步：`AGENTS.md` / `requirements.md` / 本 `task.md` / `README.md` / `README_cn.md`
 
-## M2 — 后续项（未开始）
+## M2 — 目录治理与注册中心互连（已完成）
 
-51. [ ] 真实适配器落地：model（OpenAI 兼容端点 + 回退链）、agent（`aria-agent-cloud` SSE → A2A）、
-      mcp（stdio / Streamable HTTP 子进程与 HTTP 客户端）、skill（本地/远端手册加载）、
+对照 AWS Agent Registry（对比落在 README 的「AWS Agent Registry 特性对比」章）补齐目录侧能力：
+per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批生命周期、
+多命名空间、`name + version` 去重启用键与 `custom` 类型。
+
+### 1. 对比文档
+
+51. [x] README / README_cn 的「AWS Agent Registry 特性对比」章：两级模型 / recordType / 协议 schema 校验 /
+     `name + recordVersion` 唯一键 / 四角色与审批生命周期 / 发现方式 / 授权 / tags /
+     EventBridge·CloudTrail·Organizations·RAM·PrivateLink 逐项对比；三张清单
+     （已有 / 本次补齐 / 明确不做）+ recordType ↔ Kind 字段级映射 + 剩余差距优先级
+
+### 2. 领域模型（`internal/registry`，零外部依赖）
+
+52. [x] `kinds.go`：五类 + `custom` 的 per-kind 配置（`ModelConfig`/`AgentConfig`/`MCPConfig`/
+     `SkillConfig`/`CLIConfig`/`CustomConfig`）与 `KindConfig` 编解码
+53. [x] `validate.go`：`ValidateKind(e)` 按 Kind 分发校验，产出 `invalid_kind_config` 等机器可读码
+54. [x] `lifecycle.go`：`Status`（draft/pending/approved/rejected/deprecated）+ `CanTransition`
+     合法迁移表 + `Discoverable`（消费方可见性唯一出口，只放行 approved）
+55. [x] `namespace.go`：命名空间实体 + `(namespace, name, version)` 去重启用键规则；
+     `Entry` 增量扩展（`Namespace`/`Status`/`DisplayName`/`SourceID`/`KindConfig`，全部 `omitempty`）
+56. [x] `source.go` / `sync.go`：`RegistrySource` + `Client`/`SourceStore` 端口 + 同步编排
+     （单飞 + 拉取 + 解析为 `Entry` + 去重 upsert + `last_sync_*` 回写）
+57. [x] `sync_fixture.go`（离线确定性）/ `sync_http.go`（真实 `net/http`：超时 + 限长 +
+     鉴权头 + 条目上限，`TODO(real)` 标注协议适配点）
+58. [x] `export.go`：MCP server 描述与 Agent Card 只导出 approved，带 namespace 与 kind_config 摘要
+
+### 3. 持久化（迁移 + GORM）
+
+59. [x] `008_registry_governance.sql`：`resources` 治理列（空值回填 approved/default）+ 唯一索引
+     `idx_resources_dedup` + `registries` 表（含 default 种子）+ 三个新权限与 admin 关联
+60. [x] `009_registry_sync.sql`：`registry_sources`（含 `last_sync_at/status/count/error`）；
+     全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`
+61. [x] `internal/model`：`Resource` 增列 + `Registry` / `RegistrySource` 模型（复用 `JSONField` jsonb）
+62. [x] `store/resource_store.go`：新列往返 + 唯一键冲突返回 `ErrDuplicate` + namespace/status 过滤
+63. [x] `store/registry_store.go`：`NamespaceStore` / `SourceStore` 的 GORM 实现（`MarkSync` 只改同步列）
+
+### 4. Model router（`internal/adapter`）
+
+64. [x] `model_openai.go`：OpenAI 兼容 provider（chat completions，`api_key_env` 只取环境变量名，
+     限长 + 状态码分类错误码），`TODO(real)` 标注 streaming 边界
+65. [x] `model.go`：按 `KindConfig.ModelConfig` 装配 `ModelRouter`（主 provider + 有序回退链 + 权重 +
+     超时 + 可选 mock 兜底）；`GenerateWith` 返回命中 provider 名并写进 artifact
+66. [x] `model_router_test.go`：URL 拼装、mock 离线、回退链顺序、全失败不伪造、401/畸形响应、凭据取 env
+
+### 5. 控制面（`internal/handlers` + `authz` + `config`）
+
+67. [x] `authz`：`registries:manage` / `registry:curate` / `sources:manage` 进 `AllPermissions`
+68. [x] `api_registry.go`：命名空间 CRUD + `POST /api/resources/{id}/status` 审批动作 + 待审批队列
+69. [x] `api_sync.go`：上游源 CRUD + `POST /api/registry-sources/{id}/sync`（上游失败 502 透传上游 code）
+70. [x] `api.go`：`ListFiltered(Filter{Kind,Query,Namespace,Status})`；`writeDomainErr` 补齐
+     `invalid_kind_config` / `invalid_status_transition` / `invalid_namespace` / `invalid_source` → 400、
+     `sync_in_flight` → 409
+71. [x] `hub/orchestrator.go`：A2A 寻址走 `registry.Discoverable`，未批准记录不可被调用
+72. [x] `config`：`AGENTHUB_REGISTRY_SYNC_ENABLED` / `_INTERVAL` / `_FIXTURE` /
+     `AGENTHUB_MODEL_ROUTER_MODE`（`mock`|`openai_compatible`）+ `Validate`；`main.go` 装配同步 ticker
+
+### 6. 控制台（`web/`）
+
+73. [x] `ResourceKindForm.vue` + `EnvEditor.vue`：六类专属配置区块（Model router 模式 / Agent Card /
+     MCP transport 分流 / Skill 步骤与文档 / CLI 白名单 / custom JSON schema）
+74. [x] `RegistryView.vue`：kind 分段选择 + 命名空间与状态筛选 + 审批状态徽标与状态机动作
+75. [x] `RegistriesView.vue`（命名空间 + 待审批队列）/ `SourcesView.vue`（上游源 + 手动同步与结果计数）
+76. [x] copy 与枚举：`registry-copy.js` 58 key、`registries-copy.js` 23 key、`sources-copy.js` 25 key，
+     13 语齐全；`enums-copy.js` 增 `custom` / `status` / `providerMode` / `sourceAuth` / `syncStatus`
+77. [x] `api.js` / `store.js` / `router.js` / `Sidebar.vue`：新接口、新 state 与 action、新路由与导航入口
+
+### 7. 测试与文档收口
+
+78. [x] `tests/registry_governance_integration_test.go`（`DATABASE_URL` 门控）：命名空间 CRUD、
+     治理列 jsonb 往返、去重启用键冲突、源 CRUD 与同步留痕、facade 与 store 行为一致
+79. [x] `internal/handlers/api_governance_test.go`：命名空间、审批两步行走、草稿不泄漏到导出、
+     待审批队列、源创建/同步/二次同步/上游失败 502、列表按 namespace 与 status 过滤
+80. [x] 验收：`go vet ./...` 通过、`go test -race ./...` 全绿（含真实 PostgreSQL 集成用例）、
+     `bunx vitest run` 57 passed、`bun run build` 通过
+81. [x] 文档同步：`AGENTS.md` / `requirements.md` / 本 `task.md` / `README.md` / `README_cn.md`
+
+### 8. 覆盖率补齐（一轮专项）
+
+82. [x] `internal/registry/kinds_test.go`：六类 per-kind 校验的**完整非法矩阵**（每类每个字段一条）、
+     空/缺失区块仍合法、effective 字段回退链（endpoint / model id / transport / provider mode）、
+     `KindConfigSummary` 日志安全（不打印凭据名）
+83. [x] `internal/registry/store_mode_test.go`：包内假 store（resource / namespace / source）
+     驱动**双模分支**——去重启用键、审批状态机、`Register` 重名 id、`FindByKey`、
+     持久化错误归一（`ErrNotFound`/`ErrDuplicate`/其他 → 内部错误）、计数与列表兜底、
+     命名空间与源走 store 的增删改与 `MarkSync`
+84. [x] `internal/registry/sync_http_test.go`：上游客户端的**不可信输入**分支（非 JSON / 未知形状 /
+     非 2xx / 超长体 / 畸形 URL / 上下文取消 / 缺凭据不出请求）、`decodeRecords` 全部已知包裹键、
+     `entryFromRecord` 的 MCP 与 Skill 两种形态与嵌套 repository / 工具对象
+85. [x] `internal/handlers/api_governance_more_test.go`：命名空间与源的改删路径、
+     无同步服务时全部 404、列表过滤非法参数 400、三个新权限**互不蕴含**（逐个 403/200 断言）、
+     审批接口的畸形体与不存在的边、`deprecated` 移出可发现目录
+86. [x] `internal/store/registry_governance_test.go`（`DATABASE_URL` 门控）：治理列与 `kind_config`
+     jsonb 真正落库往返、唯一索引冲突、命名空间 CRUD（含 `auto_approve=false` 的零值陷阱）、
+     源 CRUD 与同步结果留痕
+87. [x] `internal/a2a/jsonrpc_test.go`：`NewResponse` / `WriteResult` / `WriteRPCError` 的状态映射
+     （解析与无效请求 400、未知方法 404、其余 200）/ `WriteRPCErr` 归一 / `NewDataPart` / 推送配置别名
+88. [x] `internal/auth/oauth_test.go`：仅提供已配置且启用的提供方、`BeginOAuth` 携带 PKCE 与 state
+     且不泄露密钥、未配置提供方的回调拒绝、cookie 标志（HttpOnly / Lax / Secure）、
+     无 store 时服务保持惰性
+89. [x] `internal/authz/principal_test.go`：dev 与匿名两个内置 principal 的权限边界、
+     权限词表封闭且无重复、无 store 的惰性服务与可见性
+90. [x] `internal/model/model_test.go`：24 张表的 `TableName` 全量断言（含新增两张）+
+     `Resource` 治理列与 jsonb 载荷
+91. [x] `internal/config/config_test.go`：同步开关与 router 模式的默认值与校验边界、
+     环境解析失败回落、`BackupSchedule` 透传
+92. [x] `internal/backup/service_accessors_test.go`：`Enabled`/`EngineName`/`Dir`/`Quiesce`、
+     下载前校验 checksum（篡改 → 不匹配）、恢复确认、越界路径拒绝、调度只播种一次
+93. [x] `make test-cover`：`go test -coverprofile` + `go tool cover -func` 的一键覆盖率入口，
+     `coverage.out` 进 `.gitignore` 与 `make clean`
+
+## M3 — 后续项（未开始）
+
+94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`
+      SSE → A2A）、mcp（stdio / Streamable HTTP 子进程与 HTTP 客户端）、skill（本地/远端手册加载）、
       cli（`exec.CommandContext`，沿用白名单/超时/截断）
-52. [ ] pushNotification 真实回调（HTTP POST + 鉴权 + 重试；留痕表已就位）
-53. [ ] 多实例联邦：Agent Network（跨 agenthub 的 Agent Card 聚合与路由）
-54. [ ] eval 钩子接评测编排（**仍不产出分数**；缺凭据 skip 并写 reason）
-55. [ ] 控制台增强：拓扑时间窗口持久化、任务筛选与分页、artifact 下载
+95. [ ] pushNotification 真实回调（HTTP POST + 鉴权 + 重试；留痕表已就位）
+96. [ ] 多实例联邦：Agent Network（跨 agenthub 的 Agent Card 聚合与路由）
+97. [ ] eval 钩子接评测编排（**仍不产出分数**；缺凭据 skip 并写 reason）
+98. [ ] 控制台增强：拓扑时间窗口持久化、任务筛选与分页、artifact 下载
+99. [ ] 目录侧剩余项（对照 README「AWS Agent Registry 特性对比」的「剩余差距」）：批量读接口与列表分页、
+     语义检索走外部检索源接入、全量 API 调用审计留痕
+100. [ ] 覆盖率后续项：`internal/auth` 的 OAuth `Exchange`（端点为常量，需可注入才能离线断言）、
+     `internal/backup` 的 `copy.go` / `pgdump.go`（需真实 PostgreSQL 与 `pg_dump` 客户端）

@@ -5,8 +5,9 @@ import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { useHubStore, KINDS } from '../lib/store.js'
 import { errorMessage } from '../lib/errors.js'
 import { streamTask } from '../lib/api.js'
+import ResourceKindForm from '../components/ResourceKindForm.vue'
 import StateDot from '../components/StateDot.vue'
-import { BookOpen, Bot, Cpu, Plug, Plus, Search, Terminal } from 'lucide-vue-next'
+import { BookOpen, Bot, Boxes, Cpu, Plug, Plus, Search, Terminal } from 'lucide-vue-next'
 
 const store = useHubStore()
 const router = useRouter()
@@ -14,23 +15,29 @@ const { t } = useCopy('registry')
 const shell = useCopy('shell')
 
 const kindFilter = ref('')
+const namespaceFilter = ref('')
+const statusFilter = ref('')
 const query = ref('')
 const drawerOpen = ref(false)
 const editing = ref(null)
 const running = ref('')
 
-const KIND_ICONS = { model: Cpu, agent: Bot, mcp: Plug, skill: BookOpen, cli: Terminal }
+const KIND_ICONS = { model: Cpu, agent: Bot, mcp: Plug, skill: BookOpen, cli: Terminal, custom: Boxes }
 
 const form = reactive({
   id: '',
   kind: 'model',
   name: '',
+  displayName: '',
+  description: '',
+  namespace: 'default',
   endpoint: '',
   transport: '',
   version: '',
   tags: '',
   capabilities: '',
   health: 'healthy',
+  kindConfig: {},
 })
 
 const errorMessageText = computed(() => errorMessage(store.errorCode))
@@ -44,10 +51,14 @@ const tabs = computed(() => [
   })),
 ])
 
+const namespaces = computed(() => store.registries.map((ns) => ns.id))
+
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase()
   return store.resources.filter((resource) => {
     if (kindFilter.value && resource.kind !== kindFilter.value) return false
+    if (namespaceFilter.value && (resource.namespace || 'default') !== namespaceFilter.value) return false
+    if (statusFilter.value && (resource.status || 'approved') !== statusFilter.value) return false
     if (!q) return true
     return [resource.name, resource.endpoint, ...(resource.tags ?? [])]
       .filter(Boolean)
@@ -55,27 +66,51 @@ const visible = computed(() => {
   })
 })
 
+// Curation is a state machine, so the console only offers the edges that exist:
+// a draft is submitted, a pending record is approved or rejected, an approved
+// one is deprecated and a withdrawn one resubmitted.
+const curationActions = {
+  draft: ['pending'],
+  pending: ['approved', 'rejected'],
+  approved: ['deprecated'],
+  rejected: ['pending'],
+  deprecated: ['pending'],
+}
+
 onMounted(() => {
   if (!store.resources.length) store.refreshResources()
+  store.refreshRegistries()
 })
 
 function iconFor(kind) {
   return KIND_ICONS[kind] ?? Cpu
 }
 
-function openCreate() {
-  editing.value = null
+function statusOf(resource) {
+  return resource.status || 'approved'
+}
+
+function resetForm() {
   Object.assign(form, {
     id: '',
     kind: 'model',
     name: '',
+    displayName: '',
+    description: '',
+    namespace: namespaceFilter.value || 'default',
     endpoint: '',
     transport: '',
     version: '',
     tags: '',
     capabilities: '',
     health: 'healthy',
+    kindConfig: {},
   })
+}
+
+function openCreate() {
+  editing.value = null
+  resetForm()
   drawerOpen.value = true
 }
 
@@ -85,12 +120,16 @@ function openEdit(resource) {
     id: resource.id,
     kind: resource.kind,
     name: resource.name,
+    displayName: resource.display_name ?? '',
+    description: resource.description ?? '',
+    namespace: resource.namespace ?? 'default',
     endpoint: resource.endpoint ?? '',
     transport: resource.transport ?? '',
     version: resource.version ?? '',
     tags: (resource.tags ?? []).join(', '),
     capabilities: (resource.capabilities ?? []).join(', '),
     health: resource.health ?? 'healthy',
+    kindConfig: resource.kind_config ?? {},
   })
   drawerOpen.value = true
 }
@@ -102,8 +141,8 @@ function splitList(value) {
     .filter(Boolean)
 }
 
-async function submit() {
-  const payload = {
+function payload() {
+  const out = {
     kind: form.kind,
     name: form.name.trim(),
     endpoint: form.endpoint.trim(),
@@ -111,15 +150,34 @@ async function submit() {
     tags: splitList(form.tags),
     capabilities: splitList(form.capabilities),
     health: form.health,
+    namespace: form.namespace.trim() || 'default',
   }
-  if (form.transport) payload.transport = form.transport
-  const ok = editing.value ? await store.update(editing.value.id, payload) : await store.register(payload)
+  if (form.displayName.trim()) out.display_name = form.displayName.trim()
+  if (form.description.trim()) out.description = form.description.trim()
+  if (form.transport) out.transport = form.transport
+  // An empty descriptor is left out entirely rather than sent as {}.
+  if (form.kindConfig && Object.keys(form.kindConfig).length) out.kind_config = form.kindConfig
+  return out
+}
+
+async function submit() {
+  const ok = editing.value ? await store.update(editing.value.id, payload()) : await store.register(payload())
   if (ok) drawerOpen.value = false
 }
 
 async function destroy(resource) {
   if (!window.confirm(t('confirmDelete'))) return
   await store.remove(resource.id)
+}
+
+async function curate(resource, status) {
+  if (status === 'deprecated' && !window.confirm(t('confirmDeprecate'))) return
+  await store.curate(resource.id, status)
+}
+
+function labelFor(status) {
+  const key = { pending: 'actionSubmit', approved: 'actionApprove', rejected: 'actionReject', deprecated: 'actionDeprecate' }
+  return t(key[status] ?? 'actionSubmit')
 }
 
 async function tryRun(resource) {
@@ -181,6 +239,19 @@ async function tryRun(resource) {
       </button>
     </div>
 
+    <div class="toolbar secondary">
+      <select v-model="namespaceFilter" :aria-label="t('fieldNamespace')">
+        <option value="">{{ t('fieldNamespace') }}: {{ t('tabAll') }}</option>
+        <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
+      </select>
+      <select v-model="statusFilter" :aria-label="t('fieldStatus')">
+        <option value="">{{ t('fieldStatus') }}: {{ t('tabAll') }}</option>
+        <option v-for="status in ['draft', 'pending', 'approved', 'rejected', 'deprecated']" :key="status" :value="status">
+          {{ enumLabel('status', status) }}
+        </option>
+      </select>
+    </div>
+
     <div v-if="visible.length" class="grid">
       <article v-for="resource in visible" :key="resource.id" class="card resource-card">
         <div class="resource-head">
@@ -195,7 +266,9 @@ async function tryRun(resource) {
 
         <div class="tag-row">
           <span class="chip">{{ enumLabel('kind', resource.kind) }}</span>
+          <span class="chip">{{ enumLabel('status', statusOf(resource)) }}</span>
           <span v-if="resource.transport" class="chip">{{ enumLabel('transport', resource.transport) }}</span>
+          <span v-if="resource.namespace && resource.namespace !== 'default'" class="chip mono">{{ resource.namespace }}</span>
           <span v-for="tag in resource.tags ?? []" :key="tag" class="chip">#{{ tag }}</span>
         </div>
 
@@ -217,6 +290,18 @@ async function tryRun(resource) {
             {{ shell.t('actionDelete') }}
           </button>
         </div>
+
+        <div v-if="(curationActions[statusOf(resource)] || []).length" class="card-actions curate">
+          <button
+            v-for="next in curationActions[statusOf(resource)]"
+            :key="next"
+            class="btn btn-ghost"
+            type="button"
+            @click="curate(resource, next)"
+          >
+            {{ labelFor(next) }}
+          </button>
+        </div>
       </article>
     </div>
     <div v-else class="empty">{{ t('empty') }}</div>
@@ -234,18 +319,41 @@ async function tryRun(resource) {
         </div>
 
         <div class="field">
-          <label for="f-kind">{{ t('fieldKind') }}</label>
-          <select id="f-kind" v-model="form.kind">
-            <option v-for="kind in KINDS" :key="kind" :value="kind">{{ enumLabel('kind', kind) }}</option>
-          </select>
+          <label>{{ t('fieldKind') }}</label>
+          <div class="segmented">
+            <button
+              v-for="kind in KINDS"
+              :key="kind"
+              type="button"
+              class="segment"
+              :class="{ active: form.kind === kind }"
+              @click="form.kind = kind"
+            >
+              {{ enumLabel('kind', kind) }}
+            </button>
+          </div>
         </div>
+
+        <h3 class="section-title">{{ t('sectionCommon') }}</h3>
         <div class="field">
           <label for="f-name">{{ t('fieldName') }}</label>
           <input id="f-name" v-model="form.name" type="text" required />
         </div>
         <div class="field">
+          <label for="f-display">{{ t('fieldDisplayName') }}</label>
+          <input id="f-display" v-model="form.displayName" type="text" />
+        </div>
+        <div class="field">
+          <label for="f-namespace">{{ t('fieldNamespace') }}</label>
+          <input id="f-namespace" v-model="form.namespace" class="mono" type="text" />
+        </div>
+        <div class="field">
+          <label for="f-description">{{ t('fieldDescription') }}</label>
+          <input id="f-description" v-model="form.description" type="text" />
+        </div>
+        <div class="field">
           <label for="f-endpoint">{{ t('fieldEndpoint') }}</label>
-          <input id="f-endpoint" v-model="form.endpoint" type="text" />
+          <input id="f-endpoint" v-model="form.endpoint" class="mono" type="text" />
         </div>
         <div class="field">
           <label for="f-transport">{{ t('fieldTransport') }}</label>
@@ -258,12 +366,15 @@ async function tryRun(resource) {
         </div>
         <div class="field">
           <label for="f-version">{{ t('fieldVersion') }}</label>
-          <input id="f-version" v-model="form.version" type="text" />
+          <input id="f-version" v-model="form.version" class="mono" type="text" />
         </div>
         <div class="field">
           <label for="f-tags">{{ t('fieldTags') }}</label>
           <input id="f-tags" v-model="form.tags" type="text" placeholder="hr, legacy" />
         </div>
+
+        <h3 class="section-title">{{ t('sectionKindConfig') }}</h3>
+        <ResourceKindForm v-model="form.kindConfig" :kind="form.kind" />
 
         <div style="display: flex; gap: 8px; margin-top: 8px">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
@@ -296,5 +407,50 @@ async function tryRun(resource) {
 
 .search-wrap input:focus {
   box-shadow: none;
+}
+
+.toolbar.secondary {
+  margin-block-start: -6px;
+  gap: 8px;
+}
+
+.toolbar.secondary select {
+  max-width: 220px;
+}
+
+.section-title {
+  margin-block: 4px 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.segment {
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.segment.active {
+  color: var(--text-1);
+  border-color: var(--stroke-3);
+}
+
+.curate {
+  margin-block-start: 6px;
+  padding-block-start: 8px;
+  border-top: 1px solid var(--stroke-1);
 }
 </style>

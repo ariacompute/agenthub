@@ -164,7 +164,7 @@ func TestIntegrationResourceCRUD(t *testing.T) {
 	}
 
 	// Listing filters by kind.
-	mcps, err := rs.List(ctx, string(registry.KindMCP))
+	mcps, err := rs.List(ctx, registry.Filter{Kind: string(registry.KindMCP)})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

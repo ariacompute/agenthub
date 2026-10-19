@@ -104,21 +104,87 @@ func TestJSONFieldImplementsDriverInterfaces(t *testing.T) {
 	}
 }
 
+// Every model names its own table. The names are the contract with the
+// migrations, so a rename in one place without the other breaks at runtime —
+// this pins all of them in one place.
 func TestTableNameMapping(t *testing.T) {
 	cases := map[string]string{
-		(&Resource{}).TableName():        "resources",
-		(&Task{}).TableName():            "tasks",
-		(&TaskArtifact{}).TableName():    "task_artifacts",
-		(&TaskSpan{}).TableName():        "task_spans",
-		(&TaskPending{}).TableName():     "task_pending",
-		(&TaskPush{}).TableName():        "task_push",
-		(&PushRecord{}).TableName():      "push_records",
-		(&Event{}).TableName():           "events",
-		(&SchemaMigration{}).TableName(): "schema_migrations",
+		(&Resource{}).TableName():         "resources",
+		(&Registry{}).TableName():         "registries",
+		(&RegistrySource{}).TableName():   "registry_sources",
+		(&Task{}).TableName():             "tasks",
+		(&TaskArtifact{}).TableName():     "task_artifacts",
+		(&TaskSpan{}).TableName():         "task_spans",
+		(&TaskPending{}).TableName():      "task_pending",
+		(&TaskPush{}).TableName():         "task_push",
+		(&PushRecord{}).TableName():       "push_records",
+		(&Event{}).TableName():            "events",
+		(&SchemaMigration{}).TableName():  "schema_migrations",
+		(&User{}).TableName():             "users",
+		(&Session{}).TableName():          "sessions",
+		(&OAuthAccount{}).TableName():     "oauth_accounts",
+		(&Permission{}).TableName():       "permissions",
+		(&Role{}).TableName():             "roles",
+		(&RolePermission{}).TableName():   "role_permissions",
+		(&Group{}).TableName():            "groups",
+		(&UserGroup{}).TableName():        "user_groups",
+		(&UserRole{}).TableName():         "user_roles",
+		(&GroupRole{}).TableName():        "group_roles",
+		(&ResourceGrant{}).TableName():    "resource_grants",
+		(&BackupCheckpoint{}).TableName(): "backup_checkpoints",
+		(&BackupSchedule{}).TableName():   "backup_schedules",
 	}
 	for got, want := range cases {
 		if got != want {
 			t.Fatalf("TableName = %q, want %q", got, want)
 		}
+	}
+	// The count is asserted too: a new model without a TableName would silently
+	// fall back to GORM's pluralised guess, which is rarely the migration's name.
+	if len(cases) != 24 {
+		t.Fatalf("models = %d, want 24 — did one gain or lose a table?", len(cases))
+	}
+}
+
+// A resource carries its per-kind descriptor in the same jsonb field the rest
+// of the platform uses, so the governance columns have to round trip through it
+// like any other payload.
+func TestResourceCarriesTheGovernanceColumns(t *testing.T) {
+	res := &Resource{
+		ID:          "model-router",
+		Kind:        "model",
+		Namespace:   "team-a",
+		Status:      "pending",
+		DisplayName: "Router",
+		SourceID:    "src-1",
+	}
+	res.KindConfig = JSONField(`{"model":{"provider_mode":"openai_compatible","model_id":"gpt-4o-mini"}}`)
+
+	var cfg struct {
+		Model struct {
+			ProviderMode string `json:"provider_mode"`
+			ModelID      string `json:"model_id"`
+		} `json:"model"`
+	}
+	if err := res.KindConfig.Decode(&cfg); err != nil {
+		t.Fatalf("decode kind config: %v", err)
+	}
+	if cfg.Model.ProviderMode != "openai_compatible" || cfg.Model.ModelID != "gpt-4o-mini" {
+		t.Fatalf("kind config = %+v", cfg)
+	}
+	// The value the driver writes is the document as text, so Postgres can
+	// coerce it into jsonb.
+	value, err := res.KindConfig.Value()
+	if err != nil {
+		t.Fatalf("value: %v", err)
+	}
+	if _, ok := value.(string); !ok {
+		t.Fatalf("value = %T, want string", value)
+	}
+	// A source row keeps only the name of the credential variable — the token
+	// itself has no column to live in.
+	src := &RegistrySource{ID: "src-1", Kind: "mcp", Enabled: true, LastSyncStatus: "ok"}
+	if src.LastSyncStatus != "ok" || !src.Enabled || src.AuthTokenEnv != "" {
+		t.Fatalf("source = %+v", src)
 	}
 }

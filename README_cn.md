@@ -7,7 +7,8 @@
 - 后端：Go 1.27 + `net/http`，单二进制（唯一生产依赖为 GORM）
 - 前端：Vue 3 + Vite（bun），**13 种语言**，纯黑/白/灰单色视觉
 - 持久化：**PostgreSQL + GORM**（资源、任务、artifact、span、事件流、回调留痕全部落库）
-- 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通
+- 五类适配器**默认离线可跑**：无网络、无子进程、无凭据即可启动——model 条目可选接入真实的
+  OpenAI 兼容网关
 
 ## 概念地图
 
@@ -20,45 +21,6 @@
 | CLI | 对讲机 | `kind=cli`，白名单 → 超时 → 截断 → 结构化 JSON 回执 |
 
 一次调用：用户 → Agent → Model 规划 → 加载 Skill → 经 MCP 调用老系统 → 结果沿原路返回。
-
-## 配置
-
-见 `.env.example`。主要项：`DATABASE_URL`（**必填**）、`AGENTHUB_HTTP_PORT`（默认 3500）、
-`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` + `AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD`、`AGENTHUB_SESSION_TTL`、
-`AGENTHUB_MAX_PARALLEL`、`AGENTHUB_CLI_ALLOWLIST`、`AGENTHUB_CLI_TIMEOUT`、
-`AGENTHUB_MAX_OUTPUT_BYTES`、`AGENTHUB_PUSH_RECORD_LIMIT`（默认 100）、
-`AGENTHUB_SEED_DEMO`（默认 **false**）、`AGENTHUB_BACKUP_DIR`（默认为空 = 关闭检查点）、
-`AGENTHUB_BACKUP_KEEP_LAST` / `AGENTHUB_BACKUP_MAX_AGE_DAYS`（保留策略）。
-
-### 用户、会话与 RBAC
-
-控制台与 `/api/*` 控制面走的是**会话**，不再是共享 token：
-
-- **邮箱 + 密码**：`POST /api/auth/register`、`POST /api/auth/login`（响应下发 HttpOnly cookie）。
-  口令以 PBKDF2-HMAC-SHA256 派生存储，明文与原始口令都不落库。
-- **OAuth**：Google、GitHub 与任意通用 OIDC 发行方，手写授权码流程，带 PKCE（S256）与 `state`。
-  未配置凭据的提供方不会出现在登录页。
-- **引导管理员**：`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` / `..._PASSWORD` 每次启动幂等 upsert，并成为
-  **owner**。若两者都未配置且库中无账号，第一个注册的账号即成为 owner，实例因此不会无人可用。
-- **RBAC**：用户 → 组 → 角色 → 权限（`resources:read`、`resources:write`、`tasks:read`、`tasks:write`、
-  `users:manage`、`roles:manage`、`grants:manage`、`sessions:manage`、`backups:manage`）。owner 持有全部权限，
-  这是配置出错时仍可挽回的兜底。
-- **资源级授权**：`POST /api/grants` 把某条资源限定给某个用户或组（`read` / `write`）。
-  **没有**授权的资源对所有人可见；一旦产生授权，它在列表、导出与 Agent Card 中都被隐藏，
-  直接访问返回 `404`。
-- **会话**：服务端行记录，可吊销（`DELETE /api/auth/sessions/{id}`；`sessions:manage` 可用
-  `DELETE /api/users/{id}/sessions` 踢人）。`/healthz` 的 `auth` 字段为
-  `session | anonymous | disabled`。
-
-删除用户是**停用**：任务、span 与授权都会保留以备审计。
-
-以上能力在控制台中均可使用：`/login` 注册与登录；`/admin`（需 `users:manage`、`roles:manage`、
-`grants:manage` 或 `backups:manage`）管理用户、权限矩阵、资源授权与数据库检查点。
-
-默认不灌任何演示数据：只有显式 `AGENTHUB_SEED_DEMO=true`，启动时才会幂等地写入五条 `demo-*` 资源
-（`demo-model`、`demo-agent`、`demo-mcp`、`demo-skill`、`demo-cli`），下面的示例正是面向它们。
-除此之外实例以**空 registry** 启动；`config.Validate` 会拒绝 `AGENTHUB_ENV=prod` +
-`AGENTHUB_SEED_DEMO=true` 这一组合。
 
 ## 运行
 
@@ -184,8 +146,12 @@ AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 
 `desktop/` 是 **Tauri v2** 外壳，覆盖 Windows、macOS（arm64）与 Linux。它**不带后端、
 不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着你指定的 agenthub 服务端打开。浏览器里能做的
-一切——注册中心、任务追踪、拓扑、管理、SSE 实时流、归档下载——在窗口里同样可用。
+一切——注册中心、目录治理、任务追踪、拓扑、管理、SSE 实时流、归档下载——在窗口里同样可用。
 发布的 macOS 产物为 arm64；Intel Mac 请用 `make desktop-build` 从源码构建。
+
+外壳只认**路径前缀**：`/api`、`/a2a`、`/healthz`、`/.well-known` 转发给服务端，其余一律回退到
+控制台的 `index.html`。因此新增控制面端点或控制台屏幕**不需要改桌面端代码**，只需要重新构建控制台
+产物——`make desktop-dev` 与 `make desktop-build` 都会先做这件事。
 
 ```bash
 make desktop-install  # cd desktop && bun install
@@ -217,8 +183,13 @@ make desktop-test     # cd desktop/src-tauri && cargo test
 make db-up             # 集成用例需要真实 PostgreSQL
 make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
 make test-integration  # 只跑 integration_test.go
+make test-cover        # -coverprofile + go tool cover -func，按包与总计
 make web-test          # cd web && bunx vitest run
 ```
+
+覆盖率按包统计。读数字前要知道两件事：治理规则用**包内假 store** 驱动，因此 `registry` 的
+store 分支不需要数据库就能覆盖；而 `internal/store` 只有在设置了 `DATABASE_URL` 时才测得出来——
+它的用例是 skip，而不是伪造结果。
 
 对着运行中实例的端到端接口测试——把所有 `curl` 可达的端点都脚本化了：健康与发现、整套 `/api`
 控制面（资源 CRUD、导出、任务、span、事件回放）、A2A 方法（send、get、流式、push 通知、
@@ -236,6 +207,10 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 脚本会先登录（实例全新时注册第一个账号），断言无会话时 `/api/*` 被拦，随后遍历用户、角色、
 权限矩阵与资源授权，并验证「被授权的资源会从发现文档里消失」。
+
+它还覆盖目录治理：建命名空间 → 在其中注册 → 记录走 `draft → pending → approved`（草稿不得出现在
+可发现列表，`draft → approved` 必须被拒）、`(namespace, name, version)` 去重启用键，以及一个上游
+注册中心源经离线 fixture 同步两次（首次导入、二次刷新）。
 
 脚本面向种子资源（`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` / `demo-cli`），除
 `curl` 与 `python3` 外无依赖，跑完会删掉自己创建的资源；若服务始终不应答 `/healthz` 则以 2 退出。
@@ -279,7 +254,9 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 | 表 | 内容 |
 | --- | --- |
-| `resources` | 五类资源条目全字段（`tags/capabilities/auth_schemes/env/metadata` 走 `jsonb`） |
+| `resources` | 五类 + `custom` 条目全字段，含 `namespace` / `status` / `display_name` / `source_id` / `kind_config`（`tags/capabilities/auth_schemes/env/metadata/kind_config` 走 `jsonb`），`(namespace, name, version)` 唯一 |
+| `registries` | registry 命名空间，各带审批策略（`auto_approve`） |
+| `registry_sources` | 上游注册中心源与最近一次同步结果（`last_sync_at/status/count/error`） |
 | `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | 任务主体、输出、span 时间线、`input-required` 挂起问题、回调配置（子表随任务级联删除） |
 | `events` | 每次状态/artifact/message/span 帧，支持 SSE 断线重连按 `since=<seq>` 回放 |
 | `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
@@ -292,7 +269,9 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 - 事件重连：`GET /api/tasks/{id}/events?since=<seq>` 回放该 seq 之后的所有帧，再接实时流。
 
 集成用例覆盖：迁移幂等、资源 CRUD 与 jsonb 往返、任务全生命周期与级联删除、事件回放、
-push 回调留痕与保留上限、以及完整 A2A run 的落库回读。**无 DB 时自动 skip，不伪造结果**。
+push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理用例（命名空间 CRUD、治理列往返、
+去重启用键冲突、源 CRUD 与同步留痕、内存 facade 与 store facade 行为一致）。
+**无 DB 时自动 skip，不伪造结果**。
 
 ## 数据库检查点
 
@@ -313,11 +292,112 @@ push 回调留痕与保留上限、以及完整 A2A run 的落库回读。**无 
 - **开关**：`AGENTHUB_BACKUP_DIR` 就是开关。不配置时标签页显示「未启用」并说明原因，其余功能不受
   影响；`docker-compose.yml` 默认如此——`agenthub-backups` 卷已挂载，但留到你配置该变量时才启用。
 
-## 与 mastra 的关系
+## AWS Agent Registry 特性对比
 
-设计参照了 `mastra-ai/mastra` 的特性盘点：采纳其 MCP Registry 条目模型、workflow 控制流三原语（then/branch/parallel）、human-in-the-loop 与 `input-required` 的映射、Studio 试跑交互与 observability 分层。**未引入任何 mastra 代码或 npm 依赖**，Go 侧全部自实现。
+对照 [AWS Agent Registry（Amazon Bedrock AgentCore）](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html)
+与 [Concepts and terminology](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry-concepts.html)
+的逐项能力对比。
 
-不实现的边界：RAG、语音、浏览器自动化、渠道接入、多语言 SDK、LLM-as-judge 评分（eval 仅留钩子，不产出分数）。
+| | AWS Agent Registry | agenthub |
+| --- | --- | --- |
+| 本质 | **纯目录/发现服务**，记录的执行交给 Runtime / Gateway | **目录 + 执行一体**：注册的记录立刻可被 A2A 调用 |
+| 一级公民 | Registry（目录）→ Registry record（条目） | 命名空间（`registries`）→ 记录（`resources`） |
+| 协议 | 以原生 MCP endpoint 暴露目录；按 MCP / A2A 协议 schema 校验 | 对外讲 A2A（`POST /a2a`）；目录以 MCP server 描述与 Agent Card 形式**导出** |
+
+agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（五类适配器）；缺的是目录那一半：
+审批、命名空间、以及从外部注册中心同步。
+
+### 记录类型与校验
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| 两级：Registry（name / description / authorization / approval）→ Registry record | 命名空间 → 记录；命名空间自带审批策略 |
+| `recordType` ∈ `AGENT` / `MCP` / `SKILL` / `CUSTOM` | `kind` ∈ `model` / `agent` / `mcp` / `skill` / `cli` / `custom` |
+| MCP 记录 = server definition + 工具 schema，按 MCP 协议 schema 校验 | MCP 配置块：transport（stdio / streamable-http / sse-legacy）、command+args 或 URL、tool allowlist、auth schemes、env——按 kind 校验 |
+| Agent 记录 = A2A Agent Card，按 Agent Card schema 校验 | Agent 配置块：Agent Card URL、protocolVersion、capabilities、skills、鉴权 |
+| Skill 记录 = Name / Description / Package / Repository / markdown | Skill 配置块：version、repository / package、触发词、步骤、工具清单、markdown |
+| Custom 记录 = 任意合法 JSON | `custom` 类型：任意合法 JSON schema |
+| `name`、可选 `displayName`、`recordVersion` | `name`、`display_name`、`version` |
+| 去重键 `name + recordVersion`（registry 内唯一），同名可跨版本 | 去重键 `(namespace, name, version)`（唯一索引保证），同名可跨版本 |
+| —（无 Model 与 CLI 两类） | `model`（provider 回退链，可指向真实 OpenAI 兼容 router）与 `cli`（白名单 → 超时 → 截断）为 agenthub 特有 |
+
+### 生命周期与治理
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| Draft → 提交 → Curator **approve / reject**（带反馈）→ 可 **deprecate** | `draft → pending → approved / rejected → deprecated`；非法迁移返回 400 |
+| 消费方**只看到 approved** 记录 | `registry.Discoverable` 是列表、MCP 导出、Agent Card 与 A2A 寻址共用的唯一过滤出口 |
+| 四角色：Administrator / Publisher / Curator / Consumer | RBAC（owner / 组 / 角色 / 权限）+ 资源级 grant，目录侧另增 `registries:manage` / `registry:curate` / `sources:manage` |
+| 命名空间可按类型 / 环境 / 团队拆分 | 多命名空间，各带审批策略与可见性边界 |
+
+### 发现
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| **Hybrid search**：语义 + 关键词 | 仅关键词检索——见下方「明确不做」 |
+| **Catalog browsing**：分页 list + 按 recordType 过滤 + `Get` / `BatchGet` | `GET /api/resources?kind=&q=&namespace=&status=`；暂无分页与批量读 |
+| **原生 MCP endpoint**（`InvokeRegistryMcp`，任意 MCP 客户端直连） | `GET /api/export/mcp` 只**导出** MCP server 描述，不自建 MCP 服务端 |
+| Agent Card | `GET /api/export/agent-card` 与 `/.well-known/agent.json`——每个 approved 记录渲染为一个 advertised skill |
+
+### 授权与同步
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| Inbound：IAM 或 JWT | 会话 cookie → `Principal`；`/api/*` 走 `requirePermission`，A2A 走 `identify` |
+| Outbound：**credential provider**（OAuth 凭据或 IAM role），供同步时调用远端端点 | `AuthScheme`（none / bearer）+ `auth_token_env`，**只存环境变量名** |
+| **URL-based synchronization**：记录与远端 MCP / A2A 端点保持同步 | 源（mcp / skill）按手动或定时拉取，按 `(name, version)` 合并并记录同步结果；fixture 客户端默认离线，运维显式关闭后才出网 |
+
+### 运维与可观测
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| EventBridge 通知（记录提交审批时） | SSE broker + `events` 表按 `since=<seq>` 回放——能力等价，自有实现 |
+| CloudTrail 审计全部 API 调用 | `slog` 结构化日志（不记密钥、不记用户内容、不记向量）；审计面弱于 CloudTrail，**明确不补** |
+| AWS Organizations / 跨账号 RAM 共享 | 单实例多租户（principal + 资源级 grant）；绑定 AWS 基础设施，**不复制** |
+| VPC / PrivateLink、service-linked role | 自部署单二进制无对等物 |
+| Tags（key-value，成本归属 / 访问控制） | `tags []string` + `metadata map`，够用 |
+| — | 数据库检查点与定时备份（`internal/backup`）：AWS 侧无对应能力，agenthub **更强** |
+
+### 三张清单
+
+**已有**——注册即可执行的五类适配器（确定性、离线可跑）；A2A 端点与完整任务状态机（含可无限期
+挂起并经 `tasks/resume` 恢复的 `input-required`）；事件扇出（SSE + `since` 回放）；push 回调留痕；
+目录导出（MCP server 描述 + Agent Card）；认证内核（PBKDF2 口令 / 会话 / OAuth + PKCE）与 RBAC
+（组 / 角色 / 权限 / 资源级 grant）；数据库检查点；13 语 i18n 与单色视觉，Web 与桌面端同一份。
+
+**本次补齐**——六类各自的 per-kind 配置与校验；Model router（可指向 OpenAI 兼容网关）；上游注册中心
+同步（去重 + 记录同步结果）；审批生命周期（消费方只见 approved）；多 registry 命名空间；
+`(namespace, name, version)` 去重启用键；`custom` 记录类型。
+
+**明确不做**——
+
+| 项 | 理由 |
+| --- | --- |
+| 语义 / hybrid search（向量检索） | 需引入嵌入模型或外部服务，与「零新增生产依赖、离线可跑」冲突；如需，应以「外部检索源」形态接入，而非内嵌模型。 |
+| 自建 MCP JSON-RPC 服务端（`InvokeRegistryMcp` 等价物） | agenthub 的对外协议是 A2A；目录已导出 MCP server 描述供接入方自取。做第二套协议服务端会分裂契约。 |
+| CloudTrail 等价审计（全量 API 调用留痕） | 与现有 `slog` + `events` 表重叠；应作为独立可观测里程碑，不与目录治理耦合。 |
+| Organizations / 跨账号 RAM 共享 / VPC PrivateLink / service-linked role | 绑定 AWS 基础设施，跨云自建无对等物；多租户隔离已由 principal + 资源级 grant 提供。 |
+| IAM / JWT 之外的 inbound 授权形态 | 现有会话 + RBAC 已满足自部署场景。 |
+| 记录级 outbound OAuth 完整授权码流程 | 本次同步只需 bearer token（存环境变量名）；完整 OAuth 留给「真实适配器」里程碑。 |
+
+### 字段级映射（recordType ↔ Kind）
+
+| AWS recordType | 校验 schema | agenthub kind | per-kind 配置 |
+| --- | --- | --- | --- |
+| `MCP` | MCP 协议 schema | `mcp` | transport、command+args 或 URL、tool allowlist、auth schemes、env |
+| `AGENT` | A2A Agent Card schema | `agent` | Agent Card URL、protocolVersion、capabilities、skills、鉴权 |
+| `SKILL` | 描述符（Name / Description / Package / Repository / markdown） | `skill` | version、repository / package、触发词、步骤、工具清单、markdown |
+| `CUSTOM` | 任意合法 JSON | `custom` | JSON schema |
+| — | — | `model` | provider 模式、endpoint、model_id、api_key_env、回退链 + 权重、超时 |
+| — | — | `cli` | 可执行命令、命令白名单、超时、输出截断字节、工作目录、env |
+
+### 剩余差距
+
+1. **中**：语义检索缺失 —— 目录规模上千后关键词检索召回不足；建议以「外部检索源」形态接入，
+   而非内嵌嵌入模型。
+2. **中**：批量读接口与列表分页 —— 目录变大后列表接口无分页会拖慢控制台。
+3. **低**：审计面 —— 缺全量 API 调用留痕，合规场景需要。
+4. **低**：定时同步的调度表达式目前手写 5 段 cron，与 EventBridge 规则表达力不对等，但自部署够用。
 
 ## 许可证
 

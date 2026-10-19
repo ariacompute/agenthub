@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"agenthub/internal/registry"
 )
 
 // TestVersionIsStampable pins the contract the Makefile and Dockerfile rely on:
@@ -228,6 +230,19 @@ func TestValidateRejectsBadInput(t *testing.T) {
 		{"missing database url", func(c *Config) { c.DatabaseURL = "" }},
 		{"blank database url", func(c *Config) { c.DatabaseURL = "   " }},
 		{"zero push record limit", func(c *Config) { c.PushRecordLimit = 0 }},
+		{"sync on without an interval", func(c *Config) {
+			c.RegistrySyncEnabled = true
+			c.RegistrySyncInterval = 0
+		}},
+		{"sync on with a negative interval", func(c *Config) {
+			c.RegistrySyncEnabled = true
+			c.RegistrySyncInterval = -time.Minute
+		}},
+		{"unknown model router mode", func(c *Config) { c.ModelRouterMode = "anthropic" }},
+		{"backup on with an invalid schedule", func(c *Config) {
+			c.BackupDir = "/var/lib/agenthub/backups"
+			c.BackupMode = "whenever"
+		}},
 	}
 	for _, c := range cases {
 		cfg := &Config{
@@ -244,6 +259,110 @@ func TestValidateRejectsBadInput(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Fatalf("%s: expected validation error", c.name)
 		}
+	}
+}
+
+// The registry knobs only constrain a deployment that opted into them: an
+// instance that never synchronises must stay valid with the zeros it was built
+// with, and an unset router mode must not reject a caller that built the struct
+// directly instead of going through Load.
+func TestRegistryDefaultsStayValid(t *testing.T) {
+	cfg := &Config{
+		HTTPPort:        "3500",
+		Env:             "dev",
+		MaxParallel:     8,
+		CLITimeout:      time.Second,
+		MaxOutputBytes:  1024,
+		EventBuffer:     64,
+		DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable",
+		PushRecordLimit: 100,
+		SessionTTL:      time.Hour,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a config built by hand must stay valid: %v", err)
+	}
+	if cfg.ModelRouterMode != registry.ProviderModeMock {
+		t.Fatalf("router mode = %q, want it normalised to mock", cfg.ModelRouterMode)
+	}
+	// Sync off: the interval is irrelevant.
+	cfg.RegistrySyncEnabled = false
+	cfg.RegistrySyncInterval = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("sync off must not require an interval: %v", err)
+	}
+	// Sync on with a real interval is the only combination that asks for one.
+	cfg.RegistrySyncEnabled = true
+	cfg.RegistrySyncInterval = 30 * time.Minute
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("sync on with an interval: %v", err)
+	}
+}
+
+// The defaults are the offline posture: nothing reaches an upstream registry
+// unless an operator says so.
+func TestLoadDefaultsStayOffline(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+	os.Unsetenv("AGENTHUB_REGISTRY_SYNC_ENABLED")
+	os.Unsetenv("AGENTHUB_REGISTRY_SYNC_FIXTURE")
+	os.Unsetenv("AGENTHUB_MODEL_ROUTER_MODE")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RegistrySyncEnabled {
+		t.Fatal("synchronisation must be off by default")
+	}
+	if !cfg.RegistrySyncFixture {
+		t.Fatal("the offline fixture client must be pinned by default")
+	}
+	if cfg.ModelRouterMode != registry.ProviderModeMock {
+		t.Fatalf("router mode = %q, want mock", cfg.ModelRouterMode)
+	}
+	if cfg.RegistrySyncInterval <= 0 {
+		t.Fatalf("interval = %v, want a usable default", cfg.RegistrySyncInterval)
+	}
+}
+
+// An unparsable value must fall back to the default rather than fail the boot:
+// a typo in one variable should not take a whole instance down.
+func TestEnvHelpersFallBackOnGarbage(t *testing.T) {
+	t.Setenv("AGENTHUB_MAX_PARALLEL", "many")
+	if got := envInt("AGENTHUB_MAX_PARALLEL", 4); got != 4 {
+		t.Fatalf("envInt = %d, want the default", got)
+	}
+	t.Setenv("AGENTHUB_SESSION_TTL", "soon")
+	if got := envDur("AGENTHUB_SESSION_TTL", time.Hour); got != time.Hour {
+		t.Fatalf("envDur = %v, want the default", got)
+	}
+	t.Setenv("AGENTHUB_SEED_DEMO", "perhaps")
+	if got := envBool("AGENTHUB_SEED_DEMO", false); got {
+		t.Fatalf("envBool = %v, want the default", got)
+	}
+	// The parsed forms are honoured.
+	t.Setenv("AGENTHUB_SESSION_TTL", "2h")
+	if got := envDur("AGENTHUB_SESSION_TTL", time.Hour); got != 2*time.Hour {
+		t.Fatalf("envDur = %v, want 2h", got)
+	}
+}
+
+// The backup schedule is seeded from the environment once, before the console
+// ever saves one; it has to carry the mode through.
+func TestBackupScheduleCarriesTheMode(t *testing.T) {
+	cfg := &Config{
+		BackupMode:      "daily",
+		BackupInterval:  12 * time.Hour,
+		BackupDailyTime: "04:30",
+		BackupTimezone:  "UTC",
+		BackupCron:      "0 4 * * *",
+		BackupKeepLast:  5,
+		BackupMaxAge:    14,
+	}
+	s := cfg.BackupSchedule()
+	if s.Mode != "daily" || s.DailyTime != "04:30" || s.CronExpr != "0 4 * * *" || s.KeepLast != 5 {
+		t.Fatalf("schedule = %+v", s)
+	}
+	if s.MaxAgeDays != 14 || s.Interval != 12*time.Hour || s.Timezone != "UTC" {
+		t.Fatalf("schedule = %+v", s)
 	}
 }
 

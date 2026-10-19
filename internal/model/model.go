@@ -90,14 +90,74 @@ type Resource struct {
 	AuthSchemes  JSONField `gorm:"type:jsonb"`
 	Env          JSONField `gorm:"type:jsonb"`
 	Metadata     JSONField `gorm:"type:jsonb"`
-	Transport    string    `gorm:"size:32"`
-	Health       string    `gorm:"size:32;index;not null;default:unknown"`
-	CreatedAt    time.Time `gorm:"index"`
-	UpdatedAt    time.Time
+	// KindConfig is the resource type specific descriptor: the model router,
+	// the Agent Card, the MCP server definition, the skill manual or the CLI
+	// command. One jsonb column rather than a column per kind, because the
+	// shapes evolve independently and a new kind must not need a migration.
+	KindConfig JSONField `gorm:"type:jsonb"`
+	Transport  string    `gorm:"size:32"`
+	Health     string    `gorm:"size:32;index;not null;default:unknown"`
+	// Namespace is the catalogue the record belongs to.
+	Namespace string `gorm:"size:64;index;not null;default:default"`
+	// Status is the curation state; 'approved' keeps pre-governance rows
+	// discoverable.
+	Status string `gorm:"size:32;index;not null;default:approved"`
+	// DisplayName is the optional human facing label.
+	DisplayName string `gorm:"size:256"`
+	// SourceID is set when the record arrived from an upstream registry.
+	SourceID  string    `gorm:"size:64;index"`
+	CreatedAt time.Time `gorm:"index"`
+	UpdatedAt time.Time
 }
 
 // TableName returns the resources table name.
 func (Resource) TableName() string { return "resources" }
+
+// Registry is one namespace of the catalogue. Records belong to exactly one and
+// inherit its approval policy.
+type Registry struct {
+	ID          string `gorm:"primaryKey;size:64"`
+	Name        string `gorm:"size:256;not null"`
+	Description string `gorm:"type:text"`
+	// AutoApprove decides whether a new record is discoverable at once or has
+	// to be submitted for review first.
+	//
+	// The column keeps DEFAULT true for hand written SQL, but the tag must not
+	// carry a default: GORM omits a zero value field that has one, so an
+	// explicit false would silently be stored as true.
+	AutoApprove bool      `gorm:"not null"`
+	CreatedAt   time.Time `gorm:"index"`
+	UpdatedAt   time.Time
+}
+
+// TableName returns the registries table name.
+func (Registry) TableName() string { return "registries" }
+
+// RegistrySource is one upstream catalogue agenthub synchronises records from.
+type RegistrySource struct {
+	ID           string `gorm:"primaryKey;size:64"`
+	Namespace    string `gorm:"size:64;index;not null;default:default"`
+	Kind         string `gorm:"size:32;index;not null"`
+	Name         string `gorm:"size:256;not null"`
+	URL          string `gorm:"size:512;not null"`
+	AuthScheme   string `gorm:"size:32;not null;default:none"`
+	AuthTokenEnv string `gorm:"size:128;not null"`
+	// Fixture keeps the source on the offline, deterministic client.
+	// Same reason as Registry.AutoApprove: no default in the tag, otherwise an
+	// explicit false (fixture off, source disabled) is written as the default.
+	Fixture        bool   `gorm:"not null"`
+	Enabled        bool   `gorm:"index;not null"`
+	Schedule       string `gorm:"size:128;not null"`
+	LastSyncAt     *time.Time
+	LastSyncStatus string    `gorm:"size:32;not null"`
+	LastSyncCount  int       `gorm:"not null"`
+	LastSyncError  string    `gorm:"type:text;not null"`
+	CreatedAt      time.Time `gorm:"index"`
+	UpdatedAt      time.Time
+}
+
+// TableName returns the registry_sources table name.
+func (RegistrySource) TableName() string { return "registry_sources" }
 
 // Task is the A2A unit of work. Artifacts, spans, the parked question and the
 // push configuration live in their own tables keyed by task id.

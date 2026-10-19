@@ -37,10 +37,12 @@ export function healthz() {
   return request('/healthz')
 }
 
-export function listResources({ kind = '', q = '' } = {}) {
+export function listResources({ kind = '', q = '', namespace = '', status = '' } = {}) {
   const params = new URLSearchParams()
   if (kind) params.set('kind', kind)
   if (q) params.set('q', q)
+  if (namespace) params.set('namespace', namespace)
+  if (status) params.set('status', status)
   const query = params.toString()
   return request(`/api/resources${query ? `?${query}` : ''}`)
 }
@@ -59,6 +61,58 @@ export function deleteResource(id) {
 
 export function setResourceHealth(id, health) {
   return request(`/api/resources/${encodeURIComponent(id)}/health`, { method: 'POST', ...body({ health }) })
+}
+
+// Curation: submitting, approving, rejecting or deprecating a record. The
+// reason is operator text about a record and travels with the transition only.
+export function setResourceStatus(id, status, reason = '') {
+  return request(`/api/resources/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    ...body(reason ? { status, reason } : { status }),
+  })
+}
+
+export function listApprovals() {
+  return request('/api/registries/approvals')
+}
+
+export function listRegistries() {
+  return request('/api/registries')
+}
+
+export function createRegistry(namespace) {
+  return request('/api/registries', { method: 'POST', ...body(namespace) })
+}
+
+export function updateRegistry(id, namespace) {
+  return request(`/api/registries/${encodeURIComponent(id)}`, { method: 'PUT', ...body(namespace) })
+}
+
+export function deleteRegistry(id) {
+  return request(`/api/registries/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function listSources(namespace = '') {
+  const params = new URLSearchParams()
+  if (namespace) params.set('namespace', namespace)
+  const query = params.toString()
+  return request(`/api/registry-sources${query ? `?${query}` : ''}`)
+}
+
+export function createSource(source) {
+  return request('/api/registry-sources', { method: 'POST', ...body(source) })
+}
+
+export function updateSource(id, source) {
+  return request(`/api/registry-sources/${encodeURIComponent(id)}`, { method: 'PUT', ...body(source) })
+}
+
+export function deleteSource(id) {
+  return request(`/api/registry-sources/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function syncSource(id) {
+  return request(`/api/registry-sources/${encodeURIComponent(id)}/sync`, { method: 'POST', ...body({}) })
 }
 
 export function listTasks() {

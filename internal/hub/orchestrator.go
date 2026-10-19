@@ -506,7 +506,10 @@ func (h *Hub) selectBy(selector string) (*registry.Entry, error) {
 	if h.reg == nil {
 		return nil, a2a.NewError(a2a.CodeResourceNotFound, a2a.MsgResourceNotFound)
 	}
-	entries := h.reg.Snapshot()
+	// A task may only address an approved record: a draft that is still being
+	// curated, or one a curator deprecated, is not reachable through A2A even
+	// for a caller who can see it in the control plane.
+	entries := registry.Discoverable(h.reg.Snapshot())
 	if len(entries) == 0 {
 		return nil, a2a.NewError(a2a.CodeResourceNotFound, a2a.MsgResourceNotFound)
 	}

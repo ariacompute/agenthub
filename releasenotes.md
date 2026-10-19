@@ -2,11 +2,13 @@
 
 > This document takes the perspective of the A2A interconnection platform (agenthub)
 > and summarizes all feature updates in the `agenthub` repository as of
-> **2026-10-18**, covering **v0.1.0** (the M1 first release: A2A protocol layer /
+> **2026-10-19**, covering **v0.1.0** (the M1 first release: A2A protocol layer /
 > resource registry / adapter layer / Hub orchestration / console), **v0.2.0** (full
 > PostgreSQL persistence), **v0.3.0** (build stamping — `version@commit` in the
-> console and in `/healthz`), **v0.4.0** (release publishing of the container image)
-> and **v0.5.0** (the desktop shell for Windows, macOS and Linux). The server is a
+> console and in `/healthz`), **v0.4.0** (release publishing of the container image),
+> **v0.5.0** (the desktop shell for Windows, macOS and Linux) and **v0.6.0** (registry
+> governance: per-kind configuration, the model router, upstream registry sync, the
+> approval lifecycle, namespaces and the `custom` record type). The server is a
 > single Go binary, the console is a monochrome Vue 3 UI, and exactly one standard
 > set of A2A endpoints is exposed — that same console also ships as a desktop app.
 
@@ -14,10 +16,13 @@
 
 | Component | Repository | Version |
 | --- | --- | --- |
-| A2A Server + Console | `agenthub` (agenthub-server / Vue 3 console) | v0.5.0 |
+| A2A Server + Console | `agenthub` (agenthub-server / Vue 3 console) | v0.6.0 |
 | A2A Protocol Implementation | `agenthub` / `internal/a2a` | 0.2.0 |
 | Persistence | PostgreSQL 16 + GORM (`gorm.io/gorm` v1.25.12) | — |
-| Desktop Shell | `agenthub` / `desktop` (Tauri v2, Rust) | v0.5.0 |
+| Desktop Shell | `agenthub` / `desktop` (Tauri v2, Rust) | v0.6.0 |
+
+The desktop shell's own code did not change for v0.6.0 — the release simply embeds
+the new console bundle (see §10).
 
 ---
 
@@ -41,15 +46,20 @@ endpoints by any agent that speaks the protocol.
   the only production dependency.
 - **Default port 3500**; the compose database publishes host port **5434** (avoiding
   5432 / 5433).
+- **Governed catalogue** (v0.6.0): a record belongs to a namespace, carries a curation
+  status, and is deduplicated on `(namespace, name, version)`; consumers only ever see
+  approved ones.
 
-### Five-Kind Asset Map
+### Asset Map
 
-- **model**: provider registry with a fallback chain, emits a completion.
+- **model**: provider registry with a fallback chain, emits a completion; can point at a
+  real OpenAI-compatible gateway through its own router configuration.
 - **agent**: goal-driven and suspendable, plans steps into the `agent.plan` artifact.
 - **mcp**: `tools/list` + `tools/call` protocol translation; `transport` is descriptive
   only.
 - **skill**: trigger → playbook → steps → report.
 - **cli**: allowlist → timeout → truncation → structured JSON receipt.
+- **custom** (v0.6.0): a free-form JSON schema, for records that are none of the five.
 
 ---
 
@@ -70,7 +80,8 @@ protocol can discover, invoke, and take over task orchestration.
   `AGENTHUB_A2A_LEGACY_METHODS`.
 - **Resource selection**: `metadata.resourceId|resource_id|resource` (exact id → name →
   kind) → `metadata.kind` fallback → with no selector, prefer agent, otherwise the first
-  id in lexicographic order.
+  id in lexicographic order. Since v0.6.0 the candidate set is `registry.Discoverable`, so
+  a record that has not been approved cannot be selected or invoked.
 
 ### Task State Machine
 
@@ -106,10 +117,10 @@ protocol can discover, invoke, and take over task orchestration.
 
 ## 3. Resource Registry
 
-`registry` records the five kinds of assets with an MCP-Registry-flavoured entry model
-and provides discovery, export and aggregation.
+`registry` records the five kinds of assets — plus the `custom` record type since v0.6.0 —
+with an MCP-Registry-flavoured entry model, and provides discovery, export and aggregation.
 
-### Five Kinds of Entries
+### Entry Model (five kinds + custom)
 
 - **Registry-level metadata**: `version` / `repository` / `tags` / `env` /
   `auth_schemes`, plus `endpoint` / `transport` (descriptive only — adapters must not
@@ -118,25 +129,70 @@ and provides discovery, export and aggregation.
   `health` is `healthy` / `degraded` / `unhealthy` / `unknown`.
 - **Id rule**: shaped `<kind>-<hex>`, auto-generated when omitted; registering a
   duplicate id returns 400.
+- **Dedup key** (v0.6.0): `(namespace, name, version)`, enforced by a unique index — the
+  same name at a new version is a new record, the same name at the same one returns 400.
+
+### Registry Governance (v0.6.0)
+
+The catalogue is a governed registry rather than a flat list. The item-by-item comparison
+against the AWS Agent Registry that drove this work is the *AWS Agent Registry comparison*
+section of `README.md`, including what agenthub deliberately does not do (semantic hybrid
+search, CloudTrail-equivalent auditing, cross-account RAM sharing, VPC PrivateLink).
+
+- **Per-kind configuration**: each of the six kinds has its own block in the register
+  drawer and its own backend validation (`ValidateKind`, `invalid_kind_config`) — a model
+  declares a provider mode, an agent its Agent Card URL and capabilities, an MCP server a
+  transport that decides whether a command or a URL is asked for, a skill its steps and
+  manual, a CLI its command allowlist, and a custom record any JSON schema.
+- **Approval lifecycle**: `draft → pending → approved / rejected`, then `deprecated`,
+  driven through `POST /api/resources/{id}/status` (`registry:curate`).
+  `registry.Discoverable` is the single choke point: the listing, the MCP export, the
+  Agent Card and A2A addressing all read through it, so an unapproved record cannot be
+  found or invoked. An empty status is treated as `approved`, which is what keeps a
+  catalogue that predates the feature visible after an upgrade.
+- **Namespaces**: the `registries` table holds namespaces, each with its own approval
+  policy (`auto_approve`); `default` is seeded and cannot be deleted.
+- **Upstream registry sync**: a source (MCP or Skill) pulls records from an external
+  registry on demand or on an interval, merges them on `(name, version)` and records the
+  outcome (`last_sync_at` / `status` / `count` / `error`) on the source. Imported records
+  go through the same `Upsert` path as a hand-written registration, so an upstream
+  catalogue can never bypass validation or curation. The real client is `net/http` with a
+  timeout, a size cap and per-source auth; the fixture client is deterministic and
+  offline, and `AGENTHUB_REGISTRY_SYNC_FIXTURE` (on by default) pins every source to it —
+  enabling synchronisation never silently enables outbound traffic.
+- **New error codes**: `invalid_kind_config`, `invalid_status_transition`,
+  `invalid_namespace`, `invalid_source` → 400; `sync_in_flight` → 409; an unreachable
+  upstream registry → 502 with the upstream code passed through.
 
 ### Control Plane & Export
 
 - **CRUD and discovery**: `GET/POST /api/resources`, `GET/PUT/DELETE /api/resources/{id}`,
-  `POST /api/resources/{id}/health`, with `?kind=` and `?q=` filtering and counts.
-- **MCP export**: `GET /api/export/mcp` emits MCP server descriptions.
-- **Aggregated Agent Card**: `GET /api/export/agent-card`, one skill per resource.
+  `POST /api/resources/{id}/health`, with `?kind=`, `?q=`, `?namespace=` and `?status=`
+  filtering and counts.
+- **Namespaces and curation** (v0.6.0): `GET/POST /api/registries`,
+  `PUT/DELETE /api/registries/{id}`, `GET /api/registries/approvals` (the curator's
+  queue), `POST /api/resources/{id}/status`.
+- **Upstream sources** (v0.6.0): `GET/POST /api/registry-sources`,
+  `PUT/DELETE /api/registry-sources/{id}`, `POST /api/registry-sources/{id}/sync`.
+- **MCP export**: `GET /api/export/mcp` emits MCP server descriptions — approved records
+  only.
+- **Aggregated Agent Card**: `GET /api/export/agent-card`, one skill per resource —
+  approved records only.
 
 ---
 
 ## 4. Adapter Layer
 
 `adapter` converges the invocation surface of all five kinds behind a single
-`Connector` interface. In this release **all five are deterministic mocks**: no network,
-no subprocess, fully runnable offline, with real integrations marked `TODO(real)`.
+`Connector` interface. Four of them are **deterministic mocks**: no network, no
+subprocess, fully runnable offline, with real integrations marked `TODO(real)`. Since
+v0.6.0 the model connector can also run a **real OpenAI-compatible provider** when its
+entry asks for one.
 
 ### Five Connectors
 
-- **model**: provider registry with a fallback chain; artifact `model.completion`.
+- **model**: provider registry with a fallback chain; artifact `model.completion`, which
+  now carries the name of the provider that answered.
 - **agent**: step planning; a prompt containing `approve` / `confirm` / `approval`
   (**word-level match**) parks the task and sets `RequiresInput`.
 - **mcp**: `tools/list` + `tools/call` translation; artifacts `mcp.tools` / `mcp.call`.
@@ -153,6 +209,23 @@ no subprocess, fully runnable offline, with real integrations marked `TODO(real)
   skipped.
 - **Artifact accumulation**: supports `append` / `lastChunk`, returned as the accumulated
   list when the task ends.
+
+### Model Router (v0.6.0)
+
+An entry with `provider_mode=openai_compatible` points `endpoint` at any
+OpenAI-compatible gateway — LiteLLM, OpenRouter or a self-hosted router — and is served
+by a real chat-completions provider.
+
+- **Configuration**: `model_id`, `api_key_env`, an ordered fallback chain with weights, a
+  timeout, and an optional mock fallback. The router is built per entry from its
+  `KindConfig`, so two model resources can route to two gateways.
+- **Credentials**: `api_key_env` holds the **name of an environment variable** only. The
+  key itself is never stored in the database and never logged.
+- **Failure is never faked**: when every provider fails the connector returns an error.
+  Only an explicit `fallback_mock` answers from the deterministic mock, and the artifact
+  says `provider: mock` so nobody mistakes it for a real completion.
+- **Boundaries**: streaming and the real agent / mcp / skill / cli adapters remain
+  `TODO(real)`; those four stay offline.
 
 ---
 
@@ -201,8 +274,13 @@ while the container itself stays stateless.
 
 ### Tables
 
-- **`resources`**: every entry field, with `tags` / `capabilities` / `auth_schemes` /
-  `env` / `metadata` stored as `jsonb`.
+- **`resources`**: every entry field plus the governance columns — `namespace`, `status`,
+  `display_name`, `source_id` and the per-kind `kind_config` — with `tags` /
+  `capabilities` / `auth_schemes` / `env` / `metadata` / `kind_config` stored as `jsonb`;
+  unique on `(namespace, name, version)`.
+- **`registries`** (v0.6.0): namespaces, each with its own approval policy.
+- **`registry_sources`** (v0.6.0): upstream registry sources and the outcome of their last
+  sync (`last_sync_at` / `status` / `count` / `error`).
 - **`tasks` plus children**: the task body and state; `task_artifacts`, `task_spans`,
   `task_pending`, `task_push` cascade with the task.
 - **`events`**: one row per broker frame, primary key `(task_id, seq)`, powering
@@ -217,7 +295,11 @@ while the container itself stays stateless.
 
 - **Embedded idempotent migrations**: `migrations/*.sql` is embedded with `//go:embed`,
   executed in filename order, one transaction per file; the SQL itself is idempotent, so
-  it is repeatable, auditable and rollback-friendly.
+  it is repeatable, auditable and rollback-friendly. `008_registry_governance.sql` and
+  `009_registry_sync.sql` (v0.6.0) add the governance columns, the unique dedup index, the
+  namespaces and the upstream sources — every statement is `IF NOT EXISTS` /
+  `ON CONFLICT DO NOTHING`, and rows written before the upgrade keep their status as
+  `approved`.
 - **Conditional updates prevent lost updates**: task transitions use
   `UPDATE ... WHERE id=? AND state=?` plus a `RowsAffected` check, and zero rows is split
   into "no such task" vs "concurrent conflict".
@@ -247,10 +329,17 @@ while the container itself stays stateless.
 The Vue 3 + Vite (bun) bundle is hosted at `/` by the Go process — both an operations
 screen and a visual inspector for the A2A contract.
 
-### Five Screens
+### Seven Screens
 
-- **Registry**: five-kind filtering + search, health indicators and a stats bar, and a
-  per-resource "trial run".
+- **Registry**: six-kind (including `custom`) filtering + search, namespace and status
+  filters, health indicators and a stats bar, and a per-resource "trial run". The register
+  drawer now switches per kind — a model shows its router, an MCP server its transport, a
+  skill its steps and manual — and every card carries a curation badge that offers exactly
+  the transitions the status allows.
+- **Registries** (v0.6.0): namespaces with their approval policy, plus the curator's
+  pending-review queue with approve / reject in place.
+- **Sources** (v0.6.0): upstream registry sources, a manual "sync now", and the imported /
+  updated / skipped counts of the last run.
 - **Task trace**: task list with status filtering, span timeline replay, and copyable
   artifact text.
 - **Topology**: five asset lanes with invocation edges, line style distinguishing active
@@ -268,7 +357,7 @@ screen and a visual inspector for the A2A contract.
 - **No hardcoded natural language**: components always call `t()`; backend enums are
   mapped by `copy/enums-copy.js`.
 - **Pure black / white / grey**: every hex satisfies **R=G=B** and any hue is banned;
-  state is encoded by fill / stroke / motion, and the five kinds are distinguished with
+  state is encoded by fill / stroke / motion, and the kinds are distinguished with
   triple redundancy (grey level + dedicated icon + text label).
 - **Automated guards**: `web/tests/style.spec.js` checks colours; `prefers-contrast` and
   `prefers-reduced-motion` both have degraded modes.
@@ -307,6 +396,16 @@ screen and a visual inspector for the A2A contract.
   `AGENTHUB_CLI_ALLOWLIST` (git / ls / cat / echo / date / aria-memo),
   `AGENTHUB_MAX_OUTPUT_BYTES` (65536), `AGENTHUB_EVENT_BUFFER` (512),
   `AGENTHUB_PUSH_RECORD_LIMIT` (100).
+- **Catalogue (v0.6.0)**: `AGENTHUB_MODEL_ROUTER_MODE` (`mock` | `openai_compatible`,
+  default `mock` — the per-entry configuration always wins over this global default),
+  `AGENTHUB_REGISTRY_SYNC_ENABLED` (default **false**),
+  `AGENTHUB_REGISTRY_SYNC_INTERVAL` (default `1h`, must be positive once sync is on) and
+  `AGENTHUB_REGISTRY_SYNC_FIXTURE` (default **true**, which pins every source to the
+  offline client — a deployment must opt out explicitly before agenthub will open a
+  connection to an upstream registry).
+- **Governance permissions (v0.6.0)**: `registries:manage` (namespaces),
+  `registry:curate` (approve / reject / deprecate), `sources:manage` (upstream sources and
+  their synchronisation). The owner holds all of them.
 - **Logging**: `slog` JSON; no message bodies, keys or vectors; DSNs are redacted by
   `store.RedactDSN` before they are logged.
 
@@ -324,6 +423,19 @@ screen and a visual inspector for the A2A contract.
   deletes, event replay, push record persistence and the retention cap, and reading a
   complete A2A run back from the database; **they skip when `DATABASE_URL` is unset and
   never fabricate results**.
+- **Governance cases** (v0.6.0): the store-backed branches of `registry` are driven by
+  in-package fakes (`store_mode_test.go`), so the dedup key, the approval state machine
+  and the persistence error mapping are covered with no database at all;
+  `internal/store/registry_governance_test.go` and
+  `tests/registry_governance_integration_test.go` cover what genuinely needs PostgreSQL —
+  the governance columns and the per-kind block surviving a jsonb round trip, the unique
+  index rejecting a repeat, namespace CRUD and the sync bookkeeping. Both gate on
+  `DATABASE_URL`.
+- **Coverage** (v0.6.0): `make test-cover` runs `-coverprofile` and prints
+  `go tool cover -func`. With a database attached, `a2a` 97.8%, `model` 93.9%, `registry`
+  89.7%, `hub` 87.8%, `authz` 87.9%, `adapter` 83.3%, `config` 80.3%, `httputil` 80.2%,
+  `handlers` 68.7%, `backup` 58.2%, `auth` 56.9%, `store` 22.6% (its cases skip without
+  `DATABASE_URL`, so that number says nothing until one is set).
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
@@ -337,16 +449,27 @@ screen and a visual inspector for the A2A contract.
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
   trip.
+- **Scripted API test** (v0.6.0): `scripts/test-api.sh` grew a governance section —
+  creating a namespace, watching a record go `draft → pending → approved` (and proving
+  that `draft → approved` is refused and a draft stays out of the discoverable list), the
+  dedup key, and a fixture source syncing twice (imported on the first run, refreshed on
+  the second). Against a running instance: **167 passed, 0 failed, 3 skipped**.
 
 ---
 
-## 10. Desktop Shell (v0.5.0)
+## 10. Desktop Shell (v0.6.0)
 
 `desktop/` is a **Tauri v2** shell (Rust, system WebView) for Windows, macOS (arm64)
 and Linux. It carries **no backend and no database**: it embeds the same
 console the server hosts and opens it against a server the user points it at. Neither
 the console nor the Go server was written for the desktop — not a line of either
 changed.
+
+**v0.6.0 carries a rebuilt console, not a rewritten shell.** The two new screens and the
+new control-plane endpoints needed no change here, which is the design working as
+intended: forwarding is decided by prefix (`/api`, `/a2a`, `/healthz`, `/.well-known`) and
+every other path falls back to `index.html`, so Vue's router owns console paths inside the
+window exactly as it does on the server. `cargo test` still passes 34/34 unchanged.
 
 ### Why a Loopback Proxy
 
@@ -408,7 +531,8 @@ caller --POST /a2a (single JSON-RPC 2.0 entry)--> handlers -> hub -> adapter -> 
 caller --GET /.well-known/agent.json-----------> Agent Card (one skill per resource)
 console --GET /api/tasks/{id}/events?since=seq--> SSE replay + live stream
 hub ----store (GORM, four port interfaces)------> PostgreSQL 16 (embedded idempotent migrations)
-console --GET /api/*---------------------------> Registry / Task trace / Topology
+console --GET /api/*---------------------------> Registry / Registries / Sources / Task trace / Topology
+upstream registry --HTTPS----------------------> registry source -> dedup on (name, version) -> Upsert
 ```
 
 - **Frozen contract**: A2A frame shapes are defined only in `internal/a2a` and no layer
@@ -417,6 +541,12 @@ console --GET /api/*---------------------------> Registry / Task trace / Topolog
   codes; localization is 100% the frontend copy layer's job.
 - **Transport-agnostic**: an MCP entry's `transport` (stdio / streamable-http /
   sse-legacy) is a recorded field, and adapters must not branch on it.
+- **Consumers only see approved records** (v0.6.0): `registry.Discoverable` is the single
+  filter the listing, the MCP export, the Agent Card and A2A addressing share, so a draft
+  cannot leak through one path that another path guards.
+- **Offline by default** (v0.6.0): every adapter except an explicitly configured model
+  router stays deterministic, and upstream synchronisation is both off and pinned to the
+  fixture client until an operator turns both of those off.
 - **No scoring**: eval only keeps a hook — no LLM judge, and no scores are produced.
 - **One console, two shells**: the desktop app is the same bundle served from a
   loopback origin, so the console never grows a desktop-only code path — and the Go

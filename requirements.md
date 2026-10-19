@@ -39,8 +39,9 @@
   registry/hub/broker/notifier 退化为**原有内存行为**（公开签名零变更），单测因此零外部依赖。
 - **控制面与运维**：`/api/*` 管理接口 + `/healthz`（版本、适配器、资源计数、当前模式、鉴权模式、
   **数据库可达性**）；admin token 鉴权，open 模式仅本地可用。
-- **Web 控制台三屏**：注册中心（五类 CRUD + 健康指示 + **单资源「试跑」**）、
-  任务追踪（任务列表 + 事件/span 时间线 + artifact 原始内容）、拓扑视图（五列资产 + 调用边）。
+- **Web 控制台七屏**：注册中心（六类 CRUD + per-kind 配置 + 审批状态 + **单资源「试跑」**）、
+  命名空间与待审批队列、上游注册中心源、任务追踪（任务列表 + 事件/span 时间线 + artifact 原始内容）、
+  拓扑视图（五列资产 + 调用边）、登录/注册、管理后台（用户 / 权限矩阵 / 资源授权 / 数据库检查点）。
 - **多语言 13 种**：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`（`ar` 为 RTL）。
 - **纯黑/白/灰单色视觉**：禁止任何有彩色相，靠明度分级 + 线型 + 图形 + 动效编码语义。
 
@@ -103,13 +104,47 @@
 | 字段 | 说明 |
 | --- | --- |
 | `id` | 形如 `<kind>-<hex>`，缺省自动生成 |
-| `kind` | `model`/`agent`/`mcp`/`skill`/`cli`（`invalid_kind`） |
+| `kind` | `model`/`agent`/`mcp`/`skill`/`cli`/`custom`（`invalid_kind`）；新增字段全部 `omitempty`，向后兼容 |
 | `name` | 必填，去空白（`invalid_entry`） |
+| `namespace` | 归属的 registry 命名空间，缺省 `default`（`invalid_namespace`） |
+| `status` | `draft`/`pending`/`approved`/`rejected`/`deprecated`；空值按 `approved` 处理（`invalid_status_transition`） |
+| `display_name` / `source_id` | 展示名；由上游注册中心同步而来时的来源 id |
 | `version` / `repository` / `tags` / `env` / `auth_schemes` | Registry 级元数据 |
 | `endpoint` / `transport` | 传输**描述**字段，适配器不得分支（`invalid_transport`） |
 | `capabilities` | 能力清单（MCP 为工具名，skill 为步骤工具） |
 | `health` | `healthy`/`degraded`/`unhealthy`/`unknown`（`invalid_health`） |
 | `metadata` | KV；`cli` 用 `command` 指定白名单命令 |
+| `kind_config` | per-kind 专属配置（`jsonb`，见 §3.1.1），注册时经 `ValidateKind` 按 Kind 校验（`invalid_kind_config`） |
+
+#### 3.1.1 per-kind 配置（`KindConfig`）
+
+注册抽屉按 kind 切换配置区块，后端按同一结构校验（对照 AWS `recordType` 的 schema 校验）：
+
+| Kind | 配置区块 |
+| --- | --- |
+| `model` | `provider_mode`（`mock` / `openai_compatible`）、`endpoint`（OpenAI 兼容网关：LiteLLM / OpenRouter / 自建）、`model_id`、`api_key_env`（**只存环境变量名**）、`targets`（有序回退链 + 权重）、`timeout_ms`、`fallback_mock`（可选 mock 兜底） |
+| `agent` | Agent Card URL、`protocol_version`、capabilities（streaming / pushNotifications / stateTransitionHistory）、skills、`auth_scheme` |
+| `mcp` | `transport`（stdio / streamable-http / sse-legacy）分流的 command+args 或 URL、tool allowlist、auth schemes、`env` |
+| `skill` | version、repository / package、触发词、步骤、工具清单、markdown 文档 |
+| `cli` | 可执行命令、命令白名单、超时、输出截断字节、工作目录、`env` |
+| `custom` | 任意合法 JSON schema 文本 |
+
+#### 3.1.2 去重启用键与治理
+
+- 去重启用键是 `(namespace, name, version)`：同名跨版本是**不同**记录（对齐 AWS
+  `name + recordVersion`）；由 `idx_resources_dedup` 唯一索引（内存模式同语义）保证，冲突 →
+  `resource_already_exists`（400）。
+- 审批状态机：`draft → pending → approved / rejected`、`approved → deprecated`、
+  `rejected|deprecated → pending`；非法迁移 → `invalid_status_transition`（400）。
+  状态通过 `POST /api/resources/{id}/status` 推进（`registry:curate`）。
+- 消费方**只见 approved**：`registry.Discoverable` 是唯一过滤出口，覆盖列表、MCP 导出、
+  Agent Card 与 A2A 寻址；未批准记录不得被调用。
+- 命名空间（`registries`）：名称、描述、`auto_approve`（新记录是否直接可发现）；`default`
+  由迁移种子创建且不可删除。
+- 上游注册中心同步（`registry_sources`）：kind（`mcp` / `skill`）、url、auth（`none` / `bearer`，
+  `auth_token_env` **只存环境变量名**）、schedule（手写 5 段 cron）、`fixture`（离线确定性模式）、
+  手动或定时同步；按 `(name, version)` 去重 upsert，回写 `last_sync_at/status/count/error`。
+  真实 HTTP 客户端设超时 + 限长 + 条目上限；外网用例缺凭据 skip，**绝不伪造同步结果**。
 
 ### 3.2 任务与追踪
 
@@ -123,7 +158,9 @@
 
 | 表 | 承载 |
 | --- | --- |
-| `resources` | 3.1 条目全字段；`tags`/`capabilities`/`auth_schemes`/`env`/`metadata` 为 `jsonb` |
+| `resources` | 3.1 条目全字段（含治理列与 `kind_config`）；`tags`/`capabilities`/`auth_schemes`/`env`/`metadata`/`kind_config` 为 `jsonb` |
+| `registries` | 命名空间：`id`、`name`、`description`、`auto_approve` |
+| `registry_sources` | 上游注册中心：配置 + `last_sync_at/status/count/error` |
 | `tasks` | 3.2 的 Task（`status.message`/`history`/`metadata` 为 `jsonb`） |
 | `task_artifacts` | `parts`/`metadata` 为 `jsonb`，按 `id` 保序，随任务级联删除 |
 | `task_spans` | span 时间线，同上级联 |
@@ -161,12 +198,24 @@
 ### 4.2 控制面（`/api/*`，admin token）
 
 ```
-GET    /api/resources[?kind=&q=]              → {resources, counts, health}
-POST   /api/resources                          → 201 Entry（重复 id → 400）
+GET    /api/resources[?kind=&q=&namespace=&status=] → {resources, counts, health}
+POST   /api/resources                          → 201 Entry（重复 id 或 (namespace,name,version) → 400）
 GET    /api/resources/{id}                     → Entry | 404
 PUT    /api/resources/{id}                     → Entry | 404
 DELETE /api/resources/{id}                     → 204 | 404
 POST   /api/resources/{id}/health              → {health}
+POST   /api/resources/{id}/status              → Entry（registry:curate；非法迁移 → 400）
+GET    /api/registries                         → {registries}（registries:manage）
+POST   /api/registries                         → 201 Namespace | 400（非法 slug）
+PUT    /api/registries/{id}                    → Namespace | 404（default 不可改 id）
+DELETE /api/registries/{id}                    → 204 | 404（default 不可删）
+GET    /api/registries/approvals               → {items}（registry:curate，待审批队列）
+GET    /api/registry-sources[?namespace=]      → {sources}（sources:manage）
+POST   /api/registry-sources                   → 201 RegistrySource | 400
+PUT    /api/registry-sources/{id}              → RegistrySource | 404
+DELETE /api/registry-sources/{id}              → 204 | 404
+POST   /api/registry-sources/{id}/sync         → SyncResult（上游失败 → 502 透传上游 code，
+                                                 并发同步 → 409 sync_in_flight）
 GET    /api/tasks                              → {tasks}
 GET    /api/tasks/{id}                         → Task | 404
 GET    /api/tasks/{id}/spans                   → {spans} | 404
@@ -194,7 +243,9 @@ GET    /healthz                                → 状态与计数（无鉴权�
 `payload_too_large`(413) / `internal_error`(500)；领域码由 `writeDomainErr` 映射：
 `invalid_kind`·`invalid_health`·`invalid_transport`·`invalid_entry`·`resource_already_exists` → 400，
 `resource_not_found`·`task_not_found` → 404，
-`invalid_state_transition`·`task_not_resumable`·`task_not_cancelable`·`no_resource_available`·`invalid_flow` → 400。
+`invalid_state_transition`·`task_not_resumable`·`task_not_cancelable`·`no_resource_available`·`invalid_flow` → 400，
+目录治理码：`invalid_kind_config`·`invalid_status_transition`·`invalid_namespace`·`invalid_source` → 400，
+`sync_in_flight` → 409；上游注册中心不可达时 `/api/registry-sources/{id}/sync` 返回 502 并透传上游 code。
 
 ### 5.2 JSON-RPC 错误码
 
@@ -214,13 +265,18 @@ GET    /healthz                                → 状态与计数（无鉴权�
 
 | Kind | mock 行为（确定性） | 产物 |
 | --- | --- | --- |
-| model | provider 注册表 + 回退链，输出 completion | artifact `model.completion` |
+| model | `provider_mode=mock`：provider 注册表 + 回退链，确定性 completion；`openai_compatible`：真实 chat completions（endpoint 指向 OpenAI 兼容网关），按序回退，可选 mock 兜底 | artifact `model.completion`（含命中的 `provider` 名） |
 | agent | 步骤规划；prompt 含 `approve`/`confirm`/`approval`（**词级匹配**）→ 挂起 | artifact `agent.plan`，`RequiresInput` |
 | mcp | `tools/list` + `tools/call` 协议转换 | artifact `mcp.tools` / `mcp.call` |
 | skill | 触发 → 手册 → 步骤 → 报告 | artifact `skill.manual` |
 | cli | 白名单 → 超时 → 截断 → JSON 回执 | artifact `cli.receipt`（含 `truncated`） |
 
 所有 mock 必须：同输入同输出（按输入哈希派生）、不触网、不起进程、健康检查返回确定性 `mockHealth`。
+
+Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启用：`api_key_env` **只存环境变量名**
+（本体不入库、不落日志），响应体限长，401/403 → `provider_unauthorized`、畸形响应 →
+`provider_malformed`；全部 provider 失败时**绝不伪造 completion**（除非显式开启 `fallback_mock`，
+且产物标注 `provider: mock`）。streaming 与真实 agent/mcp/skill/cli 适配器仍属后续项。
 
 ## 7. 多语言与视觉约束
 
@@ -268,3 +324,33 @@ GET    /healthz                                → 状态与计数（无鉴权�
 8. 持久化验收：`DATABASE_URL` 缺失时拒绝启动；迁移可重复执行（第二次为 no-op）；
    资源/任务/artifact/span/事件/回调重启后仍可回读，事件可按 `since` 回放；
    **集成用例在未设置 `DATABASE_URL` 时 skip，绝不伪造结果**。
+
+## 8.1 测试与覆盖率约定
+
+- 新代码须补**正常 + 异常**双路径用例，且每个新增机器可读错误码至少有一条断言。
+- **双模分支用包内假 store 覆盖**：`registry` 的 `store != nil` 分支由
+  `store_mode_test.go` 的内存假 store 驱动，不需要数据库就与内存语义对齐。
+- **需要 PostgreSQL 的断言写在被测包内**（如 `internal/store/registry_governance_test.go`），
+  以 `DATABASE_URL` 门控；放 `tests/` 只验证行为，不产生该包覆盖率。
+- **离线优先**：会触网的用例一律走 `httptest` 或 fixture；同步类源必须 `Fixture: true`。
+- 一键度量：`make test-cover`（`coverage.out` 已进 `.gitignore` 与 `make clean`）。
+
+## 8.2 验收标准（M2 — 目录治理与注册中心互连）
+
+1. `go vet ./...` 无告警；`go test -race ./...` 全绿，含 `tests/registry_governance_integration_test.go`
+   在**真实 PostgreSQL** 下跑通的治理用例（未设 `DATABASE_URL` 时 skip）。
+2. per-kind 校验：六类各自配置可注册并回读；非法配置（如 `mcp` 缺 command+args 与 URL、
+   `custom` 非法 JSON）返回 `invalid_kind_config`（400）。
+3. 审批：新记录默认 `draft`（`auto_approve` 命名空间除外）→ 不出现在列表/导出/Agent Card/A2A 寻址；
+   `draft → approved` 被拒（400），`draft → pending → approved` 后可见。
+4. 去重启用键：同 `(namespace, name, version)` 第二次写入报 `resource_already_exists`（400）；
+   换 version 可写入；换 namespace 可写入。
+5. 同步：fixture 源离线同步导入固定条数并回写 `last_sync_*`；二次同步为 update 而非重复导入；
+   上游不可达返回 502 并透传上游 code；并发同步返回 409。
+6. Model router：`openai_compatible` 模式用 `httptest` 覆盖命中与回退链顺序；全部 provider 失败时
+   不伪造 completion；未设凭据的用例 skip 并写 reason。
+7. 前端：`bunx vitest run` 全绿（含 `copy-fallback` / `enums-copy` / `style` 三道护栏），
+   `bun run build` 通过；新 copy 组 13 语齐全、非英语译文异于英文、无有彩色值。
+8. README 的「AWS Agent Registry 特性对比」章与落地代码一致：三张清单逐项可追溯。
+9. 覆盖率：`make test-cover` 可复现；`registry` / `model` / `a2a` / `hub` / `authz` 均在 85% 以上，
+   `store` 在 `DATABASE_URL` 未设置时 skip（此时数值不代表真实覆盖）。

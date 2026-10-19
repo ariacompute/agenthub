@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
-import { Boxes, Network, PanelLeftClose, PanelLeftOpen, Shield, Workflow } from 'lucide-vue-next'
+import { Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Workflow } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
 import StateDot from './StateDot.vue'
 
@@ -43,6 +43,15 @@ const items = computed(() => {
   ]
   // The administration screen is only offered to accounts that can use it:
   // a link that answers 403 is worse than no link.
+  // Registry governance is its own pair of screens: curating what is
+  // discoverable and pulling from upstream registries are both operator jobs,
+  // not everyday registry browsing.
+  if (auth.can('registries:manage') || auth.can('registry:curate')) {
+    base.push({ to: '/registries', label: t('navRegistries'), icon: Library })
+  }
+  if (auth.can('sources:manage')) {
+    base.push({ to: '/sources', label: t('navSources'), icon: Cloud })
+  }
   if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage') || auth.can('backups:manage')) {
     base.push({ to: '/admin', label: t('navAdmin'), icon: Shield })
   }

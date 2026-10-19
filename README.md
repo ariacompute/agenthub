@@ -10,8 +10,8 @@ and exposes them as standard A2A endpoints that any protocol-conforming agent ca
 - Frontend: Vue 3 + Vite (bun), **13 languages**, pure black / white / grey monochrome UI
 - Persistence: **PostgreSQL + GORM** — resources, tasks, artifacts, spans, the event stream and
   push callback records are all durable
-- All five adapters in this release are **deterministic mocks**: no network, no subprocess,
-  fully runnable offline
+- All five adapters run **offline by default**: no network, no subprocess, fully runnable
+  without credentials — a model entry can opt into a real OpenAI-compatible gateway
 
 ## Concept map
 
@@ -25,48 +25,6 @@ and exposes them as standard A2A endpoints that any protocol-conforming agent ca
 
 One call: user → Agent → Model plans → Skill loaded → MCP reaches the legacy system → the result
 travels back the same path.
-
-## Configuration
-
-See `.env.example`. Main knobs: `DATABASE_URL` (**required**), `AGENTHUB_HTTP_PORT` (default 3500),
-`AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` + `AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD`, `AGENTHUB_SESSION_TTL`,
-`AGENTHUB_MAX_PARALLEL`, `AGENTHUB_CLI_ALLOWLIST`, `AGENTHUB_CLI_TIMEOUT`,
-`AGENTHUB_MAX_OUTPUT_BYTES`, `AGENTHUB_PUSH_RECORD_LIMIT` (default 100),
-`AGENTHUB_SEED_DEMO` (default **false**), `AGENTHUB_BACKUP_DIR` (default empty = checkpoints off),
-`AGENTHUB_BACKUP_KEEP_LAST` / `AGENTHUB_BACKUP_MAX_AGE_DAYS` (retention).
-
-### Users, sessions and RBAC
-
-The console and the `/api/*` control plane are behind a **session**, not a shared token:
-
-- **Email + password**: `POST /api/auth/register` and `POST /api/auth/login` (the response sets an
-  HttpOnly cookie). Passwords are hashed with PBKDF2-HMAC-SHA256; only the derived value is stored.
-- **OAuth**: Google, GitHub and any generic OIDC issuer, hand-rolled authorization code flow with
-  PKCE (S256) and `state`. A provider without credentials is simply not offered.
-- **Bootstrap administrator**: `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` / `..._PASSWORD` is upserted at every
-  boot and becomes the **owner**. With neither that nor an existing account, the first registered
-  account becomes the owner, so a fresh instance is never unreachable.
-- **RBAC**: users → groups → roles → permissions (`resources:read`, `resources:write`, `tasks:read`,
-  `tasks:write`, `users:manage`, `roles:manage`, `grants:manage`, `sessions:manage`,
-  `backups:manage`). The owner holds
-  all of them, which is what keeps a misconfigured instance recoverable.
-- **Resource grants**: `POST /api/grants` restricts one resource to a user or group (`read` / `write`).
-  A resource **without** a grant stays visible to everyone; the first grant restricts it everywhere —
-  listings, exports and the Agent Card — and a direct request to it is answered `404`.
-- **Sessions**: server-side rows, revocable (`DELETE /api/auth/sessions/{id}`, or
-  `DELETE /api/users/{id}/sessions` for `sessions:manage`). `/healthz` reports
-  `auth: session | anonymous | disabled`.
-
-Deleting a user **disables** it: tasks, spans and grants stay for the audit trail.
-
-All of this is available in the console: `/login` for registration and login, `/admin` (visible with
-`users:manage`, `roles:manage`, `grants:manage` or `backups:manage`) for users, the permission
-matrix, grants and database checkpoints.
-
-No demo data is inserted unless you ask for it: `AGENTHUB_SEED_DEMO=true` registers the five
-`demo-*` resources (`demo-model`, `demo-agent`, `demo-mcp`, `demo-skill`, `demo-cli`) at startup,
-idempotently, which is what the examples below target. Everything else starts with an empty
-registry, and `config.Validate` refuses the combination `AGENTHUB_ENV=prod` + `AGENTHUB_SEED_DEMO=true`.
 
 ## Run
 
@@ -201,9 +159,15 @@ restart. Configuration is passed through the compose `.env` file or environment 
 
 `desktop/` is a **Tauri v2** shell for Windows, macOS (arm64) and Linux. It carries no
 backend and no database of its own: it embeds the same console the server serves, and opens it
-against an agenthub server you point it at. Everything you can do in a browser — registry, task
-trace, topology, administration, SSE streams, downloads — works the same way inside the window.
-The published macOS binary is arm64; on an Intel Mac build from source with `make desktop-build`.
+against an agenthub server you point it at. Everything you can do in a browser — registry,
+registry governance, task trace, topology, administration, SSE streams, downloads — works the same
+way inside the window. The published macOS binary is arm64; on an Intel Mac build from source with
+`make desktop-build`.
+
+The shell only ever looks at a **path prefix**: `/api`, `/a2a`, `/healthz` and `/.well-known` go to
+the server, everything else falls back to the console's `index.html`. A new control plane endpoint
+or a new console screen therefore needs no change here — only a rebuilt console bundle, which
+`make desktop-dev` and `make desktop-build` both produce.
 
 ```bash
 make desktop-install  # cd desktop && bun install
@@ -238,8 +202,14 @@ Unit and integration suites:
 make db-up             # integration cases need a real PostgreSQL
 make test              # go test -race ./... (integration cases skip without DATABASE_URL)
 make test-integration  # only integration_test.go
+make test-cover        # -coverprofile + go tool cover -func, per package and in total
 make web-test          # cd web && bunx vitest run
 ```
+
+Coverage is measured per package. Two things are worth knowing before reading the numbers: the
+governance rules are driven through in-package fakes, so the store-backed branches of `registry`
+are covered without a database, while `internal/store` only measures once `DATABASE_URL` is set —
+its cases skip rather than fabricate.
 
 End-to-end API test against a running instance — the scripted form of every `curl`-able endpoint:
 health and discovery, the whole `/api` control plane (resources CRUD, exports, tasks, spans, event
@@ -259,6 +229,12 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # slow networks / cold boots
 The script logs in first (registering the first account when the instance is brand new) and asserts
 that `/api/*` stays closed without a session, then walks users, roles, the permission matrix and a
 resource grant — including the fact that a granted resource disappears from discovery.
+
+It also covers the catalogue governance: creating a namespace, registering into it and watching the
+record go `draft → pending → approved` (a draft must stay out of the discoverable list, and
+`draft → approved` has to be refused), the `(namespace, name, version)` dedup key, and an upstream
+registry source syncing twice through the offline fixture — imported on the first run, refreshed on
+the second.
 
 It targets the seeded resources (`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` /
 `demo-cli`), needs nothing beyond `curl` and `python3`, deletes the resource it creates, and exits
@@ -310,7 +286,9 @@ localised copy on the client.
 
 | Table | Content |
 | --- | --- |
-| `resources` | The five kinds of entries, `tags/capabilities/auth_schemes/env/metadata` stored as `jsonb` |
+| `resources` | Entries of the five kinds plus `custom`, with `namespace` / `status` / `display_name` / `source_id` / `kind_config` and `tags/capabilities/auth_schemes/env/metadata` stored as `jsonb`; unique on `(namespace, name, version)` |
+| `registries` | Registry namespaces, each with its own approval policy (`auto_approve`) |
+| `registry_sources` | Upstream registry sources plus the outcome of their last sync (`last_sync_at/status/count/error`) |
 | `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` | Task body, outputs, span timeline, the parked `input-required` question and the callback config (children cascade with the task) |
 | `events` | Every status / artifact / message / span frame, replayable with `since=<seq>` after a reconnect |
 | `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
@@ -327,9 +305,10 @@ localised copy on the client.
   the live stream.
 
 Integration coverage: idempotent migrations, resource CRUD with jsonb round trips, the full task
-lifecycle with cascade deletes, event replay, push record persistence plus the retention cap, and
-reading a complete A2A run back from the database. **They skip without a database and never
-fabricate results.**
+lifecycle with cascade deletes, event replay, push record persistence plus the retention cap,
+reading a complete A2A run back from the database, and the governance cases (namespace CRUD,
+governance column round trips, the dedup key, source CRUD and sync bookkeeping, the in-memory and
+store-backed facades agreeing). **They skip without a database and never fabricate results.**
 
 ## Database checkpoints
 
@@ -359,16 +338,118 @@ schema into one `tar.gz` on disk and can rewind the database to any of them.
   disabled and nothing else changes — the default in `docker-compose.yml`, where the
   `agenthub-backups` volume is mounted but left unused until you set the variable.
 
-## Relationship to mastra
+## AWS Agent Registry comparison
 
-The design references a feature survey of `mastra-ai/mastra` and adopts its **protocol and
-interaction shapes**: the MCP Registry entry model, the three workflow control-flow primitives
-(then / branch / parallel), the human-in-the-loop → `input-required` mapping, the Studio trial-run
-interaction and the observability layering. **No mastra code and no npm dependency is used** —
-everything on the Go side is implemented here.
+An item-by-item capability comparison against
+[AWS Agent Registry](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html)
+([concepts and terminology](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry-concepts.html)).
 
-Out of scope: RAG, voice, browser automation, channel integrations, multi-language SDKs and
-LLM-as-judge scoring (eval only keeps a hook and produces no scores).
+| | AWS Agent Registry | agenthub |
+| --- | --- | --- |
+| What it is | A **catalogue and discovery service**; executing a record belongs to Runtime / Gateway | **Catalogue and execution in one**: a registered record is callable over A2A immediately |
+| First-class citizens | Registry (catalogue) → Registry record (entry) | Namespace (`registries`) → record (`resources`) |
+| Protocol | Exposes the catalogue through a native MCP endpoint; validates MCP and A2A schemas | Speaks A2A (`POST /a2a`); the catalogue is **exported** as MCP server descriptions and an Agent Card |
+
+agenthub has always had the half AWS leaves to another service — register a record and it runs,
+through one of five adapters. What it lacked was the catalogue half: curation, namespaces and
+synchronisation from an external registry.
+
+### Record types and validation
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| Two levels: Registry (name / description / authorization / approval) → Registry record | Namespace → record; a namespace carries its own approval policy |
+| `recordType` ∈ `AGENT` / `MCP` / `SKILL` / `CUSTOM` | `kind` ∈ `model` / `agent` / `mcp` / `skill` / `cli` / `custom` |
+| MCP record = server definition + tool schemas, validated against the MCP protocol schema | MCP block: transport (stdio / streamable-http / sse-legacy), command+args or URL, tool allowlist, auth schemes, env — validated per kind |
+| Agent record = A2A Agent Card, validated against the Agent Card schema | Agent block: card URL, protocol version, capabilities, skills, auth |
+| Skill record = name / description / package / repository / markdown | Skill block: version, repository / package, triggers, steps, tool list, markdown |
+| Custom record = any valid JSON | `custom` kind: a free-form JSON schema |
+| `name`, optional `displayName`, `recordVersion` | `name`, `display_name`, `version` |
+| Dedup key `name + recordVersion` inside a registry; the same name may be republished at a new version | Dedup key `(namespace, name, version)` behind a unique index; the same name may be republished at a new version |
+| — (no model or CLI type) | `model` (provider fallback chain, optionally a real OpenAI-compatible router) and `cli` (allowlist → timeout → truncation) are agenthub's own |
+
+### Lifecycle and governance
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| Draft → submit → curator **approve / reject** (with feedback) → **deprecate** | `draft → pending → approved / rejected → deprecated`; an illegal transition is a 400 |
+| Consumers only ever see approved records | `registry.Discoverable` is the single filter the listing, the MCP export, the Agent Card and A2A addressing share |
+| Four roles: Administrator / Publisher / Curator / Consumer | RBAC (owner / groups / roles / permissions) plus resource grants, with `registries:manage`, `registry:curate` and `sources:manage` for the catalogue |
+| Namespaces split by type, environment or team | Namespaces, each with its own approval policy and visibility boundary |
+
+### Discovery
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| **Hybrid search**: semantic + keyword | Keyword search only — see *deliberately not* below |
+| **Catalogue browsing**: paginated list, filter by recordType, `Get` / `BatchGet` | `GET /api/resources?kind=&q=&namespace=&status=`; no pagination and no batch read yet |
+| **Native MCP endpoint** (`InvokeRegistryMcp`) any MCP client can call | `GET /api/export/mcp` **exports** MCP server descriptions; agenthub does not run an MCP server |
+| Agent Card | `GET /api/export/agent-card` and `/.well-known/agent.json`, one advertised skill per approved record |
+
+### Authorization and synchronisation
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| Inbound: IAM or JWT | Session cookie → `Principal`; `/api/*` behind `requirePermission`, A2A behind `identify` |
+| Outbound: a **credential provider** (OAuth credential or IAM role) for reaching remote endpoints | `AuthScheme` (none / bearer) plus `auth_token_env`, which stores the environment variable **name** only |
+| **URL-based synchronisation**, keeping records in step with remote MCP / A2A endpoints | A source (mcp or skill) pulls on demand or on an interval, merges on `(name, version)` and records the outcome; the fixture client keeps it offline until an operator opts out |
+
+### Operations and observability
+
+| AWS Agent Registry | agenthub |
+| --- | --- |
+| EventBridge notifications (a record submitted for approval) | SSE broker plus the `events` table, replayable with `since=<seq>` — equivalent in kind, agenthub's own implementation |
+| CloudTrail auditing of every API call | `slog` structured logs (no secrets, no user content, no vectors); a weaker audit surface, deliberately left alone |
+| Organizations, cross-account RAM sharing | One instance, multi-tenant by principal and resource grants; AWS-only constructs that are not replicated |
+| VPC / PrivateLink, service-linked role | Not applicable to a self-hosted binary |
+| Key-value tags (cost attribution, access control) | `tags []string` plus a `metadata` map — enough for the use |
+| — | Database checkpoints with scheduled dumps and in-place restore (`internal/backup`): no AWS counterpart, agenthub is ahead here |
+
+### What agenthub had, what it added, what it refuses
+
+**Already had** — register-and-run adapters for all five kinds (deterministic, offline); the A2A
+endpoint with the full task state machine, including `input-required` parked indefinitely and
+resumed with `tasks/resume`; event fan-out over SSE with `since` replay; push callback records;
+catalogue export as MCP server descriptions and an Agent Card; an auth kernel (PBKDF2 passwords,
+sessions, OAuth with PKCE) and RBAC with resource grants; database checkpoints; 13 languages and a
+monochrome UI, on the web and on the desktop.
+
+**Added for this comparison** — per-kind configuration and validation for all six kinds; a model
+router that can point at an OpenAI-compatible gateway; upstream registry synchronisation with dedup
+and recorded outcomes; the approval lifecycle with consumers limited to approved records; multiple
+namespaces; the `(namespace, name, version)` dedup key; and the `custom` record type.
+
+**Deliberately not** —
+
+| Not doing | Why |
+| --- | --- |
+| Semantic / hybrid search | It needs an embedding model or an external service, which conflicts with "no new production dependency, runs offline". If it is ever needed it arrives as an external search source, not inside the catalogue. |
+| Running an MCP JSON-RPC server (`InvokeRegistryMcp`) | agenthub's protocol is A2A; the catalogue already exports MCP server descriptions for anyone who wants them. A second protocol server would split the contract. |
+| CloudTrail-equivalent auditing (every API call) | It overlaps `slog` and the `events` table; it belongs to an observability milestone of its own, not to catalogue governance. |
+| Organizations, cross-account RAM sharing, VPC PrivateLink, service-linked roles | They are bound to AWS infrastructure with no cross-cloud counterpart; multi-tenancy already comes from the principal plus resource grants. |
+| Inbound authorization beyond sessions and RBAC | Session + RBAC already covers a self-hosted deployment. |
+| A full OAuth authorization-code flow per record | Synchronisation only needs a bearer token held in an environment variable; the full flow belongs to the "real adapters" milestone. |
+
+### recordType ↔ Kind
+
+| AWS recordType | Validated against | agenthub kind | Per-kind configuration |
+| --- | --- | --- | --- |
+| `MCP` | MCP protocol schema | `mcp` | transport, command+args or URL, tool allowlist, auth schemes, env |
+| `AGENT` | A2A Agent Card schema | `agent` | card URL, protocol version, capabilities, skills, auth |
+| `SKILL` | descriptor (name / description / package / repository / markdown) | `skill` | version, repository / package, triggers, steps, tool list, markdown |
+| `CUSTOM` | any valid JSON | `custom` | JSON schema |
+| — | — | `model` | provider mode, endpoint, model id, api key env, fallback chain with weights, timeout |
+| — | — | `cli` | command, allowlist, timeout, output truncation, working directory, env |
+
+### Remaining gaps
+
+1. **Semantic retrieval** (medium): keyword search recalls poorly once a catalogue runs to thousands
+   of records; the fix would be an external search source rather than an embedded model.
+2. **Batch read and pagination** (medium): the listing has neither yet, which will slow the console
+   down as the catalogue grows.
+3. **Audit surface** (low): no record of every API call, which compliance scenarios ask for.
+4. **Schedule expressiveness** (low): a sync schedule is a hand-rolled five-field cron, less
+   expressive than EventBridge rules but enough for a self-hosted instance.
 
 ## License
 

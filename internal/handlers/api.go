@@ -37,8 +37,14 @@ func writeDomainErr(w http.ResponseWriter, err error) {
 	code := httputil.AsError(err).Code
 	switch code {
 	case registry.CodeInvalidKind, registry.CodeInvalidHealth, registry.CodeInvalidTransport,
-		registry.CodeInvalidEntry, registry.CodeDuplicate:
+		registry.CodeInvalidEntry, registry.CodeDuplicate, registry.CodeInvalidKindConfig,
+		registry.CodeInvalidStatusTransition, registry.CodeInvalidNamespace,
+		registry.CodeInvalidSource:
 		status = http.StatusBadRequest
+	case registry.CodeSyncInFlight:
+		// The source is already being pulled: the caller should come back, not
+		// change its request.
+		status = http.StatusConflict
 	case registry.CodeNotFound, hub.CodeTaskNotFound:
 		status = http.StatusNotFound
 	case hub.CodeInvalidStateTransition, hub.CodeTaskNotResumable, hub.CodeNoResource, hub.CodeInvalidFlow:
@@ -52,15 +58,31 @@ func writeDomainErr(w http.ResponseWriter, err error) {
 	httputil.WriteError(w, status, code)
 }
 
+// handleListResources is the management listing: it shows every state, drafts
+// and pending records included, because a curator cannot act on what a listing
+// hides. The discoverable catalogue is the export endpoints, which filter down
+// to approved records.
 func (d Deps) handleListResources(w http.ResponseWriter, r *http.Request) {
-	kind := r.URL.Query().Get("kind")
+	q := r.URL.Query()
+	kind := q.Get("kind")
 	if kind != "" {
 		if _, err := registry.ParseKind(kind); err != nil {
 			writeDomainErr(w, err)
 			return
 		}
 	}
-	entries := d.visibleEntries(r, d.Reg.List(kind, r.URL.Query().Get("q")))
+	if st := q.Get("status"); st != "" {
+		if _, err := registry.ParseStatus(st); err != nil {
+			writeDomainErr(w, err)
+			return
+		}
+	}
+	entries := d.visibleEntries(r, d.Reg.ListFiltered(registry.Filter{
+		Kind:      kind,
+		Query:     q.Get("q"),
+		Namespace: q.Get("namespace"),
+		Status:    q.Get("status"),
+	}))
 	byKind, byHealth := countsOf(entries)
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"resources": entries,

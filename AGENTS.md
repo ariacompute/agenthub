@@ -10,9 +10,12 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 
 - 后端：**Go 1.27 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
   （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
-- 前端：Vue 3 + Vite（**bun** 包管理/测试），三屏控制台，**13 种语言**，**纯黑/白/灰单色**视觉。
+- 前端：Vue 3 + Vite（**bun** 包管理/测试），七屏控制台（registry / registries / sources / trace /
+  topology / login / admin），**13 种语言**，**纯黑/白/灰单色**视觉。
 - 桌面端：`desktop/`，**Rust + Tauri v2** 外壳（Windows / macOS arm64 / Linux）。**不含后端、
   不含数据库**，用环回反向代理把同一份控制台对着用户指定的服务端打开；外壳自有文案同样 13 语。
+  外壳只认**前缀**（`/api`、`/a2a`、`/healthz`、`/.well-known`），其余路径一律 SPA 回退到
+  `index.html`，因此控制台新增屏幕与控制面新增端点**不需要改桌面端代码**。
 - 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通；真实对接以 `TODO(real)` 标注边界。
 - 设计参照 `mastra-ai/mastra` 的**协议与交互形态**（MCP Registry 条目模型、workflow 三原语、
   HITL→`input-required`、Studio 试跑、observability 分层），但**不引入其任何代码或 npm 依赖**。
@@ -23,14 +26,15 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 a2a（协议类型/编解码，零依赖）
   → authz（权限解析 + 资源级授权）         ┐
     → auth（密码、会话、OAuth、Principal） │ 端口由本包定义，实现在 store
-      → registry（五类资源条目 + export）  │ 依赖倒置：端口接口由消费方定义
+      → registry（五类 + custom 条目 + 治理：命名空间/审批/同步 + export） │ 依赖倒置：端口接口由消费方定义
         → adapter（Connector 工厂 + 五类实现）
           → hub（任务状态机 + 事件 broker + span + flow 编排）
             → handlers（/.well-known、/a2a、/api/*、/healthz、静态托管）
 persistence ← internal/store（GORM 实现）
   ├─ migrations/*.sql（go:embed，幂等）+ schema_migrations 版本表
-  └─ resources / tasks / task_artifacts / task_spans / task_pending / task_push / events /
-     push_records / users / sessions / oauth_accounts / groups / roles / permissions / grants
+  └─ resources / registries / registry_sources / tasks / task_artifacts / task_spans /
+     task_pending / task_push / events / push_records / users / sessions / oauth_accounts /
+     groups / roles / permissions / grants
 ```
 
 一次请求：身份解析（会话 cookie → `Principal`）→ 权限校验（`/api/*`）→ 方法规范化（v0.1 别名）→
@@ -44,7 +48,9 @@ persistence ← internal/store（GORM 实现）
 
 | 端口接口（由消费方包定义） | GORM 实现 | 落库内容 |
 | --- | --- | --- |
-| `registry.ResourceStore` | `store.NewResourceStore` | `resources`：五类条目全字段 + jsonb 列 +时间戳 |
+| `registry.ResourceStore` | `store.NewResourceStore` | `resources`：五类 + custom 条目全字段（含 `namespace`/`status`/`display_name`/`source_id`/`kind_config`）+ jsonb 列 + 时间戳 |
+| `registry.NamespaceStore` | `store.NewNamespaceStore` | `registries`：命名空间（含 `auto_approve` 审批策略） |
+| `registry.SourceStore` | `store.NewSourceStore` | `registry_sources`：上游注册中心 + `last_sync_at/status/count/error` |
 | `hub.TaskRepository` | `store.NewTaskRepository` | `tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` |
 | `hub.EventRepository` | `store.NewEventRepository` | `events(seq, task_id, kind, payload)`，供 `since=<seq>` 断线重连回放 |
 | `hub.PushRepository` | `store.NewPushRepository` | `push_records`：mock notifier 捕获的每次回调（url/state/config 快照） |
@@ -79,9 +85,17 @@ persistence ← internal/store（GORM 实现）
 - `internal/store`：`db.go`（`Open`/`Ping`/`Close`/`RedactDSN`，连接池 25/10/30min、`PrepareStmt`）、
   `migrate.go`（`go:embed` + `schema_migrations` 按序单事务执行）、`seed.go`（demo 五类资源）、
   `resource_store.go` / `task_store.go` / `event_store.go` / `push_store.go` /
-  `auth_store.go` / `authz_store.go` / `backup_store.go`（七个仓库实现）
+  `auth_store.go` / `authz_store.go` / `backup_store.go` / `registry_store.go`
+  （命名空间 + 审批 + 上游源，八个仓库实现）
 - `internal/registry`：`registry.go`（`Kind`/`Health`/`Transport`/`Entry` + CRUD + 发现 +
-  `ResourceStore` 端口 + 委托）、`export.go`（聚合 Agent Card + MCP server 描述）
+  `ResourceStore` 端口 + 委托）、`export.go`（聚合 Agent Card + MCP server 描述，**只导出
+  approved**）、`kinds.go`（五类 + `custom` 的 per-kind 配置：`ModelConfig`/`AgentConfig`/
+  `MCPConfig`/`SkillConfig`/`CLIConfig`/`CustomConfig`）、`validate.go`（`ValidateKind` 按 Kind
+  分发校验）、`lifecycle.go`（`Status` 枚举 + `CanTransition` 审批状态机 + `Discoverable` 消费方
+  可见性唯一出口）、`namespace.go`（命名空间 + `(namespace, name, version)` 去重启用键）、
+  `source.go`（`RegistrySource` + `Client`/`SourceStore` 端口）、`sync.go`（同步编排：单飞 + 拉取 +
+  解析 + 去重 upsert + 状态回写）、`sync_fixture.go`（离线确定性实现）、`sync_http.go`（真实
+  `net/http` 客户端，限长 + 超时 + 鉴权头，`TODO(real)` 标注协议适配点）
 - `internal/backup`：**数据库检查点内核**（端口在此定义，GORM 实现在 `internal/store`）。
   `engine.go`（`Engine` 接口 + `Manifest`/`Checkpoint` + `SelectEngine` 自动选择）、
   `pgdump.go`（`pg_dump -Fc` / `pg_restore --clean --if-exists --single-transaction`）、
@@ -90,7 +104,10 @@ persistence ← internal/store（GORM 实现）
   `service.go`（单飞打点/恢复编排/保留清理/回滚点）、`schedule.go`（三种模式 + 手写 5 段 cron）、
   `store.go`（`BackupStore`/`Quiesce`/`Reloader` 端口）
 - `internal/adapter`：`connector.go`（`Connector` 接口 + `Options` + `For` 工厂）、
-  `mock.go`（确定性基元）、`model.go`（provider 注册表 + 回退链）、`agent.go`、`mcp.go`、`skill.go`、`cli.go`
+  `mock.go`（确定性基元）、`model.go`（provider 注册表 + `ModelRouter` 回退链 + 按
+  `Entry.KindConfig.ModelConfig` 装配）、`model_openai.go`（OpenAI 兼容 provider，chat completions，
+  `api_key_env` 只取环境变量名，失败回退 mock，`TODO(real)` 标注 streaming 边界）、
+  `agent.go`、`mcp.go`、`skill.go`、`cli.go`
 - `internal/hub`：`store.go`（`TaskRepository`/`EventRepository`/`PushRepository` 端口 + `Persistence`）、
   `task.go`（TaskStore + 合法迁移校验 + 挂起状态 + 条件更新委托）、`trace.go`（span 时间线）、
   `broker.go`（事件扇出 + 有界队列异步落库）、`flow.go`（`then/branch/parallel`）、
@@ -101,18 +118,28 @@ persistence ← internal/store（GORM 实现）
   `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放）、
   `api_auth.go`（注册/登录/登出/me/会话/OAuth 回调）、
   `api_admin.go`（users/groups/roles/permissions/grants 管理）、
-  `api_backups.go`（检查点列表/打点/下载/删除/恢复 + 定时读写，全部 `backups:manage`）
+  `api_backups.go`（检查点列表/打点/下载/删除/恢复 + 定时读写，全部 `backups:manage`）、
+  `api_registry.go`（命名空间 CRUD + `/api/resources/{id}/status` 审批动作 + 待审批队列）、
+  `api_sync.go`（上游源 CRUD + 手动同步，上游失败返回 502 并透传上游 code）
 - `migrations/`：`001_resources.sql` … `004_push_records.sql`、`005_auth.sql`（users/sessions/
   oauth_accounts）、`006_rbac.sql`（groups/roles/permissions/各种关联表/resource_grants + 内置
   角色权限种子）、`007_backups.sql`（`backup_checkpoints` / `backup_schedules` + `backups:manage`
-  权限与 admin 角色关联，全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`），经 `embed.go` 内嵌
-- `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go`：`DATABASE_URL` 门控集成
+  权限与 admin 角色关联，全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`）、
+  `008_registry_governance.sql`（`resources` 治理列 + `idx_resources_dedup` 唯一索引 +
+  `registries` 表 + 三个新权限与 admin 关联）、`009_registry_sync.sql`（`registry_sources`），
+  经 `embed.go` 内嵌
+- `README.md` / `README_cn.md` 的「AWS Agent Registry 特性对比」章：与 AWS Agent Registry 的
+  逐项对比（含已有 / 本次补齐 / 明确不做三张清单与 recordType ↔ Kind 字段级映射）
+- `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go` 与
+  `tests/registry_governance_integration_test.go`：`DATABASE_URL` 门控集成
 - `docker-compose.yml`：`postgres:16-alpine`（宿主 **5434**）+ `agenthub`（依赖 `service_healthy`）
   + `web`（`profiles: [dev]`）
 - `web/`：Vue 3 控制台（`src/lib/copy/*-copy.js` ×13 语、`languages.js`、`use-copy.js`、`api.js`、
-  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 五屏
-  （registry / trace / topology / **login** / **admin**，admin 第四屏 backups 拆为
-  `views/admin/{BackupsPanel,BackupScheduleCard,BackupList,RestoreDrawer}.vue`）；`tests/` vitest）
+  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 七屏
+  （registry / **registries** / **sources** / trace / topology / **login** / **admin**，admin
+  第四屏 backups 拆为 `views/admin/{BackupsPanel,BackupScheduleCard,BackupList,RestoreDrawer}.vue`；
+  registry 抽屉的 per-kind 配置区块抽为 `views/components/ResourceKindForm.vue` 与
+  `components/EnvEditor.vue`）；`tests/` vitest）
 - `backend/static/`：Vue 构建产物（Go 进程托管，gitignore）
 - `desktop/`：**桌面外壳（Tauri v2，Rust，独立 crate，不在任何 workspace 内）**。
   `src-tauri/src/proxy/`（`mod.rs` 环回监听与路由分发、`forward.rs` reqwest 流式转发 +
@@ -170,9 +197,30 @@ persistence ← internal/store（GORM 实现）
   否则一律退化为 500；前端同步登记 `errors.js` 的 `CODE_KEYS` 与 `errors-copy.js` 的 13 语。
 - **新权限需同步四处**：`authz.Perm*` 常量 → `AllPermissions` → 迁移里的权限种子与 admin 角色关联 →
   前端 `auth-store.js` 的 `PERMISSIONS` 与 `enums-copy.js` 的 `permission` 分组（13 语）。
+- **目录治理四条**：
+  1. **消费方只见 approved**：`registry.Discoverable` 是唯一过滤出口，列表 / MCP 导出 / Agent Card /
+     A2A 寻址全部走它；空 `status` 按 `approved` 处理，保证升级后既有资源不消失。
+  2. **去重启用键是 `(namespace, name, version)`**：同名跨版本是不同记录；由 DB 唯一索引（内存模式
+     用同语义 map）保证，冲突映射为 `resource_already_exists` → 400。
+  3. **同步导入与手工注册同路**：上游记录先解析为 `Entry` 再走同一条 `Upsert`，共享同一套校验与审批；
+     同步单飞，`last_sync_*` 只记状态/条数/错误码，不记响应体与凭据；全局开关
+     `AGENTHUB_REGISTRY_SYNC_FIXTURE`（默认 **开**）把**所有**源钉在离线客户端上，
+     要真正出网必须显式关掉它。
+  4. **密钥只存名字**：`api_key_env` / `auth_token_env` 仅保存环境变量名，本体不入库、不落日志。
+- **bool 字段不要写 `default` 到 GORM tag**：带 `default` 的零值字段会被 GORM 从 INSERT 中省略，
+  DB 默认值生效，于是显式 `false`（如 `auto_approve=false`、`enabled=false`）被静默写成 `true`。
+  列上的 SQL `DEFAULT` 保留给手写 SQL，模型 tag 只写 `not null`。
 - **测试**：`go test -race ./...`（纯逻辑单测零外部依赖 —— memory 回退保证无 DB 也全绿）；
   集成用例以 `DATABASE_URL` 门控（**未设置则 `t.Skip`，绝不伪造结果**）；前端 `bunx vitest run`。
   新增功能须补**正常 + 异常**双路径用例。
+- **覆盖率门在看板之外，但看板不能空**：新代码至少覆盖到「正常路径 + 每个错误码一条」，
+  并按这三条惯例落位：
+  1. store 端口（内存 / PostgreSQL 双模）用**包内假 store** 驱动，不需要 DB 就能跑到
+     `store != nil` 的全部分支（`internal/registry/store_mode_test.go` 是模板）；
+  2. 真正需要 PostgreSQL 的断言写在**被测包内**并以 `DATABASE_URL` 门控，这样覆盖率算在
+     `internal/store` 而不是都归到 `tests/`（后者只有 0 语句，覆盖率不体现）；
+  3. 离线优先是硬约束：任何会触网的用例必须走 `httptest` 或 fixture；同步类用例一律
+     `Fixture: true`，否则一次 DNS 超时就是 5 秒的测试。
 - **桌面端测试**：`cd desktop/src-tauri && cargo test`（配置校验、i18n 完整性、代理转发清单、
   `Set-Cookie` 改写，以及**起真实环回代理 + 假服务端**的端到端用例：转发、cookie、SSE 不缓冲、
   SPA 回退、连接保存；控制台未构建时静态用例自动 skip，不伪造结果）。

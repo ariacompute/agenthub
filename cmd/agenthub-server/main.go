@@ -95,7 +95,22 @@ func main() {
 	defer stopSweep()
 	go sweepSessions(sweepCtx, store.NewSessionStore(db))
 
-	reg := registry.NewWithStore(store.NewResourceStore(db))
+	// The catalogue: resources plus the namespaces they belong to. Loading the
+	// namespaces once at boot is what lets "does this record need review?" be
+	// answered in memory on every registration.
+	reg := registry.NewWithStores(store.NewResourceStore(db), store.NewNamespaceStore(db))
+	if err := reg.LoadNamespaces(context.Background()); err != nil {
+		slog.Error("registry: load namespaces", "error", err)
+		os.Exit(1)
+	}
+	// Upstream registries. The service keeps working with a nil store, so an
+	// instance that never federates anything simply has no sources.
+	sources := registry.NewSourceService(reg, store.NewSourceStore(db),
+		registry.WithFixturePin(cfg.RegistrySyncFixture))
+	if cfg.RegistrySyncFixture {
+		slog.Info("registry: upstream synchronisation is pinned to the offline client",
+			"hint", "AGENTHUB_REGISTRY_SYNC_FIXTURE is on, no source will reach the network")
+	}
 
 	opts := adapter.Options{
 		CLITimeout:     cfg.CLITimeout,
@@ -129,7 +144,19 @@ func main() {
 		}()
 	}
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc}
+	// Background synchronisation. It is off unless an operator switched it on,
+	// and it stops with the same cancellation the rest of the process uses, so
+	// a shutdown never leaves a pull half written.
+	syncCtx, stopSync := context.WithCancel(context.Background())
+	defer stopSync()
+	if cfg.RegistrySyncEnabled {
+		go syncSources(syncCtx, sources, cfg.RegistrySyncInterval)
+	} else {
+		slog.Info("registry: background synchronisation disabled",
+			"hint", "set AGENTHUB_REGISTRY_SYNC_ENABLED=true, or trigger a source from the console")
+	}
+
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Register(deps),
@@ -245,6 +272,35 @@ func sweepSessions(ctx context.Context, sessions auth.SessionStore) {
 			return
 		case <-ticker.C:
 			sweep()
+		}
+	}
+}
+
+// syncSources pulls every enabled upstream registry on a fixed interval.
+//
+// A failed source is logged and skipped: one unreachable registry must not
+// stop the others, and the outcome is recorded on the source itself so the
+// console can show it.
+func syncSources(ctx context.Context, sources *registry.SourceService, interval time.Duration) {
+	run := func() {
+		for id, res := range sources.SyncAll(ctx, "") {
+			if res.Status == registry.SyncStatusFailed {
+				slog.Warn("registry: scheduled sync failed", "source", id, "code", res.Error)
+				continue
+			}
+			slog.Info("registry: scheduled sync", "source", id,
+				"imported", res.Imported, "updated", res.Updated, "skipped", res.Skipped)
+		}
+	}
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }

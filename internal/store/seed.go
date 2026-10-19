@@ -95,6 +95,25 @@ func DemoResources() []*registry.Entry {
 			Tags:         []string{"cli"},
 			Metadata:     map[string]string{"command": "git"},
 			Health:       registry.HealthHealthy,
+			KindConfig: &registry.KindConfig{CLI: &registry.CLIConfig{
+				Command:        "git",
+				Allowlist:      []string{"status", "log"},
+				TimeoutMS:      15000,
+				MaxOutputBytes: 65536,
+			}},
+		},
+		{
+			ID:          "demo-custom",
+			Kind:        registry.KindCustom,
+			Name:        "ticket-schema",
+			Description: "A caller defined record: an internal ticket schema nothing else fits",
+			Endpoint:    "https://internal.example/schemas/ticket.json",
+			Version:     "1.0.0",
+			Tags:        []string{"schema", "internal"},
+			Health:      registry.HealthHealthy,
+			KindConfig: &registry.KindConfig{Custom: &registry.CustomConfig{
+				Schema: `{"type":"object","properties":{"id":{"type":"string"},"state":{"type":"string"}}}`,
+			}},
 		},
 	}
 	for _, e := range seeds {

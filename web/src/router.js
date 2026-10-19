@@ -4,6 +4,8 @@ import TaskTraceView from './views/TaskTraceView.vue'
 import TopologyView from './views/TopologyView.vue'
 import LoginView from './views/LoginView.vue'
 import AdminView from './views/AdminView.vue'
+import RegistriesView from './views/RegistriesView.vue'
+import SourcesView from './views/SourcesView.vue'
 import { useAuthStore } from './lib/auth-store.js'
 
 const router = createRouter({
@@ -14,6 +16,16 @@ const router = createRouter({
     { path: '/registry', name: 'registry', component: RegistryView },
     { path: '/trace', name: 'trace', component: TaskTraceView },
     { path: '/topology', name: 'topology', component: TopologyView },
+    // Namespaces double as the curator's queue, so either permission opens it:
+    // a curator who may approve records is not necessarily the one creating
+    // namespaces.
+    {
+      path: '/registries',
+      name: 'registries',
+      component: RegistriesView,
+      meta: { permissions: ['registries:manage', 'registry:curate'] },
+    },
+    { path: '/sources', name: 'sources', component: SourcesView, meta: { permissions: ['sources:manage'] } },
     // The administration screen carries several tabs, each with its own
     // permission: an operator who may only manage database checkpoints must
     // still be able to reach it.

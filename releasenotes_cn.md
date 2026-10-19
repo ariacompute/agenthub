@@ -1,20 +1,23 @@
 # AgentHub 发布说明
 
-> 本文档以 A2A 互连平台（agenthub）产品的视角，汇总 `agenthub` 仓库截至 **2026-10-18**
+> 本文档以 A2A 互连平台（agenthub）产品的视角，汇总 `agenthub` 仓库截至 **2026-10-19**
 > 的全部特性更新，覆盖 **v0.1.0**（M1 首版：A2A 协议层 / 资源注册 / 适配层 / Hub 编排 /
 > 控制台）、**v0.2.0**（PostgreSQL 全量持久化）、**v0.3.0**（构建打标：控制台与
-> `/healthz` 的 `version@commit`）、**v0.4.0**（Release 发布容器镜像）与 **v0.5.0**
-> （Windows / macOS / Linux 桌面外壳）。服务端为 Go 单二进制，控制台为 Vue 3 单色界面，
-> 对外只暴露一套标准 A2A 端点——同一份控制台同时以桌面应用形态交付。
+> `/healthz` 的 `version@commit`）、**v0.4.0**（Release 发布容器镜像）、**v0.5.0**
+> （Windows / macOS / Linux 桌面外壳）与 **v0.6.0**（目录治理：per-kind 配置、Model
+> router、上游注册中心同步、审批生命周期、命名空间与 `custom` 记录类型）。服务端为 Go 单二进制，
+> 控制台为 Vue 3 单色界面，对外只暴露一套标准 A2A 端点——同一份控制台同时以桌面应用形态交付。
 
 ## 组件版本参考
 
 | 组件 | 仓库 | 版本参考 |
 | --- | --- | --- |
-| A2A 服务端 + 控制台 | `agenthub`（agenthub-server / Vue 3 console） | v0.5.0 |
+| A2A 服务端 + 控制台 | `agenthub`（agenthub-server / Vue 3 console） | v0.6.0 |
 | A2A 协议实现 | `agenthub` / `internal/a2a` | 0.2.0 |
 | 持久化 | PostgreSQL 16 + GORM（`gorm.io/gorm` v1.25.12） | — |
-| 桌面外壳 | `agenthub` / `desktop`（Tauri v2，Rust） | v0.5.0 |
+| 桌面外壳 | `agenthub` / `desktop`（Tauri v2，Rust） | v0.6.0 |
+
+v0.6.0 的桌面外壳**自身代码没有改动**，这一版只是内嵌了新的控制台产物（见 §十）。
 
 ---
 
@@ -33,14 +36,18 @@ Agent 调用。
   因此 `hub`、`registry` 不 import `store`。
 - **单二进制**：Go 1.27 + 标准库 `net/http`，无框架；GORM 是唯一生产依赖。
 - **默认端口 3500**，compose 数据库宿主端口 **5434**（避开 5432 / 5433）。
+- **受治理的目录**（v0.6.0）：条目归属一个命名空间、带审批状态、按
+  `(namespace, name, version)` 去重；消费方只见已批准的条目。
 
-### 五类资产概念地图
+### 资产概念地图
 
-- **model**：provider 注册表 + 回退链，输出 completion。
+- **model**：provider 注册表 + 回退链，输出 completion；可通过自身 router 配置指向真实的
+  OpenAI 兼容网关。
 - **agent**：目标驱动、可挂起待输入，步骤规划产物 `agent.plan`。
 - **mcp**：`tools/list` + `tools/call` 协议转换；`transport` 仅为描述字段。
 - **skill**：触发 → 手册 → 步骤 → 报告。
 - **cli**：白名单 → 超时 → 截断 → 结构化 JSON 回执。
+- **custom**（v0.6.0）：任意合法 JSON schema，用于五类之外的记录。
 
 ---
 
@@ -58,7 +65,8 @@ Agent 调用。
 - **v0.1 别名**：`tasks/send` / `tasks/sendSubscribe`，由 `AGENTHUB_A2A_LEGACY_METHODS`
   控制开关。
 - **资源选择**：`metadata.resourceId|resource_id|resource`（精确 id → 名称 → kind）→
-  `metadata.kind` 兜底 → 无选择器时优先 agent，否则按 id 字典序首个。
+  `metadata.kind` 兜底 → 无选择器时优先 agent，否则按 id 字典序首个。自 v0.6.0 起候选集是
+  `registry.Discoverable`，未获批准的记录选不中、也调不动。
 
 ### 任务状态机
 
@@ -88,33 +96,65 @@ Agent 调用。
 
 ## 三、资源注册层
 
-`registry` 以 MCP Registry 风格的条目模型登记五类资产，并提供发现、导出与聚合。
+`registry` 以 MCP Registry 风格的条目模型登记五类资产与 `custom` 记录，并提供发现、导出与聚合。
 
-### 五类条目
+### 条目模型（五类 + custom）
 
 - **Registry 级元数据**：`version` / `repository` / `tags` / `env` / `auth_schemes`，
   以及 `endpoint` / `transport`（仅描述，适配器不得按它分支）。
 - **能力与健康**：`capabilities`（MCP 为工具名、skill 为步骤工具）；
   `health` 取 `healthy` / `degraded` / `unhealthy` / `unknown`。
 - **id 规则**：形如 `<kind>-<hex>`，缺省自动生成；重复 id 注册返回 400。
+- **去重启用键**（v0.6.0）：`(namespace, name, version)`，由唯一索引保证——同名换版本是
+  新记录，同名单同版本再注册返回 400。
+
+### 目录治理（v0.6.0）
+
+目录不再是平铺清单，而是一个受治理的 registry。驱动本次工作的 AWS Agent Registry 逐项对比
+见 `README_cn.md` 的「AWS Agent Registry 特性对比」一章，其中包含 agenthub **明确不做**的项
+（语义 hybrid search、CloudTrail 等价审计、跨账号 RAM 共享、VPC PrivateLink）。
+
+- **per-kind 配置**：六类在注册抽屉各有专属配置区块，后端按同一结构校验
+  （`ValidateKind`，`invalid_kind_config`）——model 声明 provider 模式、agent 填 Agent Card
+  与能力、MCP 按 transport 决定填命令还是 URL、skill 填步骤与手册、CLI 填命令白名单、
+  custom 填任意 JSON schema。
+- **审批生命周期**：`draft → pending → approved / rejected`，另有 `deprecated`，经
+  `POST /api/resources/{id}/status` 推进（`registry:curate`）。`registry.Discoverable`
+  是唯一过滤出口：列表、MCP 导出、Agent Card 与 A2A 寻址共用它，未批准的记录既找不到也
+  调不动。空 `status` 按 `approved` 处理，保证升级后既有目录不会集体消失。
+- **命名空间**：`registries` 表存命名空间，各自带审批策略（`auto_approve`）；`default`
+  由迁移种子创建且不可删除。
+- **上游注册中心同步**：源（MCP / Skill）按手动或定时把外部记录拉入本地目录，按
+  `(name, version)` 合并，并把结果（`last_sync_at` / `status` / `count` / `error`）写回源。
+  导入的记录与手工注册走同一条 `Upsert`，因此上游目录无法绕过校验与审批。真实客户端是
+  `net/http`（超时 + 限长 + 按源鉴权），fixture 客户端离线确定性；`AGENTHUB_REGISTRY_SYNC_FIXTURE`
+  （默认开）把所有源钉在离线客户端上——开启同步绝不等于静默开启出网。
+- **新增错误码**：`invalid_kind_config`、`invalid_status_transition`、`invalid_namespace`、
+  `invalid_source` → 400；`sync_in_flight` → 409；上游不可达 → 502 并透传上游 code。
 
 ### 控制面与导出
 
 - **CRUD 与发现**：`GET/POST /api/resources`、`GET/PUT/DELETE /api/resources/{id}`、
-  `POST /api/resources/{id}/health`，支持 `?kind=` 与 `?q=` 过滤和计数。
-- **MCP 导出**：`GET /api/export/mcp` 输出 MCP server 描述。
-- **聚合 Agent Card**：`GET /api/export/agent-card`，每资源渲染为一个 skill。
+  `POST /api/resources/{id}/health`，支持 `?kind=`、`?q=`、`?namespace=` 与 `?status=`
+  过滤和计数。
+- **命名空间与审批**（v0.6.0）：`GET/POST /api/registries`、`PUT/DELETE /api/registries/{id}`、
+  `GET /api/registries/approvals`（待审批队列）、`POST /api/resources/{id}/status`。
+- **上游源**（v0.6.0）：`GET/POST /api/registry-sources`、`PUT/DELETE /api/registry-sources/{id}`、
+  `POST /api/registry-sources/{id}/sync`。
+- **MCP 导出**：`GET /api/export/mcp` 输出 MCP server 描述——仅 approved。
+- **聚合 Agent Card**：`GET /api/export/agent-card`，每资源渲染为一个 skill——仅 approved。
 
 ---
 
 ## 四、适配层
 
-`adapter` 以同一个 `Connector` 接口收敛五类资产的调用面，首版**全部为确定性 mock**：
-无网络、无子进程、离线可跑通，真实对接以 `TODO(real)` 标注边界。
+`adapter` 以同一个 `Connector` 接口收敛五类资产的调用面。其中四类**仍为确定性 mock**：
+无网络、无子进程、离线可跑通，真实对接以 `TODO(real)` 标注边界；自 v0.6.0 起，model
+连接器在条目声明时可以跑**真实的 OpenAI 兼容 provider**。
 
 ### 五类连接器
 
-- **model**：provider 注册表 + 回退链，产物 `model.completion`。
+- **model**：provider 注册表 + 回退链，产物 `model.completion`——现在带上命中的 provider 名。
 - **agent**：步骤规划；prompt 含 `approve` / `confirm` / `approval`（**词级匹配**）→
   挂起并置 `RequiresInput`。
 - **mcp**：`tools/list` + `tools/call` 协议转换，产物 `mcp.tools` / `mcp.call`。
@@ -128,6 +168,19 @@ Agent 调用。
 - **CLI 四步底线**：白名单前置校验 → 单次超时（默认 15s）→ 输出截断 → 结构化 JSON 回执，
   四步缺一不可。
 - **artifact 累积**：支持 `append` / `lastChunk`，任务结束时按累积列表返回。
+
+### Model Router（v0.6.0）
+
+条目声明 `provider_mode=openai_compatible` 时，`endpoint` 可指向任意 OpenAI 兼容网关
+（LiteLLM / OpenRouter / 自建路由），由真实 chat completions provider 承接。
+
+- **配置**：`model_id`、`api_key_env`、有序回退链 + 权重、超时、可选 mock 兜底。router
+  按条目的 `KindConfig` 装配，因此两个 model 资源可以指向两个网关。
+- **凭据**：`api_key_env` **只存环境变量名**；密钥本体不入库、不落日志。
+- **绝不伪造**：全部 provider 失败时连接器返回错误。只有显式开启 `fallback_mock` 才由
+  确定性 mock 应答，且产物标注 `provider: mock`，不会被误认作真实 completion。
+- **边界**：streaming 与真实 agent / mcp / skill / cli 适配器仍是 `TODO(real)`，这四类
+  保持离线。
 
 ---
 
@@ -167,8 +220,12 @@ Agent 调用。
 
 ### 数据表
 
-- **`resources`**：五类条目全字段，`tags` / `capabilities` / `auth_schemes` / `env` /
-  `metadata` 为 `jsonb`。
+- **`resources`**：条目全字段 + 治理列（`namespace`、`status`、`display_name`、
+  `source_id` 与 per-kind 的 `kind_config`），`tags` / `capabilities` / `auth_schemes` /
+  `env` / `metadata` / `kind_config` 为 `jsonb`；`(namespace, name, version)` 唯一。
+- **`registries`**（v0.6.0）：命名空间，各带审批策略。
+- **`registry_sources`**（v0.6.0）：上游注册中心源与最近一次同步结果
+  （`last_sync_at` / `status` / `count` / `error`）。
 - **`tasks` + 子表**：任务主体与状态；`task_artifacts`、`task_spans`、`task_pending`、
   `task_push` 随任务级联删除。
 - **`events`**：每个 broker 帧，`(task_id, seq)` 主键，供 `since=<seq>` 回放。
@@ -181,7 +238,9 @@ Agent 调用。
 ### 迁移与写入策略
 
 - **内嵌幂等迁移**：`migrations/*.sql` 经 `//go:embed` 内嵌，按文件名顺序、每文件单事务
-  执行；SQL 自身幂等，可重复执行、可审计、可回滚。
+  执行；SQL 自身幂等，可重复执行、可审计、可回滚。`008_registry_governance.sql` 与
+  `009_registry_sync.sql`（v0.6.0）补上治理列、去重启用唯一索引、命名空间与上游源——
+  语句全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`，升级前已存在的条目保持 `approved`。
 - **条件更新防丢更新**：任务状态迁移走 `UPDATE ... WHERE id=? AND state=?` 并校验
   `RowsAffected`，0 行时区分「任务不存在」与「并发冲突」。
 - **持久化不阻塞运行**：状态 / artifact / span 同步写；`events` 与 `push_records`
@@ -205,9 +264,14 @@ Agent 调用。
 Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面，也是 A2A 契约的可视化
 检查器。
 
-### 五屏
+### 七屏
 
-- **注册中心**：五类筛选 + 搜索、健康指示与统计条、单资源「试跑」。
+- **注册中心**：六类（含 `custom`）筛选 + 搜索、命名空间与状态筛选、健康指示与统计条、
+  单资源「试跑」。注册抽屉改为按 kind 切换专属配置区块——model 看 router、MCP 看 transport、
+  skill 看步骤与手册；每张卡片带审批徽标，只给出当前状态允许的迁移动作。
+- **命名空间**（v0.6.0）：命名空间与其审批策略，外加待审批队列（行内批准 / 驳回）。
+- **上游源**（v0.6.0）：上游注册中心源、手动「立即同步」，以及最近一次同步的
+  导入 / 更新 / 跳过三计数。
 - **任务追踪**：任务列表 + 状态过滤、span 时间线回放、artifact 原文可复制。
 - **拓扑视图**：五泳道资产与调用边，线型区分活跃与失败。
 - **登录注册**：首个账号即 owner，`/api/*` 无会话一律关闭。
@@ -220,7 +284,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   全量母语翻译，英文兜底，`ar` 为 RTL；运行时切换同步 `<html lang>` 与 `dir`。
 - **零硬编码自然语言**：组件内一律 `t()`，后端枚举由 `copy/enums-copy.js` 映射。
 - **纯黑/白/灰单色**：所有 hex 满足 **R=G=B**，禁止任何有彩色相；状态靠
-  填充 / 描边 / 动效编码，五类资产以「灰阶明度 + 专属图标 + 文字标签」三重冗余区分。
+  填充 / 描边 / 动效编码，各类资产以「灰阶明度 + 专属图标 + 文字标签」三重冗余区分。
 - **自动护栏**：`web/tests/style.spec.js` 校验色彩；`prefers-contrast` 与
   `prefers-reduced-motion` 均有降级。
 
@@ -255,6 +319,13 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `AGENTHUB_CLI_ALLOWLIST`（git / ls / cat / echo / date / aria-memo）、
   `AGENTHUB_MAX_OUTPUT_BYTES`（65536）、`AGENTHUB_EVENT_BUFFER`（512）、
   `AGENTHUB_PUSH_RECORD_LIMIT`（100）。
+- **目录相关**（v0.6.0）：`AGENTHUB_MODEL_ROUTER_MODE`（`mock` | `openai_compatible`，
+  默认 `mock`——条目自身配置优先于这个全局默认）、`AGENTHUB_REGISTRY_SYNC_ENABLED`
+  （默认 **false**）、`AGENTHUB_REGISTRY_SYNC_INTERVAL`（默认 `1h`，开启同步时须为正）
+  与 `AGENTHUB_REGISTRY_SYNC_FIXTURE`（默认 **true**，把所有源钉在离线客户端上——要真正
+  出网，运维必须显式关掉它）。
+- **治理权限**（v0.6.0）：`registries:manage`（命名空间）、`registry:curate`
+  （批准 / 驳回 / 废弃）、`sources:manage`（上游源与同步）。owner 持有全部权限。
 - **日志**：`slog` JSON，不打正文、密钥与向量；DSN 经 `store.RedactDSN` 脱敏后再记录。
 
 ---
@@ -268,6 +339,16 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 - **DB 门控集成用例**：`tests/integration_test.go` 覆盖迁移幂等、资源 CRUD 与 jsonb 往返、
   任务全生命周期与级联删除、事件回放、push 留痕与保留上限、完整 A2A run 落库回读；
   **未设置 `DATABASE_URL` 则 skip，绝不伪造结果**。
+- **治理用例**（v0.6.0）：`registry` 的 store 分支由**包内假 store** 驱动
+  （`store_mode_test.go`），因此去重启用键、审批状态机与持久化错误归一都无需数据库即可覆盖；
+  `internal/store/registry_governance_test.go` 与
+  `tests/registry_governance_integration_test.go` 覆盖真正需要 PostgreSQL 的部分——治理列与
+  per-kind 配置的 jsonb 往返、唯一索引拒绝重复、命名空间 CRUD、同步结果留痕。两者均以
+  `DATABASE_URL` 门控。
+- **覆盖率**（v0.6.0）：`make test-cover` 跑 `-coverprofile` 并打印 `go tool cover -func`。
+  带库时：`a2a` 97.8%、`model` 93.9%、`registry` 89.7%、`authz` 87.9%、`hub` 87.8%、
+  `adapter` 83.3%、`config` 80.3%、`httputil` 80.2%、`handlers` 68.7%、`backup` 58.2%、
+  `auth` 56.9%、`store` 22.6%（未设 `DATABASE_URL` 时它的用例 skip，数字不代表真实覆盖）。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
 - **前端**：`bunx vitest run` 57 项通过（languages / copy-fallback / enums-copy / api /
@@ -278,14 +359,23 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
+- **脚本化接口测试**（v0.6.0）：`scripts/test-api.sh` 新增治理段落——建命名空间、记录走
+  `draft → pending → approved`（并验证 `draft → approved` 被拒、草稿不进可发现列表）、
+  去重启用键、fixture 源同步两次（首轮导入、次轮刷新）。对着运行中实例：**167 通过、
+  0 失败、3 跳过**。
 
 ---
 
-## 十、桌面外壳（v0.5.0）
+## 十、桌面外壳（v0.6.0）
 
 `desktop/` 是 **Tauri v2** 外壳（Rust + 系统 WebView），覆盖 Windows、macOS（arm64）
 与 Linux。它**不带后端、不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着用户
 指定的服务端打开。控制台与 Go 服务端一行都没有为桌面端改动。
+
+**v0.6.0 带来的是重新构建的控制台，而不是重写的外壳。** 两个新屏与新增的控制面端点
+在这里不需要任何改动，这正是设计意图：转发只按前缀判定（`/api`、`/a2a`、`/healthz`、
+`/.well-known`），其余路径一律回退 `index.html`，于是窗口内的控制台路由与服务端一样由
+Vue 路由接管。`cargo test` 仍是 34 项全通过，无变化。
 
 ### 为什么是环回代理
 
@@ -337,7 +427,8 @@ Intel 一格跑在已被 GitHub 退役的 `macos-13` 标签上，作业受理后
 调用方 ──GET /.well-known/agent.json──────> Agent Card（一资源渲染为一个 skill）
 控制台 ──GET /api/tasks/{id}/events?since=seq──> SSE 回放 + 实时流
 hub ────store（GORM，四个端口接口）────────> PostgreSQL 16（内嵌幂等迁移）
-控制台 ──GET /api/*─────────────────────> 注册中心 / 任务追踪 / 拓扑视图
+控制台 ──GET /api/*─────────────────────> 注册中心 / 命名空间 / 上游源 / 任务追踪 / 拓扑视图
+上游注册中心 ──HTTPS────────────────────> registry source → 按 (name, version) 去重 → Upsert
 ```
 
 - **冻结契约**：A2A 帧形状只能在 `internal/a2a` 定义，任何层不得改写；SSE 无 `[DONE]`
@@ -346,6 +437,10 @@ hub ────store（GORM，四个端口接口）────────> Po
   copy 层承担。
 - **传输无关**：MCP 的 `transport`（stdio / streamable-http / sse-legacy）是记录字段，
   适配器不得按它分支。
+- **消费方只见 approved**（v0.6.0）：`registry.Discoverable` 是列表、MCP 导出、Agent Card
+  与 A2A 寻址共用的唯一过滤出口，草稿不会从某条没加守卫的路径漏出去。
+- **默认离线**（v0.6.0）：除显式配置成 router 的 model 外，所有适配器保持确定性；上游同步
+  既默认关闭、又默认钉在 fixture 客户端上——运维要显式关掉这两道闸才会真正出网。
 - **不做评分**：eval 仅留钩子，不接 LLM judge、不产出任何分数。
 - **一份控制台、两种外壳**：桌面端是同一份构建产物，只是由环回源提供，因此控制台不会
   长出任何桌面专用分支，Go 服务端也无从感知桌面客户端的存在。

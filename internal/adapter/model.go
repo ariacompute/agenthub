@@ -9,9 +9,13 @@ import (
 
 // ModelProvider is the single surface a model backend has to implement.
 //
-// TODO(real): add an OpenAI-compatible provider (chat completions + streaming)
-// and register it first in NewModelRouter; the mock stays as the fallback so a
-// deployment without credentials still runs end to end.
+// Two implementations exist: mockModelProvider, which is deterministic and
+// offline, and openAIProvider, which talks to any OpenAI compatible chat
+// completions endpoint — the shape every model router (LiteLLM, OpenRouter, a
+// self hosted gateway) exposes.
+//
+// TODO(real): streaming. Both providers request a non-streamed completion today;
+// adding SSE means a second path beside Generate, not a change to this one.
 type ModelProvider interface {
 	Name() string
 	Generate(ctx context.Context, prompt string) (string, error)
@@ -31,32 +35,50 @@ func (mockModelProvider) Generate(ctx context.Context, prompt string) (string, e
 }
 
 // ModelRouter selects a provider and falls back down the chain on failure.
+//
+// The chain is explicit: a real provider failing does not quietly land on the
+// mock unless the operator configured that, because a completion nobody produced
+// is worse than an error somebody can act on.
 type ModelRouter struct {
 	providers []ModelProvider
 }
 
-// NewModelRouter builds the default router.
+// NewModelRouter builds the default router: offline, deterministic, no
+// credentials and no network — which is what an instance without a model
+// backend has to fall back to.
 func NewModelRouter() *ModelRouter {
 	return &ModelRouter{providers: []ModelProvider{mockModelProvider{}}}
 }
 
+// NewModelRouterFor builds the router a registered model resource asks for:
+// router mode produces a real provider plus one provider per fallback target.
+func NewModelRouterFor(e *registry.Entry) *ModelRouter { return newModelRouterFor(e) }
+
 // Generate walks the fallback chain until one provider answers.
 func (r *ModelRouter) Generate(ctx context.Context, prompt string) (string, error) {
-	if len(r.providers) == 0 {
-		return "", &mockUnavailable{}
+	out, _, err := r.GenerateWith(ctx, prompt)
+	return out, err
+}
+
+// GenerateWith is Generate plus the name of the provider that answered, so the
+// artifact can say which model produced a completion instead of hiding the
+// fallback behind a single string.
+func (r *ModelRouter) GenerateWith(ctx context.Context, prompt string) (string, string, error) {
+	if r == nil || len(r.providers) == 0 {
+		return "", "", &mockUnavailable{}
 	}
 	var lastErr error
 	for _, p := range r.providers {
 		out, err := p.Generate(ctx, prompt)
 		if err == nil {
-			return out, nil
+			return out, p.Name(), nil
 		}
 		lastErr = err
 	}
 	if lastErr != nil {
-		return "", lastErr
+		return "", "", lastErr
 	}
-	return "", &mockUnavailable{}
+	return "", "", &mockUnavailable{}
 }
 
 type mockUnavailable struct{}
@@ -71,9 +93,12 @@ func (c *modelConnector) Kind() registry.Kind { return registry.KindModel }
 
 func (c *modelConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeResult, error) {
 	if c.router == nil {
+		c.router = newModelRouterFor(&req.Entry)
+	}
+	if len(c.router.providers) == 0 {
 		c.router = NewModelRouter()
 	}
-	out, err := c.router.Generate(ctx, req.Prompt)
+	out, provider, err := c.router.GenerateWith(ctx, req.Prompt)
 	if err != nil {
 		return InvokeResult{}, err
 	}
@@ -81,7 +106,7 @@ func (c *modelConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	data := map[string]any{
 		"kind":     string(registry.KindModel),
 		"resource": req.Entry.Name,
-		"provider": "mock",
+		"provider": provider,
 		"tokens":   tokens,
 		"digest":   digest(req.Prompt)[:16],
 		"echo":     req.Prompt,
@@ -89,7 +114,7 @@ func (c *modelConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	return InvokeResult{
 		Text:      out,
 		Parts:     []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
-		Artifacts: []a2a.Artifact{artifact("model.completion", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindModel))},
+		Artifacts: []a2a.Artifact{artifact("model.completion", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindModel), "provider", provider)},
 	}, nil
 }
 

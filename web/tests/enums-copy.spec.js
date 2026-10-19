@@ -15,6 +15,10 @@ const GROUPS = [
   'backupStatus',
   'backupKind',
   'backupMode',
+  'status',
+  'providerMode',
+  'sourceAuth',
+  'syncStatus',
 ]
 
 describe('enum copy', () => {
@@ -38,7 +42,7 @@ describe('enum copy', () => {
   })
 
   it('never translates protocol identifiers used as values', () => {
-    expect(Object.keys(enumsCopy.kind.en)).toEqual(['model', 'agent', 'mcp', 'skill', 'cli'])
+    expect(Object.keys(enumsCopy.kind.en)).toEqual(['model', 'agent', 'mcp', 'skill', 'cli', 'custom'])
     expect(Object.keys(enumsCopy.transport.en)).toEqual(['stdio', 'streamable-http', 'sse-legacy'])
   })
 

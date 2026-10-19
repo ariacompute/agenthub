@@ -29,6 +29,20 @@ func (s *resourceStore) Upsert(ctx context.Context, e *registry.Entry) (*registr
 	if err != nil {
 		return nil, err
 	}
+	// The dedup key is (namespace, name, version) and the database enforces it
+	// with a unique index. Checking first turns the driver's constraint
+	// violation into resource_already_exists, which is what the console
+	// localises; the index stays the authority in case two writers race.
+	var clash model.Resource
+	err = s.db.WithContext(ctx).
+		Where("namespace = ? AND name = ? AND version = ? AND id <> ?", row.Namespace, row.Name, row.Version, row.ID).
+		Take(&clash).Error
+	if err == nil {
+		return nil, registry.ErrDuplicate
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
 	err = s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns(resourceUpdateColumns),
@@ -43,8 +57,9 @@ func (s *resourceStore) Upsert(ctx context.Context, e *registry.Entry) (*registr
 // deliberately absent so it keeps the value of the first insert.
 var resourceUpdateColumns = []string{
 	"kind", "name", "description", "endpoint", "version", "repository",
-	"tags", "capabilities", "auth_schemes", "env", "metadata",
-	"transport", "health", "updated_at",
+	"tags", "capabilities", "auth_schemes", "env", "metadata", "kind_config",
+	"transport", "health", "namespace", "status", "display_name", "source_id",
+	"updated_at",
 }
 
 func (s *resourceStore) Get(ctx context.Context, id string) (*registry.Entry, error) {
@@ -59,10 +74,19 @@ func (s *resourceStore) Get(ctx context.Context, id string) (*registry.Entry, er
 	return entryFromResource(&row)
 }
 
-func (s *resourceStore) List(ctx context.Context, kind string) ([]*registry.Entry, error) {
+// List applies the kind, namespace and status constraints of the filter. The
+// free text query stays in the registry: it is a match across several columns
+// and belongs next to the sorting, not in SQL.
+func (s *resourceStore) List(ctx context.Context, f registry.Filter) ([]*registry.Entry, error) {
 	q := s.db.WithContext(ctx).Model(&model.Resource{})
-	if kind != "" {
-		q = q.Where("kind = ?", kind)
+	if k := f.Kind; k != "" {
+		q = q.Where("kind = ?", k)
+	}
+	if ns := f.Namespace; ns != "" {
+		q = q.Where("namespace = ?", ns)
+	}
+	if st := f.Status; st != "" {
+		q = q.Where("status = ?", st)
 	}
 	var rows []model.Resource
 	if err := q.Order("id ASC").Find(&rows).Error; err != nil {
@@ -172,6 +196,10 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 	if err != nil {
 		return nil, err
 	}
+	kindCfg, err := model.NewJSONField(e.KindConfig)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	createdAt := e.CreatedAt
 	if createdAt.IsZero() {
@@ -184,6 +212,12 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 	health := e.Health
 	if health == "" {
 		health = registry.HealthUnknown
+	}
+	status := e.Status
+	if !status.Valid() {
+		// An empty or unknown state is read as approved everywhere in the
+		// domain, so the row and the in-memory copy can never disagree.
+		status = registry.StatusApproved
 	}
 	return &model.Resource{
 		ID:           e.ID,
@@ -198,8 +232,13 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 		AuthSchemes:  auth,
 		Env:          env,
 		Metadata:     meta,
+		KindConfig:   kindCfg,
 		Transport:    string(e.Transport),
 		Health:       string(health),
+		Namespace:    e.EffectiveNamespace(),
+		Status:       string(status),
+		DisplayName:  e.DisplayName,
+		SourceID:     e.SourceID,
 		CreatedAt:    createdAt,
 		UpdatedAt:    updatedAt,
 	}, nil
@@ -216,6 +255,10 @@ func entryFromResource(row *model.Resource) (*registry.Entry, error) {
 		Repository:  row.Repository,
 		Transport:   registry.Transport(row.Transport),
 		Health:      registry.Health(row.Health),
+		Namespace:   row.Namespace,
+		Status:      registry.Status(row.Status),
+		DisplayName: row.DisplayName,
+		SourceID:    row.SourceID,
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
 	}
@@ -232,6 +275,9 @@ func entryFromResource(row *model.Resource) (*registry.Entry, error) {
 		return nil, err
 	}
 	if err := row.Metadata.Decode(&e.Metadata); err != nil {
+		return nil, err
+	}
+	if err := row.KindConfig.Decode(&e.KindConfig); err != nil {
 		return nil, err
 	}
 	return e, nil
