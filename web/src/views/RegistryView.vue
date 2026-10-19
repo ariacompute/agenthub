@@ -316,7 +316,7 @@ async function tryRun(resource) {
             {{ t('actionTryRun') }}
           </button>
           <button class="btn btn-ghost" type="button" @click="openEdit(resource)">
-            {{ shell.t('actionSave') }}
+            {{ shell.t('actionEdit') }}
           </button>
           <button class="btn btn-ghost" type="button" @click="destroy(resource)">
             {{ shell.t('actionDelete') }}
