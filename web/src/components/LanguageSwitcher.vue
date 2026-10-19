@@ -23,7 +23,7 @@ function choose(code) {
       <Globe :size="14" />
       <strong>{{ current }}</strong>
     </button>
-    <div v-if="open" class="lang-menu card" role="listbox">
+    <div v-if="open" class="lang-menu" role="listbox">
       <button
         v-for="[code, name] in LANGUAGES"
         :key="code"
@@ -61,6 +61,14 @@ function choose(code) {
   flex-direction: column;
   gap: 2px;
   z-index: 50;
+  /* Opaque on purpose: the menu floats over live console content, so a
+     translucent card would let that content bleed through the list. It keeps
+     the card's border, radius and shadow, only dropping the see-through wash
+     and its blur. */
+  background: var(--bg-surface);
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
 .lang-item {
