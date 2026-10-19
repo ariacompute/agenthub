@@ -51,13 +51,18 @@ registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=t
 ## 示例
 
 [`example/`](example/README.md) 提供一份可直接灌进运行实例的真实目录：**41 份完整
-`registry.Entry` 载荷**加一个可重复执行的装载脚本，五类资产各有 Windows 与 Ubuntu 两套形态。
+`registry.Entry` 载荷**加一个可重复执行的装载脚本，五类资产各有 Windows 与 Ubuntu 两套形态；
+`deploy-agent.sh` 更进一步，在 WSL2 / Ubuntu 上把其中一个 agent 真跑起来，让目录里登记的
+`card_url` 真能应答。
 
 ```bash
 cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
                          # 并填 AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
 ./example/load.sh        # 按 uname -s 选平台
 ./example/load.sh --all  # 两个平台都灌
+
+./example/deploy-agent.sh google-adk start  # 把某个 agent 跑起来，让它登记的 card_url 真能应答
+./example/deploy-agent.sh google-adk smoke  # 打印它的 Agent Card，再发一条 message/send
 ```
 
 | 类别 | 注册了什么 |
@@ -75,6 +80,9 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 `example/README.md` 另附载荷契约（21 个可用键、`kind` / `transport` / `health` / `status` 四类枚举、
 `kind_config`）、每类上游项目的 Windows/Ubuntu 安装与启动命令，以及两个最容易踩的配置项：
 网关的 `AGENTHUB_EXAMPLE_API_KEY` 与 CLI 的 `AGENTHUB_CLI_ALLOWLIST`。
+
+`deploy-agent.sh` 刻意与装载脚本分开：它不登录、不碰数据库、也不调 `/probe`，只负责安装、启动与
+校验某一个 agent——而这正是 `Try run` 与健康探测要报出「实测值」的前提。
 
 ## 部署
 

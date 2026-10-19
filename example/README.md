@@ -2,7 +2,8 @@
 
 A catalogue you can load straight into a running agenthub instance: five kinds of assets
 (model / agent / mcp / skill / cli), one set for Windows and one for Ubuntu, **41 JSON files**
-in total, plus a re-runnable `load.sh`.
+in total, plus a re-runnable `load.sh` and `deploy-agent.sh`, which stands one of the agents
+up on WSL2 / Ubuntu so the `card_url` it registers really answers.
 
 Every file is a **complete `registry.Entry` payload**: the server's `DisallowUnknownFields`,
 the four enum checks and the `kind_config` validation prove the fields are written correctly,
@@ -10,12 +11,25 @@ and a clean `load.sh` run proves the sample is valid.
 
 ```sh
 # from the repository root — the examples read the single root .env
-cp .env.example .env          # then set AGENTHUB_EXAMPLE_ENABLED=true
-                              # and AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
-./example/load.sh             # picks the platform from uname -s
-./example/load.sh --all       # loads both platforms
+cp .env.example .env                  # then set AGENTHUB_EXAMPLE_ENABLED=true
+                                      # and AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
+./example/load.sh                     # picks the platform from uname -s
+./example/load.sh --all               # loads both platforms
 ./example/load.sh --platform windows
 ```
+
+The catalogue only *describes* these assets — nothing in it is running. To make one of the A2A
+agents real on WSL2 / Ubuntu, so `Try run` and `POST /api/resources/{id}/probe` reach a service
+instead of refusing, use `deploy-agent.sh`:
+
+```sh
+./example/deploy-agent.sh google-adk start   # venv + google-adk[a2a] + uvicorn, background
+./example/deploy-agent.sh google-adk smoke   # print the Agent Card, then one message/send
+./example/deploy-agent.sh google-adk status  # pid, card reachability, log path
+./example/deploy-agent.sh google-adk stop    # TERM the recorded pid
+```
+
+Section 7 covers what it installs, where it puts things and how it handles the gateway key.
 
 Loading is **opt-in**: `load.sh` exits with a message until
 `AGENTHUB_EXAMPLE_ENABLED=true` is set, so a plain `cp .env.example .env` can never
@@ -58,6 +72,7 @@ Open the console and you will find three namespaces: `example` (model), `example
 | mcp | `mcp-{filesystem,github,google-drive,google-docs,gmail,slack,stripe,wechat,dingtalk,feishu}-{ubuntu,windows}.json` | `example-*` | 10 × 2 |
 | skill | `skill-{anthropics-pdf,skillssh-find-skills}-{ubuntu,windows}.json` | `example-*` | 2 × 2 |
 | cli | `cli-{gh,huggingface,modelscope}-{ubuntu,windows}.json` | `example-*` | 3 × 2 |
+| — | `deploy-agent.sh` | — | deployment script: stands one agent up on WSL2 / Ubuntu (`google-adk` today), see §7 |
 
 ## 3. Upstream choices & Windows / Ubuntu comparison
 
@@ -81,6 +96,7 @@ and are marked explicitly through the `non-a2a` tag and `metadata.a2a`.
 **not A2A**. To speak A2A you must wrap the agent with `to_a2a(root_agent, port=8001)` and serve it with
 uvicorn; the a2a-sdk then auto-publishes the Agent Card at
 `http://127.0.0.1:8001/.well-known/agent-card.json` (documented as experimental).
+A ready-made deployment for it lives in `deploy-agent.sh` — see §7.
 
 ⚠️ **The controls publish no Agent Card**: Pi's only programmatic entry point is `--mode rpc` (JSONL records
 on stdin/stdout) and DeepSeek Harness only ships the `dsh web` Web UI (`:3080`) — neither upstream
@@ -220,3 +236,35 @@ listed in the corresponding JSON's `metadata.env_hint` as a reminder; no values 
   @modelcontextprotocol/server-slack MIT, @stripe/mcp MIT, workspace-mcp MIT, wechat-mcp MIT,
   gh MIT, huggingface_hub Apache-2.0, modelscope Apache-2.0, and anthropics/skills and
   vercel-labs/skills as documented in their repositories.
+
+## 7. Deploying an agent on Ubuntu (`deploy-agent.sh`)
+
+`load.sh` registers what an asset *is*; `deploy-agent.sh` makes one of them *answer*. It targets
+WSL2 / Ubuntu and takes the agent as its first argument:
+
+```sh
+./example/deploy-agent.sh <agent> [start|stop|restart|status|smoke] [options]
+```
+
+| Agent | Port | What it installs | How it serves |
+| --- | --- | --- | --- |
+| `google-adk` | 8001 | `google-adk[a2a]` + `uvicorn` in a venv | `uvicorn a2a_agent:a2a_app --host 127.0.0.1 --port 8001` |
+
+- `start` creates the venv, writes `a2a_agent.py`, serves it with `nohup` and waits for the Agent
+  Card (default 60s, `--wait`). Host, port and the card path are read out of the matching
+  `resources/agent-<name>-ubuntu.json`, so the script cannot drift from the catalogue, and a
+  mismatch with what is registered is called out.
+- the default agent is a deterministic `BaseAgent` that calls no LLM, so the deployment can be
+  verified before any credential exists. `--llm` swaps in the gateway-backed agent
+  (`--model-id`, default `ariacompute/ariamodel`; `--api-base`, default
+  `https://gateway.ariacompute.com/v1`).
+- the gateway key comes from `--api-key` or `AGENTHUB_EXAMPLE_API_KEY` and only travels through
+  the server process environment: it is never written to the generated agent, the pid file or the
+  log, and never echoed. Prefer the environment variable — a value on the command line shows up
+  in `ps`.
+- `stop` sends TERM (KILL when it is ignored), `status` reports pid + card reachability + log path
+  and exits 1 when nothing is running, and `smoke` sends one `message/send` and prints the reply,
+  so a real answer is distinguishable from a mock.
+- everything lands in `$HOME/.local/share/agenthub-<agent>` (`--workdir` to override), which keeps
+  the venv and the log out of the repository.
+- the script never talks to agenthub: no login, no `load.sh`, no `/probe`.

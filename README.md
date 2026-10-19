@@ -61,13 +61,17 @@ of pretending to be a release. Images take the same values through the `VERSION`
 
 [`example/`](example/README.md) registers a realistic catalogue straight from the repository: 41
 complete `registry.Entry` payloads plus a re-runnable loader, covering all five kinds in both a
-Windows and an Ubuntu shape.
+Windows and an Ubuntu shape. `deploy-agent.sh` goes one step further and stands one of the agents
+up on WSL2 / Ubuntu, so the `card_url` the catalogue registers really answers.
 
 ```bash
 cp .env.example .env     # then set AGENTHUB_EXAMPLE_ENABLED=true and
                          # AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
 ./example/load.sh        # picks the platform from uname -s
 ./example/load.sh --all  # both platforms
+
+./example/deploy-agent.sh google-adk start  # stand one agent up so its card_url answers
+./example/deploy-agent.sh google-adk smoke  # print its Agent Card, then send one message/send
 ```
 
 | Kind | What it registers |
@@ -86,6 +90,10 @@ exists — PUT is not an upsert — so it is safe to re-run.
 `transport` / `health` / `status` enums and `kind_config`), the upstream install and start commands
 per platform, and the two settings people trip over: `AGENTHUB_EXAMPLE_API_KEY` for the gateway and
 `AGENTHUB_CLI_ALLOWLIST` for the CLI commands.
+
+`deploy-agent.sh` is deliberately separate from the loader: it never logs in, never touches the
+database and never calls `/probe` — it only installs, serves and verifies one agent, which is what
+`Try run` and a health probe need before they can report anything measured.
 
 ## Deployment
 
