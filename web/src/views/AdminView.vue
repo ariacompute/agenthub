@@ -260,7 +260,15 @@ watch(query, (value) => {
       <div class="matrix" role="table">
         <div class="matrix-row matrix-row-head" role="row" :style="{ gridTemplateColumns: matrixColumns }">
           <span role="columnheader"></span>
-          <span v-for="role in auth.rolesCatalogue" :key="role.id" role="columnheader">
+          <!-- Centred like the checkbox below it: the column is far wider than
+               either, so a left-aligned label reads as belonging to the column
+               on its left. -->
+          <span
+            v-for="role in auth.rolesCatalogue"
+            :key="role.id"
+            class="matrix-cell-head"
+            role="columnheader"
+          >
             {{ role.name }}
             <span v-if="role.builtin" class="chip">{{ t('builtinBadge') }}</span>
           </span>
@@ -492,19 +500,45 @@ watch(query, (value) => {
 }
 
 .admin-table {
-  display: flex;
-  flex-direction: column;
-}
-
-.admin-row {
+  /* One grid for every row, so the header and the body share a single set of
+     tracks. Every row used to be its own grid, and the trailing `auto` column
+     then measured the action buttons in the body and nothing at all in the
+     header: different free space, different fr widths, and each heading sat a
+     little further right than its column — 40px off by the second column and
+     141px by the last. The offset is whatever the buttons measure, so no two
+     languages were wrong by the same amount. */
   display: grid;
   grid-template-columns: 1.6fr 1fr 0.7fr 1.2fr 1.2fr auto;
   gap: 10px;
   align-items: center;
-  padding: 10px 8px;
-  border-block-end: 1px solid var(--stroke-1);
   font-size: 13px;
+}
+
+.admin-row {
+  /* Transparent: the cells become items of the table grid above. Colour, size
+     and case are inherited and still reach the cells; the row's own box does
+     not exist, so its padding and rule live on the cells instead. */
+  display: contents;
+}
+
+.admin-row > * {
   min-width: 0;
+  padding-block: 10px;
+  border-block-end: 1px solid var(--stroke-1);
+}
+
+/* The row's 8px inset, kept by the outermost cells now that the row has no
+   box of its own. The column pin is what makes one grid behave like a table:
+   without it the cells simply fill the tracks in document order, and a row
+   with fewer cells than the grid has columns — the grants table has four —
+   is continued by the next row instead of starting one. */
+.admin-row > *:first-child {
+  grid-column: 1;
+  padding-inline-start: 8px;
+}
+
+.admin-row > *:last-child {
+  padding-inline-end: 8px;
 }
 
 .admin-row-head {
@@ -568,6 +602,24 @@ watch(query, (value) => {
   white-space: nowrap;
 }
 
+/* The role names sit over their own column's checkbox, which .matrix-cell
+   centres; the label has to be centred the same way or it drifts left of the
+   ticks it names. Flex, not grid: the name and the builtin chip are one line,
+   and a grid container would stack them. */
+.matrix-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  /* A role name longer than its column wraps instead of dragging the label off
+     centre: one unbreakable word wider than the track overflows, and an
+     overflowing centred item does not stay centred. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 .matrix-cell {
   display: grid;
   place-items: center;
@@ -602,11 +654,25 @@ watch(query, (value) => {
 }
 
 @media (max-width: 1023px) {
-  /* Narrow screens stack the table into cards instead of scrolling sideways. */
+  /* Narrow screens stack the table into cards instead of scrolling sideways,
+     which means the rows need their boxes back: one column each, no shared
+     tracks to line up with. */
+  .admin-table {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
   .admin-row {
+    display: grid;
     grid-template-columns: 1fr;
     gap: 6px;
     padding: 12px 8px;
+    border-block-end: 1px solid var(--stroke-1);
+  }
+  .admin-row > * {
+    padding: 0;
+    border-block-end: none;
   }
   .admin-row-head {
     display: none;
