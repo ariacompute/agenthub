@@ -26,6 +26,13 @@ and exposes them as standard A2A endpoints that any protocol-conforming agent ca
 One call: user → Agent → Model plans → Skill loaded → MCP reaches the legacy system → the result
 travels back the same path.
 
+## Snapshot
+
+![agenthub console — Registry screen](registry.png)
+
+The Registry screen: eight kinds of screen in one console (registry, task trace, topology,
+registries, sources, playground, administration and a built-in documentation page).
+
 ## Run
 
 ```bash
