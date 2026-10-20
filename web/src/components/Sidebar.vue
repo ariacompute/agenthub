@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
-import { Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Terminal, Workflow } from 'lucide-vue-next'
+import { BookOpen, Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Terminal, Workflow } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
 import StateDot from './StateDot.vue'
 
@@ -60,6 +60,10 @@ const items = computed(() => {
   if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage') || auth.can('backups:manage')) {
     base.push({ to: '/admin', label: t('navAdmin'), icon: Shield })
   }
+  // Documentation comes last and is never gated: it describes what the console
+  // does, so any signed-in account may read it. Administration above appears and
+  // disappears with its permissions; the docs entry must not follow it.
+  base.push({ to: '/docs', label: t('navDocs'), icon: BookOpen })
   return base
 })
 
