@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"agenthub/internal/adapter"
 	"agenthub/internal/auth"
 	"agenthub/internal/backup"
 	"agenthub/internal/registry"
@@ -178,7 +179,7 @@ func Load() (*Config, error) {
 		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
 		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
 		CLIAllowlist:   envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
-		AgentTimeout:   envDur("AGENTHUB_AGENT_TIMEOUT", 15*time.Second),
+		AgentTimeout:   envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
 		MaxOutputBytes: envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
 		EventBuffer:    envInt("AGENTHUB_EVENT_BUFFER", 512),
 		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),

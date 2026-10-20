@@ -38,8 +38,11 @@ type Options struct {
 }
 
 // DefaultAgentTimeout applies when no timeout is configured, so a card fetch can
-// never hang a task indefinitely.
-const DefaultAgentTimeout = 15 * time.Second
+// never hang a task indefinitely. It has to be generous: one A2A call covers the
+// card fetch plus a whole agent turn, and an agent backed by a reasoning gateway
+// was measured at ~40s. A shorter default turns a real answer into a timeout that
+// looks exactly like an agent nobody deployed.
+const DefaultAgentTimeout = 120 * time.Second
 
 // InvokeRequest is one call to a registered resource.
 type InvokeRequest struct {

@@ -29,6 +29,8 @@
 #   --port <port>        listen port, default from the example JSON (8001 for adk)
 #   --workdir <dir>      default $HOME/.local/share/agenthub-<agent>
 #   --wait <sec>         how long to wait for the Agent Card, default 60
+#                        (smoke allows up to 120s for the reply; an agent backed
+#                        by a reasoning gateway is slow, not missing)
 #   -h | --help          this text
 #
 # Credentials: the gateway key comes from --api-key or AGENTHUB_EXAMPLE_API_KEY
@@ -619,7 +621,9 @@ PY
 )"
 
   echo "message/send  $ORIGIN/"
-  code="$(curl -s -o "$BODY" -m 30 -w '%{http_code}' -X POST "$ORIGIN/" \
+  # A reasoning gateway can take ~40s for one turn, so the budget here is wider
+  # than a plain liveness check would be.
+  code="$(curl -s -o "$BODY" -m 120 -w '%{http_code}' -X POST "$ORIGIN/" \
     -H 'Content-Type: application/json' --data "$payload" || true)"
   echo "status        ${code:-000}"
   python3 - "$BODY" <<'PY'
