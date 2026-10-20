@@ -170,11 +170,16 @@ export async function sendTask(options) {
 /**
  * Runs a task over SSE. onEvent receives {event, data} for every frame; the
  * stream ends with the terminal status update (there is no sentinel frame).
+ *
+ * `signal` is optional and new: passing an AbortController signal stops reading
+ * and lets the caller walk away mid stream. An abort travels back out as the
+ * platform's AbortError, so it never looks like a server failure.
  */
-export async function streamTask(options, onEvent) {
+export async function streamTask(options, onEvent, signal) {
   const res = await fetch(BASE + '/a2a', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: Date.now(),
@@ -191,6 +196,10 @@ export async function streamTask(options, onEvent) {
   const decoder = new TextDecoder()
   let buffer = ''
   for (;;) {
+    if (signal?.aborted) {
+      await reader.cancel()
+      break
+    }
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })

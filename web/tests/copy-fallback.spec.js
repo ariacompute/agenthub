@@ -11,6 +11,7 @@ import { errorsCopy } from '../src/lib/copy/errors-copy.js'
 import { authCopy } from '../src/lib/copy/auth-copy.js'
 import { adminCopy } from '../src/lib/copy/admin-copy.js'
 import { backupCopy } from '../src/lib/copy/backup-copy.js'
+import { playgroundCopy } from '../src/lib/copy/playground-copy.js'
 
 const PROSE = {
   shell: shellCopy,
@@ -22,6 +23,7 @@ const PROSE = {
   auth: authCopy,
   admin: adminCopy,
   backup: backupCopy,
+  playground: playgroundCopy,
   errors: errorsCopy,
 }
 

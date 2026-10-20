@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
-import { Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Workflow } from 'lucide-vue-next'
+import { Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Terminal, Workflow } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
 import StateDot from './StateDot.vue'
 
@@ -51,6 +51,11 @@ const items = computed(() => {
   }
   if (auth.can('sources:manage')) {
     base.push({ to: '/sources', label: t('navSources'), icon: Cloud })
+  }
+  // The playground sits with the operator screens, right after the upstream
+  // registries, and is gated on the same permission the route guard asks for.
+  if (auth.can('tasks:write')) {
+    base.push({ to: '/playground', label: t('navPlayground'), icon: Terminal })
   }
   if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage') || auth.can('backups:manage')) {
     base.push({ to: '/admin', label: t('navAdmin'), icon: Shield })

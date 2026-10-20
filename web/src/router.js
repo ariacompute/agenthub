@@ -6,6 +6,7 @@ import LoginView from './views/LoginView.vue'
 import AdminView from './views/AdminView.vue'
 import RegistriesView from './views/RegistriesView.vue'
 import SourcesView from './views/SourcesView.vue'
+import PlaygroundView from './views/PlaygroundView.vue'
 import { useAuthStore } from './lib/auth-store.js'
 
 const router = createRouter({
@@ -26,6 +27,9 @@ const router = createRouter({
       meta: { permissions: ['registries:manage', 'registry:curate'] },
     },
     { path: '/sources', name: 'sources', component: SourcesView, meta: { permissions: ['sources:manage'] } },
+    // The playground runs tasks, so it answers to the same permission as
+    // cancelling and resuming one rather than to anything registry specific.
+    { path: '/playground', name: 'playground', component: PlaygroundView, meta: { permissions: ['tasks:write'] } },
     // The administration screen carries several tabs, each with its own
     // permission: an operator who may only manage database checkpoints must
     // still be able to reach it.
