@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   CARRY_TURNS,
+  CHAT_MODES,
+  DEFAULT_ROUNDS,
   MAX_PARTICIPANTS,
+  MAX_ROUNDS,
+  ROUND_POLICIES,
   applyReply,
+  autoContinue,
   beginTurn,
   canAddParticipant,
   carryContext,
@@ -10,6 +15,7 @@ import {
   flowTemplate,
   newChat,
   newRun,
+  promptFor,
   reduceFrame,
   replyFromRun,
   runFromTask,
@@ -247,5 +253,104 @@ describe('replyFromRun', () => {
   it('folds a run into what a chat bubble shows', () => {
     const reply = replyFromRun({ ...newRun(), taskId: 't1', text: 'hi', status: '' }, 'completed')
     expect(reply).toMatchObject({ taskId: 't1', text: 'hi', status: 'completed' })
+  })
+})
+
+describe('promptFor', () => {
+  const participants = [
+    { id: 'r1', name: 'agent one', kind: 'agent' },
+    { id: 'r2', name: 'model two', kind: 'model' },
+  ]
+
+  /** Opens a turn and lets every participant answer it. */
+  function answered(base, text, replies) {
+    const opened = beginTurn(base, text)
+    let chat = opened.chat
+    participants.forEach((p, i) => {
+      chat = applyReply(chat, opened.turn.id, p.id, { status: 'completed', text: replies[i] })
+    })
+    return { chat, turn: opened.turn }
+  }
+
+  it('offers nothing but the question to a broadcast', () => {
+    const opened = beginTurn(newChat(participants), 'hello')
+    expect(promptFor(opened.chat, opened.turn.id, 'broadcast', 1)).toBe('user: hello')
+  })
+
+  it('hands a relay speaker only what this round already produced', () => {
+    const opened = beginTurn(newChat(participants), 'hello')
+    // The first speaker reads the question; the second reads the first answer.
+    expect(promptFor(opened.chat, opened.turn.id, 'relay', 0)).toBe('user: hello')
+    const afterFirst = applyReply(opened.chat, opened.turn.id, 'r1', { status: 'completed', text: 'one' })
+    expect(promptFor(afterFirst, opened.turn.id, 'relay', 1)).toBe('user: hello\nagent one: one')
+    // An index past the cast says nothing about speakers that do not exist.
+    expect(promptFor(afterFirst, opened.turn.id, 'relay', 9)).toBe('user: hello\nagent one: one')
+  })
+
+  it('leaves a speaker that has not answered out of the relay prompt', () => {
+    const opened = beginTurn(newChat(participants), 'hello')
+    expect(promptFor(opened.chat, opened.turn.id, 'relay', 1)).toBe('user: hello')
+  })
+
+  it('hands a group round everything the round before said', () => {
+    const first = answered(newChat(participants), 'hello', ['one', 'two'])
+    const second = beginTurn(first.chat, '')
+    expect(promptFor(second.chat, second.turn.id, 'group', 0)).toBe('agent one: one\nmodel two: two')
+    // The opening round has nothing before it.
+    expect(promptFor(first.chat, first.turn.id, 'group', 0)).toBe('user: hello')
+  })
+
+  it('carries a failure as the words of that participant', () => {
+    const opened = beginTurn(newChat(participants), 'hello')
+    const chat = applyReply(opened.chat, opened.turn.id, 'r1', { status: 'failed', error: 'boom' })
+    expect(promptFor(chat, opened.turn.id, 'relay', 1)).toBe('user: hello\nagent one: boom')
+  })
+
+  it('has no prompt for a turn that was never opened', () => {
+    const opened = beginTurn(newChat(participants), 'hello')
+    expect(promptFor(opened.chat, 'nope', 'relay', 1)).toBe('')
+    expect(promptFor(opened.chat, 'nope', 'group', 1)).toBe('')
+  })
+})
+
+describe('autoContinue', () => {
+  it('never continues a broadcast: one message, one round', () => {
+    for (const policy of ROUND_POLICIES) {
+      expect(autoContinue('broadcast', policy, 1, 5)).toBe(false)
+    }
+  })
+
+  it('never continues on its own when each round needs a confirmation', () => {
+    for (const mode of CHAT_MODES) {
+      expect(autoContinue(mode, 'confirm', 1, 5)).toBe(false)
+    }
+  })
+
+  it('stops a limited conversation at the number the operator picked', () => {
+    expect(autoContinue('group', 'limit', 1, 3)).toBe(true)
+    expect(autoContinue('group', 'limit', 2, 3)).toBe(true)
+    expect(autoContinue('group', 'limit', 3, 3)).toBe(false)
+  })
+
+  it('reads a nonsensical limit as one round', () => {
+    expect(autoContinue('relay', 'limit', 1, 0)).toBe(false)
+    expect(autoContinue('relay', 'limit', 1, -4)).toBe(false)
+    expect(autoContinue('relay', 'limit', 1, undefined)).toBe(false)
+  })
+
+  it('keeps an unattended conversation going but still caps it', () => {
+    expect(autoContinue('group', 'manual', 1, 3)).toBe(true)
+    expect(autoContinue('group', 'manual', MAX_ROUNDS - 1, 99)).toBe(true)
+    expect(autoContinue('group', 'manual', MAX_ROUNDS, 99)).toBe(false)
+  })
+
+  it('caps a limit that is larger than the ceiling', () => {
+    expect(autoContinue('group', 'limit', MAX_ROUNDS, MAX_ROUNDS + 50)).toBe(false)
+  })
+
+  it('starts each style with a round count that suits it', () => {
+    expect(CHAT_MODES).toEqual(['broadcast', 'relay', 'group'])
+    expect(DEFAULT_ROUNDS.relay).toBe(1)
+    expect(DEFAULT_ROUNDS.group).toBeLessThanOrEqual(MAX_ROUNDS)
   })
 })

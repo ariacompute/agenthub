@@ -12,6 +12,18 @@ export const MAX_PARTICIPANTS = 4
 export const FRAME_LIMIT = 200
 export const CARRY_TURNS = 3
 
+// How the participants of one conversation talk to each other:
+//   broadcast — everybody gets the same message and answers on its own
+//   relay     — they answer in order, each reading what this round produced
+//   group     — everybody answers each round, reading the previous round
+export const CHAT_MODES = ['broadcast', 'relay', 'group']
+// How a multi round conversation knows when to stop.
+export const ROUND_POLICIES = ['limit', 'manual', 'confirm']
+// Hard ceiling for the "keep going until I stop" policy: an unattended
+// conversation must not run forever.
+export const MAX_ROUNDS = 10
+export const DEFAULT_ROUNDS = { relay: 1, group: 3 }
+
 // --- flows ----------------------------------------------------------------
 
 /** The single hop the server builds on its own when no flow is sent. */
@@ -215,6 +227,54 @@ export function turnSettled(chat, turnId) {
   const ids = Object.keys(turn.replies)
   if (ids.length === 0) return false
   return ids.every((id) => turn.replies[id]?.status !== 'working')
+}
+
+/**
+ * What one participant should read before answering: the message of this round
+ * plus whatever the chosen style lets it see.
+ *
+ * Nothing here is a server side memory — the hub only resumes a task parked in
+ * input-required, so the page is what hands a participant the words of the
+ * others by putting them into the prompt it sends.
+ */
+export function promptFor(chat, turnId, mode, index = 0) {
+  const turn = chat.turns.find((entry) => entry.id === turnId)
+  if (!turn) return ''
+  const lines = []
+  if (turn.text) lines.push(`user: ${turn.text}`)
+
+  const speak = (participant, reply) => {
+    const body = reply?.error || reply?.text
+    if (body) lines.push(`${participant.name || participant.id}: ${body}`)
+  }
+
+  if (mode === 'relay') {
+    // Everything said earlier in this very round, in speaking order.
+    for (let i = 0; i < Math.min(index, chat.participants.length); i += 1) {
+      speak(chat.participants[i], turn.replies[chat.participants[i].id])
+    }
+  } else if (mode === 'group') {
+    // Everything the round before this one produced, whoever said it.
+    const at = chat.turns.findIndex((entry) => entry.id === turnId)
+    if (at > 0) {
+      for (const participant of chat.participants) {
+        speak(participant, chat.turns[at - 1].replies[participant.id])
+      }
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Whether another round starts on its own. A broadcast is one round by
+ * definition, and "ask me each round" never continues without the operator.
+ */
+export function autoContinue(mode, policy, done, limit) {
+  if (mode === 'broadcast' || policy === 'confirm') return false
+  if (done >= MAX_ROUNDS) return false
+  if (policy === 'limit') return done < Math.max(1, Math.min(limit, MAX_ROUNDS))
+  if (policy === 'manual') return true
+  return false
 }
 
 /**

@@ -18,13 +18,20 @@ import { Play, Send, Square, Trash2 } from 'lucide-vue-next'
 import { resumeTask, sendTask, streamTask } from '../lib/api.js'
 import {
   CARRY_TURNS,
+  CHAT_MODES,
+  DEFAULT_ROUNDS,
   MAX_PARTICIPANTS,
+  MAX_ROUNDS,
+  ROUND_POLICIES,
   applyReply,
+  autoContinue,
   beginTurn,
   canAddParticipant,
   carryContext,
   chatCandidates,
   flowTemplate,
+  promptFor,
+  turnSettled,
   newChat,
   newRun,
   reduceFrame,
@@ -64,6 +71,15 @@ const chat = ref(newChat([]))
 const chatText = ref('')
 const sending = ref(false)
 const carry = ref(false)
+// A conversation between the participants themselves: how they are wired
+// together, and what makes the exchange stop.
+const chatStyle = ref('broadcast')
+const roundPolicy = ref('limit')
+const roundLimit = ref(DEFAULT_ROUNDS.group)
+
+const STYLE_KEYS = { broadcast: 'styleBroadcast', relay: 'styleRelay', group: 'styleGroup' }
+const STYLE_HINTS = { broadcast: 'styleBroadcastHint', relay: 'styleRelayHint', group: 'styleGroupHint' }
+const POLICY_KEYS = { limit: 'roundsLimit', manual: 'roundsManual', confirm: 'roundsConfirm' }
 
 const resources = computed(() => store.resources)
 const candidates = computed(() => chatCandidates(resources.value))
@@ -78,6 +94,25 @@ const canRun = computed(
 const canSend = computed(
   () => !sending.value && participants.value.length > 0 && chatText.value.trim().length > 0,
 )
+const lastTurn = computed(() => chat.value.turns[chat.value.turns.length - 1] ?? null)
+const lastRoundSettled = computed(() => (lastTurn.value ? turnSettled(chat.value, lastTurn.value.id) : false))
+// "Ask me before each round" is the only policy that waits for a click.
+const canContinue = computed(
+  () =>
+    chatStyle.value !== 'broadcast' &&
+    roundPolicy.value === 'confirm' &&
+    !sending.value &&
+    Boolean(lastTurn.value) &&
+    lastRoundSettled.value &&
+    chat.value.turns.length < MAX_ROUNDS,
+)
+// Why the exchange is over, once it is: either the operator's limit or the
+// ceiling that keeps an unattended conversation from running forever.
+const conversationNote = computed(() => {
+  if (chatStyle.value === 'broadcast' || sending.value || !lastRoundSettled.value) return ''
+  if (chat.value.turns.length <= 1) return ''
+  return chat.value.turns.length >= MAX_ROUNDS ? t('roundsCapped') : t('roundsDone')
+})
 const statusText = computed(() => enumLabel('taskState', run.value.status || 'unknown'))
 
 onMounted(async () => {
@@ -234,22 +269,85 @@ function toggleParticipant(resource) {
   chat.value = { ...chat.value, participants: participants.value }
 }
 
+function pickStyle(style) {
+  chatStyle.value = style
+  roundLimit.value = DEFAULT_ROUNDS[style] ?? DEFAULT_ROUNDS.group
+}
+
+function styleLabel(style) {
+  return t(STYLE_KEYS[style])
+}
+
+function policyLabel(policy) {
+  return t(POLICY_KEYS[policy])
+}
+
 async function sendChat() {
   const message = chatText.value.trim()
   if (!message || !participants.value.length || sending.value) return
-  const payload = carry.value ? `${carryContext(chat.value, CARRY_TURNS)}\n${message}` : message
-  const opened = beginTurn(chat.value, message)
-  chat.value = opened.chat
   chatText.value = ''
   sending.value = true
   runError.value = ''
   controller.value = new AbortController()
   try {
-    await Promise.all(
-      participants.value.map((participant) =>
-        runParticipant(opened.turn.id, participant, payload, controller.value.signal),
-      ),
-    )
+    const opened = beginTurn(chat.value, message)
+    chat.value = opened.chat
+    await runRound(opened.turn.id)
+    // Relay and group chat keep going on their own until the policy says stop.
+    let done = 1
+    while (!controller.value?.signal.aborted && autoContinue(chatStyle.value, roundPolicy.value, done, roundLimit.value)) {
+      const next = beginTurn(chat.value, '')
+      chat.value = next.chat
+      await runRound(next.turn.id)
+      done += 1
+    }
+  } finally {
+    sending.value = false
+    controller.value = null
+    await store.refreshTasks()
+  }
+}
+
+/** One round: relay answers in order, broadcast and group answer together. */
+async function runRound(turnId) {
+  if (chatStyle.value === 'relay') {
+    for (let index = 0; index < participants.value.length; index += 1) {
+      await runParticipant(turnId, participants.value[index], composeFor(turnId, index), controller.value.signal)
+      if (controller.value?.signal.aborted) return
+    }
+    return
+  }
+  await Promise.all(
+    participants.value.map((participant, index) =>
+      runParticipant(turnId, participant, composeFor(turnId, index), controller.value.signal),
+    ),
+  )
+}
+
+/**
+ * What one participant reads before answering. A broadcast keeps sending the
+ * message as typed; relay and group prepend the words the others produced,
+ * which is the only way a participant can hear them.
+ */
+function composeFor(turnId, index) {
+  if (chatStyle.value === 'broadcast') {
+    const turn = chat.value.turns.find((entry) => entry.id === turnId)
+    const base = turn?.text ?? ''
+    return carry.value ? `${carryContext(chat.value, CARRY_TURNS)}\n${base}` : base
+  }
+  return promptFor(chat.value, turnId, chatStyle.value, index)
+}
+
+/** The "ask me before each round" policy: the operator opens the next one. */
+async function nextRound() {
+  if (sending.value) return
+  const next = beginTurn(chat.value, '')
+  chat.value = next.chat
+  sending.value = true
+  runError.value = ''
+  controller.value = new AbortController()
+  try {
+    await runRound(next.turn.id)
   } finally {
     sending.value = false
     controller.value = null
@@ -445,11 +543,47 @@ function replyStatus(reply) {
           <p v-if="!candidates.length" class="muted note">{{ t('participantsEmpty') }}</p>
           <p v-else class="muted note">{{ t('participantsHint') }} {{ t('participantsLimit') }}</p>
         </div>
-        <label class="check">
+        <div class="field">
+          <span class="label">{{ t('styleLabel') }}</span>
+          <div class="tabs">
+            <button
+              v-for="style in CHAT_MODES"
+              :key="style"
+              class="tab"
+              :class="{ active: chatStyle === style }"
+              type="button"
+              :disabled="sending"
+              @click="pickStyle(style)"
+            >
+              {{ styleLabel(style) }}
+            </button>
+          </div>
+          <p class="muted note">{{ t(STYLE_HINTS[chatStyle]) }}</p>
+        </div>
+        <div v-if="chatStyle !== 'broadcast'" class="field">
+          <span class="label">{{ t('roundsLabel') }}</span>
+          <div class="tabs">
+            <button
+              v-for="policy in ROUND_POLICIES"
+              :key="policy"
+              class="tab"
+              :class="{ active: roundPolicy === policy }"
+              type="button"
+              :disabled="sending"
+              @click="roundPolicy = policy"
+            >
+              {{ policyLabel(policy) }}
+            </button>
+          </div>
+          <select v-if="roundPolicy === 'limit'" v-model.number="roundLimit" class="round-limit" :disabled="sending">
+            <option v-for="count in 5" :key="count" :value="count">{{ count }}</option>
+          </select>
+        </div>
+        <label v-if="chatStyle === 'broadcast'" class="check">
           <input v-model="carry" type="checkbox" />
           <span>{{ t('chatCarry') }}</span>
         </label>
-        <p class="muted note">{{ t('chatCarryHint') }}</p>
+        <p v-if="chatStyle === 'broadcast'" class="muted note">{{ t('chatCarryHint') }}</p>
         <div class="composer">
           <textarea
             v-model="chatText"
@@ -463,12 +597,23 @@ function replyStatus(reply) {
             {{ sending ? t('actionStop') : t('actionSend') }}
           </button>
         </div>
+        <!-- "Ask me before each round": the operator opens the next round, and
+             the note says why an exchange is not going any further. -->
+        <div v-if="chatStyle !== 'broadcast'" class="round-controls">
+          <button class="btn" type="button" :disabled="!canContinue" @click="nextRound">
+            {{ t('actionNextRound') }}
+          </button>
+          <span v-if="conversationNote" class="muted note">{{ conversationNote }}</span>
+        </div>
       </div>
 
       <div class="card transcript" aria-live="polite">
         <div v-if="chat.turns.length">
-          <article v-for="turn in chat.turns" :key="turn.id" class="turn">
-            <p class="turn-user mono">{{ turn.text }}</p>
+          <article v-for="(turn, turnIndex) in chat.turns" :key="turn.id" class="turn">
+            <p v-if="chatStyle !== 'broadcast'" class="muted note round-label">
+              {{ t('roundLabel') }} {{ turnIndex + 1 }}
+            </p>
+            <p v-if="turn.text" class="turn-user mono">{{ turn.text }}</p>
             <div class="bubbles">
               <div v-for="participant in chat.participants" :key="participant.id" class="bubble">
                 <div class="bubble-head">
@@ -627,6 +772,11 @@ function replyStatus(reply) {
 .resume textarea {
   margin-block: 10px;
 }
+/* A label that is not a form control: same reading weight as .field label. */
+.label {
+  font-size: 12px;
+  color: var(--text-3);
+}
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -667,6 +817,18 @@ function replyStatus(reply) {
   flex: 1;
   min-height: 62px;
 }
+.round-limit {
+  inline-size: 92px;
+  margin-block-start: 10px;
+}
+.round-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-block-start: 14px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--stroke-1);
+}
 .chat {
   display: flex;
   flex-direction: column;
@@ -685,6 +847,12 @@ function replyStatus(reply) {
 .turn:last-child {
   border-block-end: none;
   padding-block-end: 0;
+}
+/* Only a multi round conversation numbers its rounds. */
+.round-label {
+  margin-block-end: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 /* The user turn is a block of its own so a reply never reads as its
    continuation. */
