@@ -50,7 +50,12 @@ export DATABASE_URL
         web-install web-dev web-build web-test web-test-watch clean \
         desktop-install desktop-dev desktop-build desktop-test
 
-run: db-up
+# web-build is a dependency on purpose: the service serves the console from
+# backend/static, so starting it without rebuilding hands out whatever bundle
+# was last built - often weeks old, and silently missing whole features. The
+# cost is ~2s of bun install + vite build; use web-dev (5173, HMR) when the
+# bundle is what you are actually iterating on.
+run: db-up web-build
 	go run -ldflags="$(LDFLAGS)" ./cmd/$(BINARY)
 
 build: web-build
