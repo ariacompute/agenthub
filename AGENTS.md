@@ -10,8 +10,8 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 
 - 后端：**Go 1.27 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
   （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
-- 前端：Vue 3 + Vite（**bun** 包管理/测试），七屏控制台（registry / registries / sources / trace /
-  topology / login / admin），**13 种语言**，**纯黑/白/灰单色**视觉。
+- 前端：Vue 3 + Vite（**bun** 包管理/测试），八屏控制台（registry / registries / sources / trace /
+  topology / login / admin / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
 - 桌面端：`desktop/`，**Rust + Tauri v2** 外壳（Windows / macOS arm64 / Linux）。**不含后端、
   不含数据库**，用环回反向代理把同一份控制台对着用户指定的服务端打开；外壳自有文案同样 13 语。
   外壳只认**前缀**（`/api`、`/a2a`、`/healthz`、`/.well-known`），其余路径一律 SPA 回退到
@@ -135,11 +135,18 @@ persistence ← internal/store（GORM 实现）
 - `docker-compose.yml`：`postgres:16-alpine`（宿主 **5434**）+ `agenthub`（依赖 `service_healthy`）
   + `web`（`profiles: [dev]`）
 - `web/`：Vue 3 控制台（`src/lib/copy/*-copy.js` ×13 语、`languages.js`、`use-copy.js`、`api.js`、
-  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 七屏
-  （registry / **registries** / **sources** / trace / topology / **login** / **admin**，admin
+  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 八屏
+  （registry / **registries** / **sources** / trace / topology / **login** / **admin** / **docs**，admin
   第四屏 backups 拆为 `views/admin/{BackupsPanel,BackupScheduleCard,BackupList,RestoreDrawer}.vue`；
   registry 抽屉的 per-kind 配置区块抽为 `views/components/ResourceKindForm.vue` 与
   `components/EnvEditor.vue`）；`tests/` vitest）
+- `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js` + `web/src/views/DocsView.vue`：
+  **控制台自带文档屏**（侧边栏「管理」之后，无权限门控）。内容与文案分家——`docs-content.js` 是
+  语言中立的机器数据（`/a2a` 七方法 + 别名、66 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
+  原样渲染不翻译；`docs-copy.js` 只放散文，13 语齐备。二者的分界由 `tests/copy-fallback.spec.js`
+  强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
+  CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。
+  HTTP 原因短语（`Bad Request` 等）同属协议数据，原样呈现。
 - `backend/static/`：Vue 构建产物（Go 进程托管，gitignore）
 - `desktop/`：**桌面外壳（Tauri v2，Rust，独立 crate，不在任何 workspace 内）**。
   `src-tauri/src/proxy/`（`mod.rs` 环回监听与路由分发、`forward.rs` reqwest 流式转发 +

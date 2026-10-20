@@ -308,7 +308,7 @@ while the container itself stays stateless.
 The Vue 3 + Vite (bun) bundle is hosted at `/` by the Go process — both an operations
 screen and a visual inspector for the A2A contract.
 
-### Seven Screens
+### Eight Screens
 
 - **Registry**: six-kind (including `custom`) filtering + search, namespace and status
   filters, health indicators and a stats bar, and a per-resource "trial run". The register
@@ -327,6 +327,19 @@ screen and a visual inspector for the A2A contract.
   is closed without a session.
 - **Administration**: users, groups, roles, permissions and resource grants, plus
   database checkpoints (dump / download / restore / schedule) as a fourth tab.
+- **Documentation** (`/docs`): the console explains itself, offline and shipped with the
+  build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
+  sticky index that follows the reader. The endpoint table covers all 66 routes with
+  method, path, required permission and request/response samples taken from the handlers
+  themselves. It sits after Administration in the sidebar and is deliberately **not**
+  permission-gated: anyone who can sign in may read it, while Administration itself still
+  appears and disappears with its permissions.
+  Content and copy are split in two: `lib/docs-content.js` holds the machine-shaped half
+  (methods, paths, permission codes, field names, JSON samples, HTTP reason phrases) and
+  renders it verbatim in every locale, while `lib/copy/docs-copy.js` holds only prose in
+  13 languages. The boundary is enforced by `web/tests/copy-fallback.spec.js`, which
+  asserts that every non-English translation differs from English — a string that is
+  identical everywhere cannot live in the copy table.
 
 ### i18n & Monochrome System
 

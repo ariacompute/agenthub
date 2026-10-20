@@ -86,6 +86,16 @@
     `TaskTraceView`（列表 + span 时间线 + artifact 原文 + 恢复框）、
     `TopologyView`（五泳道 + 调用边 + 图例 + 详情）
 33. [x] `errors.js` + `copy/errors-copy.js`：机器可读 code → 本地化文案，缺失 key 显示 code 本身
+33.1 [x] **文档屏 `/docs`**（侧边栏「管理」之后，无权限门控）：
+     `lib/docs-content.js`（语言中立：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状、
+     **66 条 HTTP 路由**的方法/路径/权限/请求体/响应体、错误码按状态码分组、适配器码）+
+     `lib/copy/docs-copy.js`（仅散文，13 语 × 120 键）+ `views/DocsView.vue`
+     （sticky 章节索引 + 滚动高亮、概念/任务状态机/健康图例、端点表就地展开示例、
+     鉴权与错误码、页头 `version@commit`）；`use-copy.js` 登记 `docs` 命名空间、
+     `shell-copy.js` 补 13 语 `navDocs`、`router.js` 加无 `meta.permissions` 的 `/docs`、
+     `copy-fallback.spec.js` 的 `PROSE` 纳入 `docs`
+     —— 机器数据进 `docs-content.js` 而非 copy 表，因为该测试断言每个键的非英译文
+     异于英文；CRUD 行用「动词模板 + 名词」，HTTP 原因短语原样呈现
 
 ### 8. 多语言（13 语）
 

@@ -39,9 +39,10 @@
   registry/hub/broker/notifier 退化为**原有内存行为**（公开签名零变更），单测因此零外部依赖。
 - **控制面与运维**：`/api/*` 管理接口 + `/healthz`（版本、适配器、资源计数、当前模式、鉴权模式、
   **数据库可达性**）；admin token 鉴权，open 模式仅本地可用。
-- **Web 控制台七屏**：注册中心（六类 CRUD + per-kind 配置 + 审批状态 + **单资源「试跑」**）、
+- **Web 控制台八屏**：注册中心（六类 CRUD + per-kind 配置 + 审批状态 + **单资源「试跑」**）、
   命名空间与待审批队列、上游注册中心源、任务追踪（任务列表 + 事件/span 时间线 + artifact 原始内容）、
-  拓扑视图（五列资产 + 调用边）、登录/注册、管理后台（用户 / 权限矩阵 / 资源授权 / 数据库检查点）。
+  拓扑视图（五列资产 + 调用边）、登录/注册、管理后台（用户 / 权限矩阵 / 资源授权 / 数据库检查点）、
+  **文档**（`/docs`，控制台自带的功能与接口说明，13 语，无权限门控；详见 §9）。
 - **多语言 13 种**：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`（`ar` 为 RTL）。
 - **纯黑/白/灰单色视觉**：禁止任何有彩色相，靠明度分级 + 线型 + 图形 + 动效编码语义。
 
@@ -305,6 +306,9 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
   由 `copy/enums-copy.js` 映射。
 - 不翻译：品牌 `agenthub`、协议术语 `A2A`/`JSON-RPC`/`MCP`/`SSE`/`stdio`/`Agent Card`/`artifact`、
   资源 id、任务 id、时间戳、错误 code。
+- **散文与机器数据分家**（见 §9）：文档屏的 HTTP 方法、路径、权限码、字段名与 JSON 示例属于协议数据，
+  一律原样渲染；`tests/copy-fallback.spec.js` 断言每个 copy 键在各语言下**不等于英文**，因此这类串
+  **不得**进入 copy 表。
 
 ### 7.2 单色体系
 
@@ -368,3 +372,36 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
 8. README 的「AWS Agent Registry 特性对比」章与落地代码一致：三张清单逐项可追溯。
 9. 覆盖率：`make test-cover` 可复现；`registry` / `model` / `a2a` / `hub` / `authz` 均在 85% 以上，
    `store` 在 `DATABASE_URL` 未设置时 skip（此时数值不代表真实覆盖）。
+
+## 9. 控制台文档屏（`/docs`）
+
+控制台自带一份说明自身功能与接口的文档，随控制台发版、离线可读，不依赖外部文档站。
+
+### 9.1 入口与可见性
+
+- 侧边栏在「管理」**之后**新增「文档」项，**不加权限门控**：任何已登录账号都可读。
+  「管理」自身仍按 `users/roles/grants/backups:manage` 显隐，文档项不得随之消失。
+- 路由 `/docs` **不带** `meta.permissions`，守卫只校验会话存在。
+
+### 9.2 覆盖范围
+
+- 功能：六类资源通道、任务状态机（`submitted → working → input-required → completed/failed/canceled`）、
+  健康值**只由探测或运行写入**的语义、记录审批状态机。
+- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 66 条路由**，逐条给出方法、
+  路径、所需权限、请求体与响应体示例，按协议/鉴权/资源/命名空间/上游源/任务/导出/用户与授权/备份/运维分组。
+- 鉴权与错误码：会话 cookie、权限模型与 owner 语义；错误码按 HTTP 状态码分组 + 适配器码。
+
+### 9.3 内容与文案的边界
+
+- `web/src/lib/docs-content.js`：语言中立。字段与 JSON 示例取自后端真实编解码结构，
+  随 `internal/handlers/handlers.go` 的路由表同步——**路由搬动，此文件必须同步**。
+- `web/src/lib/copy/docs-copy.js`：只放散文，13 语齐全。
+- CRUD 行由「动词模板 + 名词」生成（`verbList` + `nounResources`），不为每一行各写一套译文。
+- HTTP 原因短语（`Bad Request` 等）属协议数据，原样呈现不翻译。
+- 页头显示 `version@commit`，与侧边栏底部署同源，标明文档对应哪个运行实例。
+
+### 9.4 验收
+
+- `docs` 已加入 `tests/copy-fallback.spec.js` 的 `PROSE` 表：13 语键位齐全且非英语译文异于英文。
+- 端点清单与 `internal/handlers/handlers.go` 注册一致（增删路由须同步 `docs-content.js`）。
+- 完成后必须 `make web-build`：`backend/static` 由 Go 在 3500 端口直接托管，不重建则新屏不可见。
