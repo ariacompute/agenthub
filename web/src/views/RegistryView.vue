@@ -83,7 +83,12 @@ const curationActions = {
 }
 
 onMounted(() => {
-  if (!store.resources.length) store.refreshResources()
+  // Always re-read: health is written by the hub on every run and probe, so a
+  // list cached from an earlier visit is stale the moment a task finishes. The
+  // old guard ("only when empty") left a card showing "unknown" after a Try run
+  // that had just proved it healthy, because coming back from the trace view
+  // never refetched.
+  store.refreshResources()
   store.refreshRegistries()
 })
 

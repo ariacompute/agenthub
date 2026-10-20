@@ -55,7 +55,9 @@ async function loadEdges() {
 }
 
 onMounted(async () => {
-  if (!store.resources.length) await store.refreshResources()
+  // Same reason as the registry view: a run or probe rewrites health, so the
+  // cached list is stale by the time this view is re-entered.
+  await store.refreshResources()
   await store.refreshTasks()
   await loadEdges()
 })
