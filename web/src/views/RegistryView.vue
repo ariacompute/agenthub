@@ -327,14 +327,6 @@ async function probe(resource) {
 
         <div class="card-actions">
           <button
-            class="btn"
-            type="button"
-            :disabled="running === resource.id"
-            @click="tryRun(resource)"
-          >
-            {{ t('actionTryRun') }}
-          </button>
-          <button
             class="btn btn-ghost"
             type="button"
             :disabled="probing === resource.id"
@@ -350,9 +342,21 @@ async function probe(resource) {
           </button>
         </div>
 
-        <div v-if="(curationActions[statusOf(resource)] || []).length" class="card-actions curate">
+        <!-- Try run leads the curation row, ahead of Deprecate/Approve/Reject.
+             The row is no longer conditional on there being a transition: every
+             status has one today, but hiding the row would hide the run button
+             with it, and a run is the only action that is always available. -->
+        <div class="card-actions curate">
           <button
-            v-for="next in curationActions[statusOf(resource)]"
+            class="btn"
+            type="button"
+            :disabled="running === resource.id"
+            @click="tryRun(resource)"
+          >
+            {{ t('actionTryRun') }}
+          </button>
+          <button
+            v-for="next in curationActions[statusOf(resource)] ?? []"
             :key="next"
             class="btn btn-ghost"
             type="button"
