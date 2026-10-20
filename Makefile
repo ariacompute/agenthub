@@ -48,6 +48,7 @@ export DATABASE_URL
         docker-build compose-build \
         db-up db-down db-psql \
         web-install web-dev web-build web-test web-test-watch clean \
+        docs-md \
         desktop-install desktop-dev desktop-build desktop-test
 
 # web-build is a dependency on purpose: the service serves the console from
@@ -157,6 +158,12 @@ web-test: web-install
 
 web-test-watch:
 	cd $(WEB) && bunx vitest
+
+# The /docs screen and docs/*.md are two renderings of the same two modules, so
+# the markdown is generated rather than maintained by hand: move an endpoint in
+# handlers.go, update docs-content.js, run this, and both views stay in step.
+docs-md:
+	bun scripts/gen-docs-md.mjs
 
 # Desktop shell (Tauri v2, Rust). It has no backend of its own: it opens the
 # console against a server the user points it at. `desktop-build` therefore

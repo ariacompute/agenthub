@@ -396,6 +396,8 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
 - `web/src/lib/docs-content.js`：语言中立。字段与 JSON 示例取自后端真实编解码结构，
   随 `internal/handlers/handlers.go` 的路由表同步——**路由搬动，此文件必须同步**。
 - `web/src/lib/copy/docs-copy.js`：只放散文，13 语齐全。
+- markdown 副本：`docs/docs.md`（英）与 `docs/docs_cn.md`（中）由 `make docs-md`
+  从上述两个模块渲染，**不得手工编辑**；改端点或改文案后重跑该目标即重新同步。
 - CRUD 行由「动词模板 + 名词」生成（`verbList` + `nounResources`），不为每一行各写一套译文。
 - HTTP 原因短语（`Bad Request` 等）属协议数据，原样呈现不翻译。
 - 页头显示 `version@commit`，与侧边栏底部署同源，标明文档对应哪个运行实例。

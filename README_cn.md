@@ -43,6 +43,11 @@ curl localhost:3500/.well-known/agent.json
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
+文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 66 条 HTTP 路由。同一份内容
+由 `make docs-md` 渲染到 [`docs/docs_cn.md`](docs/docs_cn.md)；该文件是**生成的**——来源是文档屏
+所读的两个模块（`web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`），要改就改这两处
+再重跑，不要直接编辑 markdown。
+
 registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=true` 才会得到下面示例所依赖的
 五条 `demo-*` 资源，也可以直接灌 [`example/`](example/README.md) 里那份真实目录。
 
@@ -453,3 +458,4 @@ MIT.
 - [`AGENTS.md`](AGENTS.md)：Agent 工程上下文入口与目录索引
 - [`requirements.md`](requirements.md)：需求规格（功能边界 / 异常 / 验收，人审后编码）
 - [`task.md`](task.md)：实施清单
+- [`docs/docs_cn.md`](docs/docs_cn.md)：控制台自带文档，由 `make docs-md` 生成

@@ -147,6 +147,10 @@ persistence ← internal/store（GORM 实现）
   强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
   CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。
   HTTP 原因短语（`Bad Request` 等）同属协议数据，原样呈现。
+- `docs/`：`docs.md` / `docs_cn.md` —— 控制台 `/docs` 屏的 markdown 副本，由
+  `make docs-md`（`scripts/gen-docs-md.mjs`）从 `docs-content.js` + `docs-copy.js` 渲染，
+  **不手工编辑**
+- `scripts/`：`gen-docs-md.mjs`（文档 markdown 生成）、`compose-ports.sh`、`test-api.sh`
 - `backend/static/`：Vue 构建产物（Go 进程托管，gitignore）
 - `desktop/`：**桌面外壳（Tauri v2，Rust，独立 crate，不在任何 workspace 内）**。
   `src-tauri/src/proxy/`（`mod.rs` 环回监听与路由分发、`forward.rs` reqwest 流式转发 +
