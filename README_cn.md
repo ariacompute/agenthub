@@ -183,12 +183,51 @@ AGENTHUB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<强随机串>
 AGENTHUB_COOKIE_SECURE=true                       # 走 HTTPS 时开启
 AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
+AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支撑静态加密与备份静态加密
+# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub?sslmode=require  # 可选：独立高权限迁移角色
+# AGENTHUB_PUSH_SECRET=<16+ 字节随机密钥>          # 可选：签名 + SSRF 护航的 A2A push 回调
+# AGENTHUB_DB_MAX_OPEN_CONNS=25 AGENTHUB_DB_MAX_IDLE_CONNS=10 AGENTHUB_DB_CONN_MAX_LIFETIME=30m  # 连接池调优
 ```
 
 `AGENTHUB_ENV=prod` 且未配置 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` 时 `config.Validate` **拒绝启动**：
 没有管理员的生产实例无法挽回。该账号每次启动幂等 upsert，且**不会覆盖**已有口令，
 因此在控制台改过的密码能跨重启保留。配置通过 compose 的 `.env` 或环境变量传入，
 `AGENTHUB_HTTP_PORT` 可改宿主端口。
+
+## 安全加固
+
+一次纵深防御改造，参考 ariacompute/serve 的五大域并按 agenthub 架构适配（无 nginx、会话为 DB 随机
+令牌、A2A push 回调与上游同步是服务端出站请求）。完整方案见 `requirements-security.md`，实施记录见
+`task-security.md`。要点：
+
+**传输 / 边缘**：agenthub 是单 Go 二进制，安全响应头改由中间件发出（`internal/middleware`）：
+`X-Content-Type-Options`、`Referrer-Policy`、`COOP`/`CORP`，以及灰度期的
+`Content-Security-Policy-Report-Only`。HSTS 仅在 `AGENTHUB_ENV=prod` 或请求已走 TLS（`r.TLS` 或
+`X-Forwarded-Proto: https`）时发出。**生产须在 agenthub 之前前置 TLS 终止反代**（Caddy/nginx），
+二进制本身不终止 TLS。
+
+**认证与限流**：暴力破解防护——**5 次**失败登录锁定 **15 分钟**，成功登录清零计数与锁定；不存在的账户
+一律返回相同错误，无法被枚举（`migrations/011_login_protection.sql`）。按 IP 限流：认证端点 **10 次/分钟/IP**，
+`/api` 与 `/a2a` 其余 **200 次/分钟/IP**（`429` + `Retry-After`）。CSRF：变更型请求要求 `Origin` 同源
+（环回与非浏览器客户端如桌面代理、脚本豁免），否则 `403`；控制台同源 fetch + cookie，不受影响。审计仅记
+IP 与 user_id，绝不记密码/令牌/PII。
+
+**A2A 回调与上游同步（SSRF）**：push 通知现真实 POST 到调用方提供的 `URL`（`HTTPNotifier` 替换旧记录型
+mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`internal/netutil`），并在配置 `AGENTHUB_PUSH_SECRET`
+时对载荷做 HMAC-SHA256 签名（时间戳 + nonce + body），供接收方验证真实性、新鲜度与重放；`(taskId, state)`
+1 小时幂等去重。上游 registry 同步客户端复用同一护航客户端。
+
+**密钥与数据**：`AGENTHUB_ENCRYPTION_KEY`（生产**≥ 32 字节**，否则拒绝启动）隔离静态加密与系统其余部分；
+缺失时回退到会话密钥并告警。API key 以 `token_hash` 哈希存储，OAuth 客户端密钥为环境变量引用、绝不入库——
+注入审计确认全部 SQL 已参数化。
+
+**数据库**：生产 `DATABASE_URL` 须 `sslmode=require|verify-ca|verify-full`（否则退出）；运行期建议用最小权限
+角色，迁移可经 `AGENTHUB_MIGRATOR_DATABASE_URL` 单独高权限角色。`scripts/provision-db-roles.sql` 生成
+`app` / `migrator` / `readonly` 三角色。连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` /
+`_CONN_MAX_LIFETIME` 调优。
+
+**备份**：配置 `AGENTHUB_ENCRYPTION_KEY` 时检查点归档以 AES-256-GCM 静态加密为 `<file>.tar.gz.enc` 并写
+`<file>.enc.sha256` 清单，明文绝不落盘。定期用 `scripts/backup-restore-drill.sh` 验证可恢复性。
 
 ## 桌面端
 
@@ -361,6 +400,9 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
   并等待在途任务结束 → 重写各表 → 重新载入内存状态。全程无需重启，任何失败都让数据库保持原状。
 - **开关**：`AGENTHUB_BACKUP_DIR` 就是开关。不配置时标签页显示「未启用」并说明原因，其余功能不受
   影响；`docker-compose.yml` 默认如此——`agenthub-backups` 卷已挂载，但留到你配置该变量时才启用。
+- **静态加密**：配置 `AGENTHUB_ENCRYPTION_KEY` 时归档以 `<file>.tar.gz.enc`（AES-256-GCM，明文绝不落盘）
+  写出并附带 `<file>.enc.sha256` 清单，完整性校验覆盖密文。用 `scripts/backup-restore-drill.sh` 定期演练
+  （解密进空库并报告关键表行数）。
 
 ## AWS Agent Registry 特性对比
 

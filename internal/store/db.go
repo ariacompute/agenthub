@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -56,15 +57,57 @@ func Open(dsn string, debug bool) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: sql handle: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	maxOpen, maxIdle, lifetime := dbPoolFromEnv()
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(lifetime)
 	if err := sqlDB.Ping(); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("store: ping postgres: %w", err)
 	}
 	slog.Info("store: connected", "dsn", RedactDSN(dsn))
 	return db, nil
+}
+
+// dbPoolFromEnv returns the connection-pool sizing. Each value can be overridden
+// by an environment variable so an operator can tune throughput without a rebuild;
+// sensible defaults apply when they are unset.
+func dbPoolFromEnv() (maxOpen, maxIdle int, lifetime time.Duration) {
+	maxOpen = atoiEnv("AGENTHUB_DB_MAX_OPEN_CONNS", 25)
+	maxIdle = atoiEnv("AGENTHUB_DB_MAX_IDLE_CONNS", 10)
+	lifetime = durationEnv("AGENTHUB_DB_CONN_MAX_LIFETIME", 30*time.Minute)
+	if maxOpen < 1 {
+		maxOpen = 25
+	}
+	if maxIdle < 1 || maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	if lifetime <= 0 {
+		lifetime = 30 * time.Minute
+	}
+	return maxOpen, maxIdle, lifetime
+}
+
+// atoiEnv reads an integer environment variable, returning def when unset or
+// unparsable.
+func atoiEnv(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// durationEnv reads a duration environment variable (e.g. "30m"), returning def
+// when unset or unparsable.
+func durationEnv(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
 }
 
 // Ping verifies the connection is still usable.

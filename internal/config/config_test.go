@@ -391,3 +391,27 @@ func TestLoadDotEnvDoesNotOverride(t *testing.T) {
 		t.Fatalf("existing env was overwritten: %q", got)
 	}
 }
+
+func TestHasSecureSSLMode(t *testing.T) {
+	ok := []string{
+		"postgres://u:p@db:5432/agenthub?sslmode=require",
+		"postgres://u:p@db:5432/agenthub?sslmode=verify-full",
+		"host=db port=5432 dbname=agenthub user=u sslmode=verify-ca",
+	}
+	for _, dsn := range ok {
+		if !HasSecureSSLMode(dsn) {
+			t.Errorf("expected secure: %q", dsn)
+		}
+	}
+	bad := []string{
+		"postgres://u:p@db:5432/agenthub?sslmode=disable",
+		"postgres://u:p@db:5432/agenthub?sslmode=prefer",
+		"host=db port=5432 dbname=agenthub user=u",
+		"postgres://u:p@db:5432/agenthub",
+	}
+	for _, dsn := range bad {
+		if HasSecureSSLMode(dsn) {
+			t.Errorf("expected insecure: %q", dsn)
+		}
+	}
+}

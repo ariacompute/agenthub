@@ -36,6 +36,9 @@ type PushRecord struct {
 // PushNotifier delivers the terminal callback registered for a task.
 type PushNotifier interface {
 	Notify(ctx context.Context, cfg a2a.PushNotificationConfig, taskID string, state a2a.TaskState) error
+	// Reset clears any delivery/audit state held in memory. It is used after a
+	// database restore so a recovered task history starts clean.
+	Reset()
 }
 
 // MockNotifier records callbacks: it never performs network I/O, so push

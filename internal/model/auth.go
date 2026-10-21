@@ -15,6 +15,10 @@ type User struct {
 	CreatedAt    time.Time `gorm:"index"`
 	UpdatedAt    time.Time
 	DisabledAt   *time.Time
+	// failed_login_attempts and locked_until back the brute-force lockout; they
+	// are added by migration 011 and read here so GORM can surface them.
+	FailedLoginAttempts int        `gorm:"not null;default:0"`
+	LockedUntil         *time.Time `gorm:"index"`
 }
 
 // TableName returns the users table name.

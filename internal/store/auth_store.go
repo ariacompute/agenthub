@@ -152,6 +152,42 @@ func (s *userStore) Delete(ctx context.Context, id string) error {
 		Updates(map[string]any{"status": auth.StatusDisabled, "disabled_at": now, "updated_at": now}).Error
 }
 
+// RecordLoginFailure increments the consecutive-failure counter for the account
+// and locks it for auth.AccountLockMinutes once the threshold is reached. The
+// counter and the lock are keyed by the (case-insensitive) email so a login
+// attempt with a differently cased address still counts against the same account.
+func (s *userStore) RecordLoginFailure(ctx context.Context, email string) error {
+	return s.db.WithContext(ctx).Exec(`
+UPDATE users
+SET failed_login_attempts = failed_login_attempts + 1,
+    locked_until = CASE
+        WHEN failed_login_attempts + 1 >= $1 THEN now() + ($2 * interval '1 minute')
+        ELSE locked_until
+    END,
+    updated_at = now()
+WHERE lower(email) = lower($3)`,
+		auth.MaxLoginAttempts, auth.AccountLockMinutes, email).Error
+}
+
+// ResetLoginAttempts clears the failure counter and any active lock on success.
+func (s *userStore) ResetLoginAttempts(ctx context.Context, email string) error {
+	return s.db.WithContext(ctx).Exec(`
+UPDATE users SET failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+WHERE lower(email) = lower($1)`, email).Error
+}
+
+// LockedUntil returns the account's lock expiry, or nil when it is not locked.
+func (s *userStore) LockedUntil(ctx context.Context, email string) (*time.Time, error) {
+	var until *time.Time
+	err := s.db.WithContext(ctx).Model(&model.User{}).
+		Where("lower(email) = lower(?)", email).
+		Select("locked_until").Scan(&until).Error
+	if err != nil {
+		return nil, err
+	}
+	return until, nil
+}
+
 // SetStatus is the enable/disable switch of the admin API.
 func (s *userStore) SetStatus(ctx context.Context, id, status string) error {
 	fields := map[string]any{"status": status, "updated_at": time.Now().UTC()}

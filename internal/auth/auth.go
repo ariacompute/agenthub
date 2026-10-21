@@ -46,6 +46,18 @@ var (
 	ErrSessionExpired = errors.New("session_expired")
 	// ErrPasswordRequired rejects making the last credential disappear.
 	ErrPasswordRequired = errors.New("password_required")
+	// ErrAccountLocked is returned when too many consecutive failures have
+	// temporarily disabled the account.
+	ErrAccountLocked = errors.New("account_locked")
+)
+
+// Login brute-force defence thresholds.
+const (
+	// MaxLoginAttempts is the number of consecutive failures before the account
+	// is locked.
+	MaxLoginAttempts = 5
+	// AccountLockMinutes is how long an account stays locked after the threshold.
+	AccountLockMinutes = 15
 )
 
 // User is one identity. PasswordHash is never rendered by the API: handlers
@@ -95,6 +107,12 @@ type UserStore interface {
 	List(ctx context.Context, query string) ([]User, error)
 	Count(ctx context.Context) (int64, error)
 	Delete(ctx context.Context, id string) error
+	// LoginProtection records and reports brute-force defence state.
+	RecordLoginFailure(ctx context.Context, email string) error
+	ResetLoginAttempts(ctx context.Context, email string) error
+	// LockedUntil returns the time the account is locked until, or nil when it is
+	// not currently locked.
+	LockedUntil(ctx context.Context, email string) (*time.Time, error)
 }
 
 // SessionStore persists sessions, keyed by the hash of the cookie value.
@@ -188,7 +206,10 @@ func (s *Service) Register(ctx context.Context, email, password, name string) (*
 	return u, nil
 }
 
-// Login verifies email + password and opens a session.
+// Login verifies email + password and opens a session. It enforces the
+// brute-force lockout: a temporarily locked account is rejected before any
+// password comparison, and every wrong password increments the failure counter
+// (which may lock the account). A successful login clears the counter.
 func (s *Service) Login(ctx context.Context, email, password, userAgent, ip string) (*User, string, *Session, error) {
 	email = NormalizeEmail(email)
 	if s.users == nil || s.sessions == nil {
@@ -196,22 +217,50 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 	}
 	u, err := s.users.GetByEmail(ctx, email)
 	if err != nil || u == nil {
+		// Do not reveal whether the address exists; behave exactly like a bad
+		// password so an attacker cannot enumerate accounts.
 		return nil, "", nil, ErrInvalidCredentials
+	}
+	if lt, lerr := s.users.LockedUntil(ctx, email); lerr == nil && lt != nil && lt.After(time.Now().UTC()) {
+		slog.Debug("auth: login blocked by lockout", "ip", ip)
+		return nil, "", nil, ErrAccountLocked
 	}
 	if u.PasswordHash == "" {
 		return nil, "", nil, ErrNoPassword
 	}
 	if !VerifyPassword(u.PasswordHash, password) {
+		s.recordLoginFailure(ctx, email, ip)
 		return nil, "", nil, ErrInvalidCredentials
 	}
 	if u.Status != StatusActive {
 		return nil, "", nil, ErrUserDisabled
 	}
+	// A successful login clears any accumulated failures and lockout.
+	if err := s.users.ResetLoginAttempts(ctx, email); err != nil {
+		slog.Debug("auth: reset login attempts", "error", err)
+	}
+	slog.Info("auth: login", "user_id", u.ID, "ip", ip)
 	sess, token, err := s.openSession(ctx, u.ID, userAgent, ip)
 	if err != nil {
 		return nil, "", nil, err
 	}
 	return u, token, sess, nil
+}
+
+// recordLoginFailure increments the failure counter, locking the account when
+// the threshold is reached, and writes an audit log that contains only the
+// client IP — never the email, password or any PII.
+func (s *Service) recordLoginFailure(ctx context.Context, email, ip string) {
+	if err := s.users.RecordLoginFailure(ctx, email); err != nil {
+		slog.Debug("auth: record login failure", "error", err)
+		return
+	}
+	lt, err := s.users.LockedUntil(ctx, email)
+	if err == nil && lt != nil && lt.After(time.Now().UTC()) {
+		slog.Info("auth: account locked", "ip", ip)
+	} else {
+		slog.Debug("auth: login failed", "ip", ip)
+	}
 }
 
 // BootstrapAdmin upserts the administrator described in the environment. It is

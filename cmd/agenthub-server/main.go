@@ -21,6 +21,7 @@ import (
 	"agenthub/internal/handlers"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
+	"agenthub/internal/secure"
 	"agenthub/internal/store"
 
 	"gorm.io/gorm"
@@ -35,6 +36,9 @@ func main() {
 		os.Exit(1)
 	}
 	setupLogger(cfg)
+	// Initialise the static-at-rest encryption module. When no dedicated key is
+	// configured the module logs a warning and falls back to a dev-only key.
+	secure.Configure(cfg.EncryptionKey, cfg.EncryptionKey)
 
 	db, err := store.Open(cfg.DatabaseURL, cfg.Env == "dev")
 	if err != nil {
@@ -46,9 +50,27 @@ func main() {
 			slog.Error("database close", "error", err)
 		}
 	}()
-	if err := store.Migrate(db); err != nil {
-		slog.Error("migrate", "error", err)
-		os.Exit(1)
+	// Migrations run as a separate, higher-privilege role when one is configured,
+	// keeping the runtime app role to least privilege (see
+	// scripts/provision-db-roles.sql). Otherwise they run on the app connection.
+	if cfg.MigratorDatabaseURL != "" {
+		mdb, err := store.Open(cfg.MigratorDatabaseURL, cfg.Env == "dev")
+		if err != nil {
+			slog.Error("migrator database", "error", err)
+			os.Exit(1)
+		}
+		if err := store.Migrate(mdb); err != nil {
+			slog.Error("migrate", "error", err)
+			os.Exit(1)
+		}
+		if err := store.Close(mdb); err != nil {
+			slog.Error("migrator database close", "error", err)
+		}
+	} else {
+		if err := store.Migrate(db); err != nil {
+			slog.Error("migrate", "error", err)
+			os.Exit(1)
+		}
 	}
 	// Demo resources are opt-in (AGENTHUB_SEED_DEMO=true): a default instance
 	// starts empty, which is what the README scripts switch on explicitly.
@@ -121,11 +143,17 @@ func main() {
 		ModelRouterMode: cfg.ModelRouterMode,
 		AgentTimeout:    cfg.AgentTimeout,
 	}
-	pusher := &hub.MockNotifier{Repo: store.NewPushRepository(db)}
+	pushRepo := store.NewPushRepository(db)
+	pusher := hub.PushNotifier(&hub.MockNotifier{Repo: pushRepo})
+	if cfg.PushSecret != "" {
+		// A configured push secret enables the real, signed, SSRF-guarded
+		// callback delivery instead of the recording-only mock.
+		pusher = hub.NewHTTPNotifier(pushRepo, cfg.PushSecret)
+	}
 	h := hub.New(cfg, reg, opts, pusher, hub.Persistence{
 		Tasks:  store.NewTaskRepository(db),
 		Events: store.NewEventRepository(db),
-		Pushes: pusher.Repo,
+		Pushes: pushRepo,
 	})
 	defer h.Close()
 
@@ -163,7 +191,7 @@ func main() {
 	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
-		Handler:           handlers.Register(deps),
+		Handler:           handlers.Wrap(handlers.Register(deps), cfg),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 
@@ -214,7 +242,7 @@ func main() {
 // It never fails the boot: an unusable backup directory is logged and the
 // feature comes up disabled, because losing the console over a missing volume
 // would be a worse outcome than not taking backups for one boot.
-func newBackupService(cfg *config.Config, db *gorm.DB, h *hub.Hub, pusher *hub.MockNotifier) *backup.Service {
+func newBackupService(cfg *config.Config, db *gorm.DB, h *hub.Hub, pusher hub.PushNotifier) *backup.Service {
 	log := slog.Default()
 	if !cfg.BackupEnabled() {
 		log.Info("backup: disabled", "hint", "set AGENTHUB_BACKUP_DIR to enable database checkpoints")
@@ -245,7 +273,7 @@ func newBackupService(cfg *config.Config, db *gorm.DB, h *hub.Hub, pusher *hub.M
 		backup.ReloaderFunc(func(ctx context.Context) error { return h.ResetEventSeq() }),
 		backup.ReloaderFunc(func(ctx context.Context) error { pusher.Reset(); return nil }),
 	)
-	return backup.New(backup.Options{
+	opts := backup.Options{
 		Dir:     cfg.BackupDir,
 		Engine:  engine,
 		Store:   store.NewBackupStore(db),
@@ -256,7 +284,13 @@ func newBackupService(cfg *config.Config, db *gorm.DB, h *hub.Hub, pusher *hub.M
 		Applied: func(ctx context.Context) ([]string, error) { return store.Applied(db) },
 		Migrate: func() error { return store.Migrate(db) },
 		Log:     log,
-	})
+	}
+	// At-rest encryption for backups: a stolen backup volume is useless without
+	// the key. Left unset means plaintext archives (the previous behaviour).
+	if cfg.EncryptionKey != "" {
+		opts.Key = []byte(cfg.EncryptionKey)
+	}
+	return backup.New(opts)
 }
 
 // sweepSessions deletes sessions that expired a while ago. Revoked sessions are

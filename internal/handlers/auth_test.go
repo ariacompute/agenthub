@@ -117,6 +117,11 @@ func (s *memUsers) Delete(_ context.Context, id string) error {
 	}
 	return nil
 }
+func (s *memUsers) RecordLoginFailure(_ context.Context, _ string) error { return nil }
+func (s *memUsers) ResetLoginAttempts(_ context.Context, _ string) error { return nil }
+func (s *memUsers) LockedUntil(_ context.Context, _ string) (*time.Time, error) {
+	return nil, nil
+}
 
 type memSessions struct {
 	mu      sync.Mutex

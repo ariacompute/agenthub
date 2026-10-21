@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -90,6 +91,10 @@ type Config struct {
 	// redirect URI. Empty falls back to the request host at redirect time.
 	PublicBaseURL string
 	DatabaseURL   string
+	// MigratorDatabaseURL, when set, is a higher-privilege DSN used only to run
+	// schema migrations. The runtime DatabaseURL should be the least-privilege
+	// app role; the migrator role owns DDL. See scripts/provision-db-roles.sql.
+	MigratorDatabaseURL string
 	// SeedDemo inserts the five demo resources at startup. It is off by
 	// default: an instance should start with whatever the operator registers,
 	// not with sample rows nobody asked for. Turn it on for a local walkthrough
@@ -104,6 +109,17 @@ type Config struct {
 	EventBuffer     int
 	PushEnabled     bool
 	PushRecordLimit int
+	// EncryptionKey, when set, isolates static-at-rest encryption (any future
+	// PII or provider secret columns) from the rest of the system. It is read
+	// from the environment only and never persisted. Production requires it to be
+	// at least 32 bytes; when empty a dev-only key is derived with a warning.
+	EncryptionKey string
+	// PushSecret, when set, enables signed A2A push callbacks: the outgoing
+	// payload is HMAC-SHA256 signed and carries a timestamp + nonce so the
+	// receiver can verify authenticity, freshness and replay. It is never
+	// persisted and should be a strong, randomly generated value shared only
+	// with the callback peer.
+	PushSecret string
 	// Database checkpoints. BackupDir empty means the feature is off: no
 	// directory, no files, and the console says so. The rest are only the
 	// initial policy — the console edits the schedule afterwards and it is
@@ -171,20 +187,23 @@ func Load() (*Config, error) {
 		SessionTTL:             envDur("AGENTHUB_SESSION_TTL", 12*time.Hour),
 		// Secure cookies by default in production; a plain http dev box can
 		// turn them off.
-		CookieSecure:   envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
-		PublicBaseURL:  envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
-		DatabaseURL:    envStr("DATABASE_URL", ""),
-		SeedDemo:       envBool("AGENTHUB_SEED_DEMO", false),
-		LegacyMethods:  envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
-		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
-		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
-		CLIAllowlist:   envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
-		AgentTimeout:   envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
-		MaxOutputBytes: envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
-		EventBuffer:    envInt("AGENTHUB_EVENT_BUFFER", 512),
-		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
+		CookieSecure:        envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
+		PublicBaseURL:       envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
+		DatabaseURL:         envStr("DATABASE_URL", ""),
+		MigratorDatabaseURL: envStr("AGENTHUB_MIGRATOR_DATABASE_URL", ""),
+		SeedDemo:            envBool("AGENTHUB_SEED_DEMO", false),
+		LegacyMethods:       envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
+		MaxParallel:         envInt("AGENTHUB_MAX_PARALLEL", 8),
+		CLITimeout:          envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
+		CLIAllowlist:        envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
+		AgentTimeout:        envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
+		MaxOutputBytes:      envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
+		EventBuffer:         envInt("AGENTHUB_EVENT_BUFFER", 512),
+		PushEnabled:         envBool("AGENTHUB_PUSH_ENABLED", true),
 		// Retention cap for the push callback audit trail, per task.
 		PushRecordLimit: envInt("AGENTHUB_PUSH_RECORD_LIMIT", 100),
+		PushSecret:      os.Getenv("AGENTHUB_PUSH_SECRET"),
+		EncryptionKey:   os.Getenv("AGENTHUB_ENCRYPTION_KEY"),
 		// Checkpoints are off until a directory is configured: a container with
 		// no volume must not quietly fill its own writable layer.
 		BackupDir:       envStr("AGENTHUB_BACKUP_DIR", ""),
@@ -264,6 +283,12 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL must be set")
 	}
+	// In production the database connection must not be cleartext: a missing or
+	// disabled sslmode would let credentials and data traverse the wire in the
+	// clear. dev/staging are exempt so a laptop can use a local no-TLS postgres.
+	if c.Env == "prod" && !HasSecureSSLMode(c.DatabaseURL) {
+		return fmt.Errorf("DATABASE_URL must set sslmode=require|verify-ca|verify-full in production")
+	}
 	if c.PushRecordLimit < 1 {
 		return fmt.Errorf("AGENTHUB_PUSH_RECORD_LIMIT must be positive, got %d", c.PushRecordLimit)
 	}
@@ -281,6 +306,16 @@ func (c *Config) Validate() error {
 	// Demo resources in production would be indistinguishable from real ones.
 	if c.Env == "prod" && c.SeedDemo {
 		return fmt.Errorf("AGENTHUB_SEED_DEMO must stay off when AGENTHUB_ENV=prod")
+	}
+	// Static-at-rest encryption key: required and strong in production. The key
+	// protects any encrypted column and a weak or missing value would undermine
+	// the encryption domain entirely.
+	if c.Env == "prod" && len(c.EncryptionKey) < 32 {
+		return fmt.Errorf("AGENTHUB_ENCRYPTION_KEY must be at least 32 bytes in production")
+	}
+	// A push secret, when configured, must be strong enough to be a real HMAC key.
+	if c.PushSecret != "" && len(c.PushSecret) < 16 {
+		return fmt.Errorf("AGENTHUB_PUSH_SECRET must be at least 16 bytes")
 	}
 	// Backup settings are only checked when checkpointing is switched on: an
 	// instance without a directory stays valid exactly as it was, and one with
@@ -312,6 +347,27 @@ func (c *Config) Validate() error {
 // AuthMode is the identity mode reported by /healthz. agenthub always
 // authenticates against the users table now: the shared admin token is gone.
 func (c *Config) AuthMode() string { return "session" }
+
+// HasSecureSSLMode reports whether dsn requests TLS to the database. It accepts
+// both the URI form (postgres://...?sslmode=require) and the keyword form
+// (host=... sslmode=verify-full) that libpq accepts.
+func HasSecureSSLMode(dsn string) bool {
+	if parsed, err := url.Parse(dsn); err == nil && parsed.Scheme != "" {
+		switch strings.ToLower(parsed.Query().Get("sslmode")) {
+		case "require", "verify-ca", "verify-full":
+			return true
+		}
+		return false
+	}
+	// Keyword form: scan for an sslmode= token.
+	for _, kv := range strings.Fields(dsn) {
+		if strings.HasPrefix(kv, "sslmode=") {
+			mode := strings.ToLower(strings.TrimPrefix(kv, "sslmode="))
+			return mode == "require" || mode == "verify-ca" || mode == "verify-full"
+		}
+	}
+	return false
+}
 
 func envStr(key, def string) string {
 	if v := os.Getenv(key); v != "" {

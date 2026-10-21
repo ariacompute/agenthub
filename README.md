@@ -199,6 +199,10 @@ AGENTHUB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<strong-random-string>
 AGENTHUB_COOKIE_SECURE=true                               # behind HTTPS
 AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
+AGENTHUB_ENCRYPTION_KEY=<32+ byte random secret>          # required in prod; backs static encryption + backup at-rest
+# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub?sslmode=require  # optional: separate high-privilege migration role
+# AGENTHUB_PUSH_SECRET=<16+ byte random secret>           # optional: signed, SSRF-guarded A2A push callbacks
+# AGENTHUB_DB_MAX_OPEN_CONNS=25 AGENTHUB_DB_MAX_IDLE_CONNS=10 AGENTHUB_DB_CONN_MAX_LIFETIME=30m  # pool tuning
 ```
 
 With `AGENTHUB_ENV=prod` and no `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL`, `config.Validate` **refuses to
@@ -206,6 +210,54 @@ start**: a production instance without an administrator is unrecoverable. The ac
 every boot and never has its password overwritten, so a password changed in the console survives a
 restart. Configuration is passed through the compose `.env` file or environment variables;
 `AGENTHUB_HTTP_PORT` changes the published host port.
+
+## Security hardening
+
+A defence-in-depth pass, adapted from the ariacompute/serve hardening and shaped to agenthub's
+architecture (no nginx, DB-backed sessions, A2A push callbacks and upstream synchronisation as
+server-side outbound requests). Full rationale and acceptance criteria are in
+`requirements-security.md`; the implementation record is `task-security.md`. Highlights:
+
+**Transport / edge.** agenthub is a single Go binary, so the security response headers live in a
+middleware (`internal/middleware`): `X-Content-Type-Options`, `Referrer-Policy`, `COOP`/`CORP`, and a
+grace-period `Content-Security-Policy-Report-Only`. HSTS is emitted only when `AGENTHUB_ENV=prod` or
+the request is already TLS-terminated (`r.TLS` or `X-Forwarded-Proto: https`). **Put a TLS-terminating
+reverse proxy (Caddy/nginx) in front of agenthub in production** — the binary itself does not terminate
+TLS.
+
+**Authentication & rate limiting.**
+- Brute-force protection: **5** failed logins lock an account for **15 minutes**; a successful login
+  clears the counter and lock. Unknown accounts always return the same error, so they cannot be
+  enumerated. (`migrations/011_login_protection.sql`)
+- Per-IP rate limiting: auth endpoints are capped at **10 req/min/IP**, everything under `/api` and
+  `/a2a` at **200 req/min/IP** (`429` + `Retry-After`).
+- CSRF: state-changing requests must carry a same-origin `Origin` (loopback and non-browser clients
+  such as the Tauri desktop proxy and scripts are exempt), else `403`. The console uses same-origin
+  fetch with the session cookie, so it is unaffected.
+- Audit logs record only IP and user id — never passwords, tokens or PII.
+
+**A2A callbacks & upstream sync (SSRF).** Push notifications now actually POST to the caller-supplied
+`URL` (`HTTPNotifier` replaces the old record-only mock). The destination is https-only and never
+resolves to a private/loopback/link-local address (`internal/netutil`), and when `AGENTHUB_PUSH_SECRET`
+is set the payload is HMAC-SHA256 signed (timestamp + nonce + body) so the receiver can verify
+authenticity, freshness and replay; `(taskId, state)` is de-duplicated for one hour. The upstream
+registry sync client uses the same guarded client.
+
+**Secrets & data.** `AGENTHUB_ENCRYPTION_KEY` (**≥ 32 bytes in production**, else the server refuses
+to start) isolates any future static encryption from the rest of the system; a missing key falls back
+to the session key with a startup warning. API keys are stored hashed (`token_hash`) and OAuth client
+secrets are environment-variable references, never database rows — an injection audit confirmed every
+SQL statement is parameterised.
+
+**Database.** Production `DATABASE_URL` must use `sslmode=require|verify-ca|verify-full` (the server
+exits otherwise). Run-time connections should use a least-privilege role; migrations can run as a
+separate role via `AGENTHUB_MIGRATOR_DATABASE_URL`. Provision the roles with
+`scripts/provision-db-roles.sql` (`app` / `migrator` / `readonly`). The connection pool is now
+tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME`).
+
+**Backups.** When `AGENTHUB_ENCRYPTION_KEY` is set, checkpoint archives are encrypted at rest
+(AES-256-GCM) into `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest — plaintext never touches
+disk. Verify recoverability periodically with `scripts/backup-restore-drill.sh`.
 
 ## Desktop
 
@@ -424,6 +476,10 @@ schema into one `tar.gz` on disk and can rewind the database to any of them.
 - **Configuration**: `AGENTHUB_BACKUP_DIR` is the switch. Without it the tab reports the feature as
   disabled and nothing else changes — the default in `docker-compose.yml`, where the
   `agenthub-backups` volume is mounted but left unused until you set the variable.
+- **Encryption at rest**: when `AGENTHUB_ENCRYPTION_KEY` is set, the archive is written as
+  `<file>.tar.gz.enc` (AES-256-GCM, plaintext never on disk) with a `<file>.enc.sha256` manifest. The
+  integrity check then covers the ciphertext. Validate recoverability with
+  `scripts/backup-restore-drill.sh` (decrypts into a throwaway database and reports key-table row counts).
 
 ## AWS Agent Registry comparison
 

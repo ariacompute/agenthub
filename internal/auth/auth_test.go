@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -143,6 +144,11 @@ func (s *memUserStore) Delete(_ context.Context, id string) error {
 		u.Status = StatusDisabled
 	}
 	return nil
+}
+func (s *memUserStore) RecordLoginFailure(_ context.Context, _ string) error { return nil }
+func (s *memUserStore) ResetLoginAttempts(_ context.Context, _ string) error { return nil }
+func (s *memUserStore) LockedUntil(_ context.Context, _ string) (*time.Time, error) {
+	return nil, nil
 }
 
 type memSessionStore struct {
@@ -466,5 +472,84 @@ func TestNewTokenIsOpaqueAndUnique(t *testing.T) {
 			t.Fatal("tokens must not repeat")
 		}
 		seen[tok] = true
+	}
+}
+
+// lockoutUsers is an in-memory UserStore that also enforces the brute-force
+// lockout so the Login control flow can be exercised without PostgreSQL.
+type lockoutUsers struct {
+	*memUserStore
+	mu       sync.Mutex
+	attempts map[string]int
+	locked   map[string]time.Time
+}
+
+func newLockoutUsers() *lockoutUsers {
+	return &lockoutUsers{
+		memUserStore: newMemUserStore(),
+		attempts:     map[string]int{},
+		locked:       map[string]time.Time{},
+	}
+}
+
+func (s *lockoutUsers) RecordLoginFailure(_ context.Context, email string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attempts[email]++
+	if s.attempts[email] >= MaxLoginAttempts {
+		s.locked[email] = time.Now().UTC().Add(AccountLockMinutes * time.Minute)
+	}
+	return nil
+}
+
+func (s *lockoutUsers) ResetLoginAttempts(_ context.Context, email string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.attempts, email)
+	delete(s.locked, email)
+	return nil
+}
+
+func (s *lockoutUsers) LockedUntil(_ context.Context, email string) (*time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if until, ok := s.locked[email]; ok {
+		c := until
+		return &c, nil
+	}
+	return nil, nil
+}
+
+func TestLoginLockout(t *testing.T) {
+	users := newLockoutUsers()
+	sessions := newMemSessionStore()
+	svc := New(users, sessions, &memOAuthStore{}, nil, nil, Options{TTL: time.Hour})
+	if _, err := svc.Register(context.Background(), "u@example.com", "correct horse", "U"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Five wrong passwords are still ordinary invalid_credentials.
+	for i := 0; i < MaxLoginAttempts; i++ {
+		if _, _, _, err := svc.Login(context.Background(), "u@example.com", "wrong", "", ""); err != ErrInvalidCredentials {
+			t.Fatalf("failure %d: %v, want invalid_credentials", i, err)
+		}
+	}
+	// The next attempt — wrong or right — is blocked by the lockout.
+	if _, _, _, err := svc.Login(context.Background(), "u@example.com", "wrong", "", ""); err != ErrAccountLocked {
+		t.Fatalf("6th attempt: %v, want account_locked", err)
+	}
+	if _, _, _, err := svc.Login(context.Background(), "u@example.com", "correct horse", "", ""); err != ErrAccountLocked {
+		t.Fatalf("correct while locked: %v, want account_locked", err)
+	}
+
+	// Clearing the lock (an operator unlocking, or the window passing) lets a
+	// correct password in and resets the counter.
+	users.locked = map[string]time.Time{}
+	if _, _, _, err := svc.Login(context.Background(), "u@example.com", "correct horse", "curl", "10.0.0.1"); err != nil {
+		t.Fatalf("after unlock: %v, want success", err)
+	}
+	// One more failure after the reset must not immediately re-lock.
+	if _, _, _, err := svc.Login(context.Background(), "u@example.com", "wrong", "", ""); err != ErrInvalidCredentials {
+		t.Fatalf("post-reset failure: %v, want invalid_credentials", err)
 	}
 }

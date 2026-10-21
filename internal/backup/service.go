@@ -70,7 +70,10 @@ type Options struct {
 	// Migrate brings the database up to the running build's schema, run after
 	// restoring an archive that predates some migrations.
 	Migrate func() error
-	Log     *slog.Logger
+	// Key, when set, encrypts archives at rest with AES-256-GCM (derived from the
+	// key) so a stolen backup volume is useless without it. Empty means plaintext.
+	Key []byte
+	Log *slog.Logger
 	// Now is a seam for tests and for the scheduler's arithmetic.
 	Now func() time.Time
 }
@@ -187,8 +190,35 @@ func (s *Service) checkpointLocked(ctx context.Context, kind, label, actor strin
 			_ = s.opts.Store.Finish(ctx, c)
 		}
 		// A half written archive is not a checkpoint: leave no file behind.
-		_ = os.Remove(path)
+		removeArchive(path)
 		return c, err
+	}
+
+	// When at-rest encryption is configured, the plaintext archive is encrypted
+	// into a sibling .enc file (never persisted as plaintext) and a SHA-256
+	// manifest of the ciphertext is written so a restore can verify integrity
+	// before trusting it.
+	if s.opts.Key != nil {
+		enc := path + ".enc"
+		if encErr := EncryptFile(path, enc, s.opts.Key); encErr != nil {
+			s.log.Error("backup: encrypt failed", "kind", kind, "error", encErr)
+			finished := s.now()
+			c.Status = StatusFailed
+			c.ErrorCode = "backup_encrypt_failed"
+			c.FinishedAt = &finished
+			c.DurationMS = finished.Sub(started).Milliseconds()
+			if s.opts.Store != nil {
+				_ = s.opts.Store.Finish(ctx, c)
+			}
+			removeArchive(path)
+			return c, fmt.Errorf("backup: encrypt: %w", encErr)
+		}
+		if hashErr := writeArchiveHash(enc); hashErr != nil {
+			s.log.Warn("backup: write archive hash", "error", hashErr)
+		}
+		// Plaintext never stays on disk once encrypted.
+		_ = os.Remove(path)
+		path = enc
 	}
 
 	// The file checksum goes in the row so a restore can prove the archive on
@@ -292,6 +322,10 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 			return fmt.Errorf("%w: archive %q is outside the backup directory", ErrNotFound, c.Path)
 		}
 		if err := os.Remove(c.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		// Drop the companion hash manifest for an encrypted archive too.
+		if err := os.Remove(c.Path + ".sha256"); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
@@ -422,7 +456,12 @@ func (s *Service) verify(ctx context.Context, c *Checkpoint) (Manifest, error) {
 		}
 	}
 	_ = ctx
-	m, err := ReadManifest(c.Path)
+	pp, cleanup, err := s.toPlaintext(c.Path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer cleanup()
+	m, err := ReadManifest(pp)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -463,7 +502,12 @@ func (s *Service) load(ctx context.Context, c *Checkpoint, m Manifest) error {
 		return err
 	}
 	defer func() { _ = payload.Close() }()
-	if _, err := Extract(c.Path, payload); err != nil {
+	pp, cleanup, err := s.toPlaintext(c.Path)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrRestoreFailed, err)
+	}
+	defer cleanup()
+	if _, err := Extract(pp, payload); err != nil {
 		return fmt.Errorf("%w: %v", ErrRestoreFailed, err)
 	}
 	if _, err := payload.Seek(0, io.SeekStart); err != nil {
@@ -694,6 +738,48 @@ func fileSize(path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+// removeArchive deletes the archive file and its companion SHA-256 manifest, if
+// any. Used both on failure and on pruning so a checkpoint never leaves a
+// half-present set of files.
+func removeArchive(path string) {
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".sha256")
+}
+
+// writeArchiveHash writes "<sha256>  <basename>\n" next to the archive, mirroring
+// the GNU sha256sum format, so a restore can verify the ciphertext before
+// decrypting it.
+func writeArchiveHash(path string) error {
+	sum, err := FileChecksum(path)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path+".sha256", []byte(sum+"  "+filepath.Base(path)+"\n"), 0o644)
+}
+
+// toPlaintext returns a path holding the decrypted archive when path is an
+// encrypted (.enc) file, otherwise path itself. The returned cleanup must be
+// called to delete any temporary decryption file.
+func (s *Service) toPlaintext(path string) (string, func(), error) {
+	if s.opts.Key == nil || !strings.HasSuffix(path, ".enc") {
+		return path, func() {}, nil
+	}
+	tmp, err := os.CreateTemp("", "agenthub-decrypt-*.tar.gz")
+	if err != nil {
+		return "", nil, err
+	}
+	if err := DecryptFile(path, tmp.Name(), s.opts.Key); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", nil, err
+	}
+	return tmp.Name(), func() { _ = os.Remove(tmp.Name()) }, nil
 }
 
 // codeOf maps an error to the machine readable code stored on a failed row, so

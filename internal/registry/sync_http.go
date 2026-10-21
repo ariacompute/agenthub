@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agenthub/internal/httputil"
+	"agenthub/internal/netutil"
 )
 
 // Upstream failure codes. They are deliberately generic: an upstream body is
@@ -41,19 +42,26 @@ type HTTPClient struct {
 	MaxBytes int64
 }
 
-// NewHTTPClient builds the client with the conservative defaults.
+// NewHTTPClient builds the client with the conservative defaults. The transport
+// is SSRF-guarded: it refuses redirects and resolves every address at dial time,
+// blocking loopback/link-local/multicast. Private addresses are allowed because a
+// registry source is operator-configured and explicitly trusted, but timeouts,
+// a capped body and no redirect-following still apply.
 func NewHTTPClient() *HTTPClient {
 	return &HTTPClient{
-		HTTP:     &http.Client{Timeout: DefaultSyncTimeout},
+		HTTP:     netutil.SafeClient(DefaultSyncTimeout, DefaultSyncMaxBytes, true),
 		MaxBytes: DefaultSyncMaxBytes,
 	}
 }
 
 // Fetch downloads one upstream catalogue and parses it into entries.
 func (c *HTTPClient) Fetch(ctx context.Context, src RegistrySource) ([]*Entry, error) {
+	if err := netutil.ValidateURL(strings.TrimSpace(src.URL), true); err != nil {
+		return nil, &httputil.Error{Code: CodeUpstreamMalformed}
+	}
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: DefaultSyncTimeout}
+		client = netutil.SafeClient(DefaultSyncTimeout, DefaultSyncMaxBytes, true)
 	}
 	maxBytes := c.MaxBytes
 	if maxBytes <= 0 {

@@ -40,6 +40,7 @@ const (
 	CodeUserDisabled       Code = "user_disabled"
 	CodePasswordRequired   Code = "password_required"
 	CodeSessionExpired     Code = "session_expired"
+	CodeAccountLocked      Code = "account_locked"
 	CodeOAuthNotConfigured Code = "oauth_not_configured"
 	CodeOAuthStateMismatch Code = "oauth_state_mismatch"
 	CodeOAuthFailed        Code = "oauth_failed"
@@ -120,6 +121,8 @@ func WriteErr(w http.ResponseWriter, err error) {
 	// the console treats 401 as "log in again", which is exactly what it wants.
 	case CodeUnauthorized, CodeUnauthenticated, CodeSessionExpired, CodeInvalidCredentials:
 		WriteError(w, http.StatusUnauthorized, e.Code)
+	case CodeAccountLocked:
+		WriteError(w, http.StatusTooManyRequests, e.Code)
 	case CodeForbidden, CodeUserDisabled, CodeBuiltinRole:
 		WriteError(w, http.StatusForbidden, e.Code)
 	case CodeNotFound:
