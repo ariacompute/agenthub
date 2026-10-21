@@ -196,6 +196,7 @@ async function copyToken() {
       </div>
     </div>
 
+    <Teleport to="body">
     <!-- ---------- create drawer ---------- -->
     <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
       <div class="drawer card">
@@ -263,7 +264,9 @@ async function copyToken() {
         </form>
       </div>
     </div>
+    </Teleport>
 
+    <Teleport to="body">
     <UnsavedPrompt
       v-if="askSave"
       :title="shell.t('unsavedTitle')"
@@ -272,7 +275,9 @@ async function copyToken() {
       @discard="closeDrawer"
       @cancel="askSave = false"
     />
+    </Teleport>
 
+    <Teleport to="body">
     <!-- ---------- revoke confirm ---------- -->
     <div v-if="confirmRevoke" class="drawer-backdrop" @click.self="confirmRevoke = null">
       <div class="drawer card">
@@ -290,6 +295,7 @@ async function copyToken() {
         </div>
       </div>
     </div>
+    </Teleport>
   </section>
 </template>
 
@@ -297,6 +303,19 @@ async function copyToken() {
 .mono {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
+}
+
+/* This panel is a child component, so AdminView's scoped .admin-head does not
+   reach it — without this the title and the "新建密钥" button render as stacked
+   blocks with no gap. Mirror the shared header layout: one row, title left and
+   action right, with breathing room below before the intro line. Pure layout,
+   so it holds for every language regardless of label length. */
+.admin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block-end: 12px;
 }
 
 /* The panel title row (title + "新建密钥") sits flush against the intro line
