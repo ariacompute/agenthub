@@ -426,10 +426,18 @@ watch(query, (value) => {
             <option value="write">{{ t('levelWrite') }}</option>
           </select>
         </div>
-        <button class="btn btn-primary" type="submit" :disabled="!grantForm.resourceId || !grantForm.principalId">
-          <Plus :size="15" />
-          <span>{{ t('actionGrant') }}</span>
-        </button>
+        <div class="field">
+          <label aria-hidden="true">&nbsp;</label>
+          <button
+            class="btn btn-primary"
+            type="submit"
+            :aria-label="t('actionGrant')"
+            :disabled="!grantForm.resourceId || !grantForm.principalId"
+          >
+            <Plus :size="15" />
+            <span>{{ t('actionGrant') }}</span>
+          </button>
+        </div>
       </form>
 
       <p v-if="!auth.grants.length" class="empty">{{ t('grantsEmpty') }}</p>
@@ -580,81 +588,10 @@ watch(query, (value) => {
   font-size: 12px;
 }
 
-.admin-table {
-  /* One grid for every row, so the header and the body share a single set of
-     tracks. Every row used to be its own grid, and the trailing `auto` column
-     then measured the action buttons in the body and nothing at all in the
-     header: different free space, different fr widths, and each heading sat a
-     little further right than its column — 40px off by the second column and
-     141px by the last. The offset is whatever the buttons measure, so no two
-     languages were wrong by the same amount. */
-  display: grid;
-  grid-template-columns: 1.6fr 1fr 0.7fr 1.2fr 1.2fr auto;
-  gap: 10px;
-  align-items: center;
-  font-size: 13px;
-}
-
-.admin-row {
-  /* Transparent: the cells become items of the table grid above. Colour, size
-     and case are inherited and still reach the cells; the row's own box does
-     not exist, so its padding and rule live on the cells instead. */
-  display: contents;
-}
-
-.admin-row > * {
-  min-width: 0;
-  padding-block: 10px;
-  border-block-end: 1px solid var(--stroke-1);
-}
-
-/* The row's 8px inset, kept by the outermost cells now that the row has no
-   box of its own. The column pin is what makes one grid behave like a table:
-   without it the cells simply fill the tracks in document order, and a row
-   with fewer cells than the grid has columns — the grants table has four —
-   is continued by the next row instead of starting one. */
-.admin-row > *:first-child {
-  grid-column: 1;
-  padding-inline-start: 8px;
-}
-
-.admin-row > *:last-child {
-  padding-inline-end: 8px;
-}
-
-.admin-row-head {
-  color: var(--text-3);
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.admin-cell-strong {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.admin-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.admin-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.admin-actions .btn {
-  min-width: 0;
-}
+/* Admin table styles (`.admin-table` and friends, plus the narrow-screen
+   media query) now live in style.css, because ApiKeysPanel and other child
+   panels render those elements and a parent's scoped styles would not reach
+   them. Kept here only as a pointer, not as rules. */
 
 /* ---------- permission matrix ---------- */
 .matrix {
@@ -728,32 +665,5 @@ watch(query, (value) => {
   margin-block: 14px;
 }
 
-@media (max-width: 1023px) {
-  /* Narrow screens stack the table into cards instead of scrolling sideways,
-     which means the rows need their boxes back: one column each, no shared
-     tracks to line up with. */
-  .admin-table {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-  }
-  .admin-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 6px;
-    padding: 12px 8px;
-    border-block-end: 1px solid var(--stroke-1);
-  }
-  .admin-row > * {
-    padding: 0;
-    border-block-end: none;
-  }
-  .admin-row-head {
-    display: none;
-  }
-  .admin-actions {
-    justify-content: flex-start;
-  }
-}
+/* Narrow-screen admin table rules moved to style.css alongside the rest. */
 </style>

@@ -11,7 +11,9 @@ import { useAuthStore, PERMISSIONS } from '../../lib/auth-store.js'
 import { useCopy, enumLabel } from '../../lib/use-copy.js'
 import { errorMessage } from '../../lib/errors.js'
 import { formatTime } from '../../lib/format.js'
+import { isDirty, snapshot, useEscape } from '../../lib/use-dismiss.js'
 import { KeyRound, Plus, Trash2, Copy, Check } from 'lucide-vue-next'
+import UnsavedPrompt from '../../components/UnsavedPrompt.vue'
 
 const auth = useAuthStore()
 const { t } = useCopy('apikeys')
@@ -27,6 +29,11 @@ const createdToken = ref('')
 const copied = ref(false)
 const confirmRevoke = ref(null)
 
+// Dismissing the create drawer goes through requestClose so a half-filled form
+// prompts first; these back that up (the snapshot is taken when it opens).
+const baseline = ref(null)
+const askSave = ref(false)
+
 const errorText = computed(() => errorMessage(auth.errorCode))
 const myKeys = computed(() => auth.apiKeys ?? [])
 
@@ -34,6 +41,12 @@ const myKeys = computed(() => auth.apiKeys ?? [])
 // hides anything the session cannot grant — an owner sees everything, a limited
 // account sees only what it would be able to delegate.
 const availableScopes = computed(() => PERMISSIONS.filter((code) => auth.can(code)))
+
+// Every selectable scope ticked → the toolbar offers "deselect all"; otherwise it
+// offers "select all". The label is the only translated bit, so this is language-neutral.
+const allSelected = computed(
+  () => availableScopes.value.length > 0 && availableScopes.value.every((code) => scopes.value.includes(code)),
+)
 
 const expiresOptions = [
   { value: 0, label: t('never') },
@@ -53,6 +66,7 @@ function openCreate() {
   createdToken.value = ''
   copied.value = false
   drawerOpen.value = true
+  baseline.value = snapshot({ name: name.value, scopes: scopes.value, expiresInDays: expiresInDays.value })
 }
 
 function toggleScope(code) {
@@ -60,6 +74,10 @@ function toggleScope(code) {
   if (set.has(code)) set.delete(code)
   else set.add(code)
   scopes.value = [...set]
+}
+
+function toggleAll() {
+  scopes.value = allSelected.value ? [] : [...availableScopes.value]
 }
 
 async function createKey() {
@@ -78,6 +96,34 @@ function closeDrawer() {
   drawerOpen.value = false
   createdToken.value = ''
 }
+
+// Escape, the backdrop and the cancel button all funnel through here, so the
+// gesture is identical wherever it starts. A form with edits but no key yet asks
+// first; once the token exists there is nothing to lose, so it closes outright.
+function requestClose() {
+  if (!createdToken.value && isDirty(baseline.value, { name: name.value, scopes: scopes.value, expiresInDays: expiresInDays.value })) {
+    askSave.value = true
+    return
+  }
+  closeDrawer()
+}
+
+// "Save" in the unsaved prompt mints the key but leaves the drawer open, so the
+// one-time token stays on screen — closing would discard it, unlike a plain form.
+async function saveAndClose() {
+  askSave.value = false
+  if (createdToken.value) return
+  await createKey()
+}
+
+// Esc closes only the topmost overlay, so it never also dismisses a lower one.
+useEscape(() => drawerOpen.value, requestClose)
+useEscape(
+  () => !!confirmRevoke.value,
+  () => {
+    confirmRevoke.value = null
+  },
+)
 
 async function revokeKey(key) {
   confirmRevoke.value = null
@@ -110,7 +156,7 @@ async function copyToken() {
     <p v-if="auth.errorCode" class="error-line">{{ errorText }}</p>
 
     <p v-if="!myKeys.length" class="empty">{{ t('empty') }}</p>
-    <div v-else class="admin-table" role="table">
+    <div v-else class="admin-table api-keys-table" role="table">
       <div class="admin-row admin-row-head" role="row">
         <span role="columnheader">{{ t('columnName') }}</span>
         <span role="columnheader">{{ t('columnPrefix') }}</span>
@@ -151,7 +197,7 @@ async function copyToken() {
     </div>
 
     <!-- ---------- create drawer ---------- -->
-    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="closeDrawer">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
       <div class="drawer card">
         <div class="page-head">
           <h2>{{ t('drawerTitle') }}</h2>
@@ -178,6 +224,12 @@ async function copyToken() {
           <div class="field">
             <label>{{ t('fieldScopes') }}</label>
             <p class="muted field-hint">{{ t('scopesHint') }}</p>
+            <div class="scope-toolbar">
+              <button class="btn btn-ghost" type="button" :disabled="!availableScopes.length" @click="toggleAll">
+                <component :is="allSelected ? Check : Plus" :size="14" />
+                <span>{{ allSelected ? t('deselectAll') : t('selectAll') }}</span>
+              </button>
+            </div>
             <div class="scope-matrix">
               <label v-for="code in availableScopes" :key="code" class="scope-row">
                 <input
@@ -203,7 +255,7 @@ async function copyToken() {
             <button class="btn btn-primary" type="submit" :disabled="creating || !name.trim()">
               {{ t('actionCreate') }}
             </button>
-            <button class="btn btn-ghost" type="button" @click="closeDrawer">
+            <button class="btn btn-ghost" type="button" @click="requestClose">
               {{ shell.t('actionCancel') }}
             </button>
             <span class="muted note">{{ shell.t('escHint') }}</span>
@@ -211,6 +263,15 @@ async function copyToken() {
         </form>
       </div>
     </div>
+
+    <UnsavedPrompt
+      v-if="askSave"
+      :title="shell.t('unsavedTitle')"
+      :body="shell.t('unsavedBody')"
+      @save="saveAndClose"
+      @discard="closeDrawer"
+      @cancel="askSave = false"
+    />
 
     <!-- ---------- revoke confirm ---------- -->
     <div v-if="confirmRevoke" class="drawer-backdrop" @click.self="confirmRevoke = null">
@@ -238,8 +299,22 @@ async function copyToken() {
   font-size: 12px;
 }
 
+/* The panel title row (title + "新建密钥") sits flush against the intro line
+   below it; give the subtitle breathing room from both. Pure CSS — no text
+   involved — so it holds for every language. (Scoped to this panel, so the
+   revoke drawer's own .page-sub is untouched.) */
+.panel > .page-sub {
+  margin-block: 16px;
+}
+
 .chip-muted {
   opacity: 0.6;
+}
+
+.scope-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-block: 2px 8px;
 }
 
 .scope-matrix {

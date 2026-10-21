@@ -639,12 +639,19 @@ textarea:focus {
   display: grid;
   place-items: center;
   padding: 24px;
+  /* Allow scrolling when a localized string makes the dialog taller than the
+     viewport; combined with the drawer's margin:auto it stays centered and the
+     top stays reachable in every language. */
+  overflow: auto;
 }
 
 .drawer {
   width: min(520px, 100%);
   max-height: 86vh;
   overflow: auto;
+  /* Bulletproof centering on both axes; collapses to a scrollable top anchor
+     if the content overflows, so long translations never push it off-screen. */
+  margin: auto;
   padding: 20px;
   /* The card wash alone is translucent, which is correct over the page but
      leaves a drawer reading as the backdrop behind it. Sit it on the real
@@ -697,6 +704,113 @@ textarea:focus {
   font-size: 12px;
   color: var(--text-1);
   background: var(--accent-softer);
+}
+
+/* ---------- admin tables (shared across AdminView, BackupsPanel, ApiKeysPanel) ---------- */
+/* Defined globally, not scoped to AdminView, because ApiKeysPanel and other child
+   panels render these elements and a parent component's scoped styles would not
+   reach them. A single grid for header and body keeps every column aligned. */
+.admin-table {
+  display: grid;
+  /* Default track set matches the grants table (resource / principal / level / …). */
+  grid-template-columns: 1.6fr 1fr 0.7fr 1.2fr 1.2fr auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.admin-row {
+  /* Transparent: the cells become items of the table grid above. Colour, size
+     and case are inherited and still reach the cells; the row's own box does
+     not exist, so its padding and rule live on the cells instead. */
+  display: contents;
+}
+
+.admin-row > * {
+  min-width: 0;
+  padding-block: 10px;
+  border-block-end: 1px solid var(--stroke-1);
+}
+
+/* The row's 8px inset, kept by the outermost cells now that the row has no
+   box of its own. The column pin is what makes one grid behave like a table:
+   without it the cells simply fill the tracks in document order. */
+.admin-row > *:first-child {
+  grid-column: 1;
+  padding-inline-start: 8px;
+}
+
+.admin-row > *:last-child {
+  padding-inline-end: 8px;
+}
+
+.admin-row-head {
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-cell-strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.admin-actions .btn {
+  min-width: 0;
+}
+
+/* The API-keys table carries eight columns (name / prefix / scopes / created /
+   last used / expires / status / actions), so it needs its own track set. */
+.api-keys-table {
+  grid-template-columns: 1.4fr 1fr 1.6fr 1fr 1fr 1fr 0.8fr auto;
+}
+
+@media (max-width: 1023px) {
+  /* Narrow screens stack the table into cards instead of scrolling sideways,
+     which means the rows need their boxes back: one column each, no shared
+     tracks to line up with. */
+  .admin-table {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .admin-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 12px 8px;
+    border-block-end: 1px solid var(--stroke-1);
+  }
+  .admin-row > * {
+    padding: 0;
+    border-block-end: none;
+  }
+  .admin-row-head {
+    display: none;
+  }
+  .admin-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* ---------- task trace ---------- */

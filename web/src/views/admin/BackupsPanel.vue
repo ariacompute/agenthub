@@ -232,6 +232,11 @@ onMounted(load)
 .backup-label {
   min-width: 180px;
 }
+/* The intro hint sits flush against the title row and the overview below it;
+   give it breathing room from both (language-independent — no text involved). */
+.backups > .page-sub {
+  margin-block: 16px;
+}
 .backup-disabled {
   padding: 18px;
   border: 1px dashed var(--stroke-2);
