@@ -213,6 +213,10 @@ Agent 调用。
 - **`events`**：每个 broker 帧，`(task_id, seq)` 主键，供 `since=<seq>` 回放。
 - **`push_records`**：每次回调留痕（url / state / config 快照），
   按 `AGENTHUB_PUSH_RECORD_LIMIT`（默认每任务 100 条）保留。
+- **`api_keys` / `api_key_scopes`**：长期持有的 bearer 凭据。库内只存令牌的
+  `sha256`（`token_hash`）与展示用 `prefix`（`ahk_xxxxxxxx`），**绝不存密钥本身**；
+  另含可选 `expires_at` 与软删除 `revoked_at`（吊销后仍保留行以留存审计线索，但
+  立即失去认证能力）；`api_key_scopes` 是 key → permission 的边。
 - **`schema_migrations`**：已执行的迁移文件，启动时跳过。
 - **jsonb 载荷**：由自实现 `model.JSONField`（`driver.Valuer` / `sql.Scanner`）承载，
   **不引入** `gorm.io/datatypes`。
@@ -258,7 +262,8 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 - **拓扑视图**：五泳道资产与调用边，线型区分活跃与失败。
 - **登录注册**：首个账号即 owner，`/api/*` 无会话一律关闭。
 - **管理**：用户、组、角色、权限与资源授权，外加第四个子页「数据库检查点」
-  （打点 / 下载 / 恢复 / 定时）。
+  （打点 / 下载 / 恢复 / 定时），以及新增的**API 密钥**子页——为非交互式访问
+  签发、限定范围、轮换与吊销长期持有的 bearer 凭据。
 - **文档**（`/docs`）：控制台自带文档，随构建发版、离线可读。五章——核心概念、A2A 方法、
   HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。端点表覆盖**全部 66 条路由**，
   逐条给出方法、路径、所需权限，以及取自各 handler 真实编解码结构的请求/响应示例。
@@ -315,8 +320,19 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （默认 **false**）、`AGENTHUB_REGISTRY_SYNC_INTERVAL`（默认 `1h`，开启同步时须为正）
   与 `AGENTHUB_REGISTRY_SYNC_FIXTURE`（默认 **true**，把所有源钉在离线客户端上——要真正
   出网，运维必须显式关掉它）。
+- **API 密钥认证**：面向非交互式访问（脚本、CI、其他语言）的长期 bearer 凭据
+  （形如 `ahk_…`）。密钥以其**持有者**身份完成认证，但仅拥有创建时选定的**权限子集**；
+  该子集与持有者自身权限取交集，因此密钥永不能超过其持有者、也**不能静默签发更多密钥**
+  （`apikeys:manage` 是独立权限，不被任何其他权限隐含）。原始令牌在
+  `POST /api/api-keys` 时**仅返回一次**；库内只存其 `sha256`（`token_hash`）与展示用
+  `prefix`（`ahk_xxxxxxxx`），绝不存密钥本体。密钥带可选 `expires_at` 与软删除
+  `revoked_at`，吊销后行保留、立即失效。在任意 `/api/*` 路由与 A2A 端点上，可经
+  `Authorization: Bearer ahk_…` 或 `X-AgentHub-Key` 头携带；不可用的密钥直接回退为
+  匿名，因此公开端点依旧可用。
 - **治理权限**：`registries:manage`（命名空间）、`registry:curate`
-  （批准 / 驳回 / 废弃）、`sources:manage`（上游源与同步）。owner 持有全部权限。
+  （批准 / 驳回 / 废弃）、`sources:manage`（上游源与同步）、`apikeys:manage`
+  （为任意用户列出 / 创建 / 轮换 / 吊销 API 密钥——密钥可行动但不可再签发密钥）。
+  owner 持有全部权限。
 - **日志**：`slog` JSON，不打正文、密钥与向量；DSN 经 `store.RedactDSN` 脱敏后再记录。
 
 ---
@@ -350,6 +366,10 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
+- **API 密钥覆盖**：`internal/handlers/api_apikeys_test.go` 以内存密钥仓库覆盖列表
+  （本人 vs 全部）、创建时范围钳制、管理守卫（403 / 404 / 400）、更新与吊销，以及
+  bearer 密钥认证；`tests/apikey_integration_test.go` 以 `DATABASE_URL` 门控 PostgreSQL
+  路径（迁移、令牌哈希查找、范围往返、吊销 + 审计行）。
 - **脚本化接口测试**：`scripts/test-api.sh` 新增治理段落——建命名空间、记录走
   `draft → pending → approved`（并验证 `draft → approved` 被拒、草稿不进可发现列表）、
   去重启用键、fixture 源同步两次（首轮导入、次轮刷新）。对着运行中实例：**167 通过、

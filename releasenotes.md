@@ -266,6 +266,11 @@ while the container itself stays stateless.
   `since=<seq>` replay.
 - **`push_records`**: one row per callback (url / state / config snapshot), capped by
   `AGENTHUB_PUSH_RECORD_LIMIT` (default 100 per task).
+- **`api_keys` / `api_key_scopes`**: long-lived bearer credentials. Only the `sha256`
+  of the token (`token_hash`) and a display `prefix` (`ahk_xxxxxxxx`) are stored — never
+  the secret — alongside an optional `expires_at` and a soft `revoked_at` (a revoked
+  key keeps its row for the audit trail but stops authenticating); `api_key_scopes` is
+  the key → permission edge.
 - **`schema_migrations`**: migration files already applied, skipped at startup.
 - **jsonb payloads**: carried by the in-house `model.JSONField` (`driver.Valuer` /
   `sql.Scanner`) — `gorm.io/datatypes` is **not** introduced.
@@ -326,7 +331,9 @@ screen and a visual inspector for the A2A contract.
 - **Login & registration**: the first account becomes the owner; every `/api/*` route
   is closed without a session.
 - **Administration**: users, groups, roles, permissions and resource grants, plus
-  database checkpoints (dump / download / restore / schedule) as a fourth tab.
+  database checkpoints (dump / download / restore / schedule) as a fourth tab, and
+  now an **API keys** tab for minting, scoping, rotating and revoking long-lived
+  bearer credentials for non-interactive access.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
   sticky index that follows the reader. The endpoint table covers all 66 routes with
@@ -395,9 +402,22 @@ screen and a visual inspector for the A2A contract.
   `AGENTHUB_REGISTRY_SYNC_FIXTURE` (default **true**, which pins every source to the
   offline client — a deployment must opt out explicitly before agenthub will open a
   connection to an upstream registry).
+- **API key authentication**: long-lived bearer credentials (`ahk_…`) for
+  non-interactive access — scripts, CI, other languages. A key authenticates as its
+  owner but only with the permission subset chosen at creation; scopes are intersected
+  with the owner's permissions, so a key can never exceed what its owner can do and can
+  never silently mint further keys (`apikeys:manage` is its own permission, not implied
+  by any other). The raw token is returned exactly once on `POST /api/api-keys`; only its
+  `sha256` (`token_hash`) and a display `prefix` (`ahk_xxxxxxxx`) are stored — never the
+  secret. Keys carry an optional `expires_at` and a soft `revoked_at`, so a revoked key
+  keeps its row for the audit trail but stops authenticating immediately. Send a key as
+  `Authorization: Bearer ahk_…` or the `X-AgentHub-Key` header on any `/api/*` route and
+  on the A2A endpoint; an unusable key simply falls back to anonymous, so public endpoints
+  stay open.
 - **Governance permissions**: `registries:manage` (namespaces),
   `registry:curate` (approve / reject / deprecate), `sources:manage` (upstream sources and
-  their synchronisation). The owner holds all of them.
+  their synchronisation), `apikeys:manage` (list / create / rotate / revoke API keys for
+  any user — a key can act but never issue more keys). The owner holds all of them.
 - **Logging**: `slog` JSON; no message bodies, keys or vectors; DSNs are redacted by
   `store.RedactDSN` before they are logged.
 
@@ -441,6 +461,11 @@ screen and a visual inspector for the A2A contract.
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
   trip.
+- **API key coverage**: `internal/handlers/api_apikeys_test.go` exercises listing (own vs
+  all), creation scope-clamping, manage guards (403 / 404 / 400), update + revoke and
+  bearer-key authentication against an in-memory key store; `tests/apikey_integration_test.go`
+  gates the PostgreSQL path (migration, token-hash lookup, scopes round trip, revoke +
+  audit row) on `DATABASE_URL`.
 - **Scripted API test**: `scripts/test-api.sh` grew a governance section —
   creating a namespace, watching a record go `draft → pending → approved` (and proving
   that `draft → approved` is refused and a draft stays out of the discoverable list), the
