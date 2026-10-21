@@ -275,12 +275,19 @@ AGENTHUB_SEED_DEMO=true make run                    # or locally
 ./scripts/test-api.sh                               # defaults to http://127.0.0.1:3500
 BASE_URL=https://hub.example.com ./scripts/test-api.sh
 AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
+AGENTHUB_API_KEY=ahk_xxx ./scripts/test-api.sh      # authenticate with a long-lived key
 MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # slow networks / cold boots
 ```
 
 The script logs in first (registering the first account when the instance is brand new) and asserts
 that `/api/*` stays closed without a session, then walks users, roles, the permission matrix and a
 resource grant — including the fact that a granted resource disappears from discovery.
+
+Alternatively, set `AGENTHUB_API_KEY=ahk_…` to authenticate every request with a long-lived bearer key
+instead of logging in: the script skips login and uses the key as its identity, and the API-keys section
+then verifies the imported key rather than minting and revoking one (so it never disables the credential
+the run depends on). The key must carry every permission the run exercises — for a full smoke test that
+means owner-equivalent scopes.
 
 It also covers the catalogue governance: creating a namespace, registering into it and watching the
 record go `draft → pending → approved` (a draft must stay out of the discoverable list, and
@@ -334,6 +341,33 @@ localised copy on the client.
   `-32004 unsupported_operation`, `-32005 invalid_state_transition`,
   `-32006 resource_not_found`, `-32007 resource_unreachable`, `-32008 task_not_resumable`
 
+## API keys
+
+A key is a long-lived bearer credential for non-interactive access — scripts, other
+languages, CI. It authenticates as its **owner** but only with the **permissions
+chosen at creation**, and the raw token is returned exactly once; only its `sha256`
+is ever stored (`token_hash`), never the secret.
+
+- **Mint**: `POST /api/api-keys` with `{ "name", "scopes": [...], "expiresInDays"? }`.
+  The response carries `token` (an `ahk_…` string) once — copy it then.
+- **Use**: send it as `Authorization: Bearer ahk_…` on any `/api/*` route, or as the
+  symmetric `X-AgentHub-Key` header, and on the A2A endpoint. A key's permissions are
+  the intersection of its scopes and what the owner can do, so it can never exceed the
+  owner.
+- **Manage**: `GET /api/api-keys` lists your own keys (or every key if you hold
+  `apikeys:manage`); `PUT /api/api-keys/{id}` rotates name / scopes / expiry;
+  `DELETE /api/api-keys/{id}` revokes — the token dies immediately but the row stays
+  for the audit trail.
+
+```bash
+# Create a key that can read resources and tasks, then call the control plane with it.
+TOKEN=$(curl -s -X POST localhost:3500/api/api-keys \
+  -H 'Content-Type: application/json' \
+  -H 'X-AgentHub-Session: <session>' \
+  -d '{"name":"ci","scopes":["resources:read","tasks:read"]}' | jq -r .token)
+curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
+```
+
 ## Persistence
 
 | Table | Content |
@@ -346,6 +380,7 @@ localised copy on the client.
 | `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
 | `schema_migrations` | Migration files already applied, skipped at startup |
 | `backup_checkpoints` / `backup_schedules` | The checkpoint catalogue and the schedule — **excluded** from every dump and restore, so an operator can still see the archive they restored from |
+| `api_keys` / `api_key_scopes` | Long-lived bearer credentials; only the `sha256` of the token (`token_hash`) and a display `prefix` are stored (never the secret), with an optional `expires_at` and a soft `revoked_at`; `api_key_scopes` is the key → permission edge |
 
 - Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
   transaction per file; the SQL itself is idempotent.

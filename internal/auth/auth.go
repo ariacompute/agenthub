@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -127,6 +128,7 @@ type Service struct {
 	users    UserStore
 	sessions SessionStore
 	oauth    OAuthStore
+	apiKeys  APIKeyStore
 	authz    *authz.Service
 	opts     Options
 	oauthCfg OAuthConfig
@@ -134,14 +136,14 @@ type Service struct {
 
 // New builds the service. Every store may be nil, which keeps the package inert
 // for tests that only exercise the pure rules.
-func New(users UserStore, sessions SessionStore, oauth OAuthStore, az *authz.Service, opts Options) *Service {
+func New(users UserStore, sessions SessionStore, oauth OAuthStore, keys APIKeyStore, az *authz.Service, opts Options) *Service {
 	if opts.CookieName == "" {
 		opts.CookieName = "agenthub_session"
 	}
 	if opts.TTL <= 0 {
 		opts.TTL = 12 * time.Hour
 	}
-	return &Service{users: users, sessions: sessions, oauth: oauth, authz: az, opts: opts, oauthCfg: opts.OAuth}
+	return &Service{users: users, sessions: sessions, oauth: oauth, apiKeys: keys, authz: az, opts: opts, oauthCfg: opts.OAuth}
 }
 
 // Options exposes the effective cookie configuration.
@@ -260,9 +262,26 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password, name stri
 	})
 }
 
-// Principal resolves the identity of a request: reads the cookie, loads the
-// session, and expands the user into permissions.
+// Principal resolves the identity of a request: it tries a bearer API key first
+// (Authorization: Bearer ahk_… or X-AgentHub-Key), then falls back to the
+// session cookie. A request that carries neither, or a key that is unusable, ends
+// up anonymous — which keeps public endpoints (Agent Card, MCP export) open when
+// only a stale key is present.
 func (s *Service) Principal(ctx context.Context, r *http.Request) (*authz.Principal, *Session, error) {
+	if s.apiKeys != nil {
+		if raw := apiKeyRaw(r); raw != "" {
+			p, keyID, err := s.AuthenticateAPIKey(ctx, raw)
+			if err == nil {
+				// Record usage out of the request path: a failed touch must not
+				// turn a good call into an error.
+				if err := s.apiKeys.Touch(ctx, keyID, time.Now().UTC()); err != nil {
+					slog.Debug("auth: touch api key", "error", err)
+				}
+				return p, nil, nil
+			}
+			slog.Debug("auth: api key not usable", "error", err)
+		}
+	}
 	if s.sessions == nil {
 		return nil, nil, nil
 	}

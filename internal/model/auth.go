@@ -121,6 +121,34 @@ type GroupRole struct {
 // TableName returns the group_roles table name.
 func (GroupRole) TableName() string { return "group_roles" }
 
+// APIKey is a long-lived bearer credential for programmatic access. Only the
+// sha256 of the raw value (TokenHash) and a short display Prefix are stored; the
+// secret itself is shown once at creation and never persisted.
+type APIKey struct {
+	ID         string    `gorm:"primaryKey;size:64"`
+	UserID     string    `gorm:"size:64;index;not null"`
+	Name       string    `gorm:"type:text;not null"`
+	TokenHash  string    `gorm:"size:128;uniqueIndex;not null"`
+	Prefix     string    `gorm:"size:32;not null;default:''"`
+	CreatedAt  time.Time `gorm:"index"`
+	LastUsedAt *time.Time
+	ExpiresAt  *time.Time
+	RevokedAt  *time.Time `gorm:"index"`
+	CreatedBy  string     `gorm:"type:text;not null"`
+}
+
+// TableName returns the api_keys table name.
+func (APIKey) TableName() string { return "api_keys" }
+
+// APIKeyScope is the key → permission edge: the capability subset the key holds.
+type APIKeyScope struct {
+	KeyID      string `gorm:"primaryKey;size:64"`
+	Permission string `gorm:"primaryKey;size:64"`
+}
+
+// TableName returns the api_key_scopes table name.
+func (APIKeyScope) TableName() string { return "api_key_scopes" }
+
 // ResourceGrant is the resource-level authorization: one user or group may read
 // or write one registry resource. Without a grant a resource is invisible to
 // that principal.

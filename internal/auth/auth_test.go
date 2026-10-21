@@ -234,7 +234,7 @@ func (s *memOAuthStore) ListForUser(_ context.Context, userID string) ([]OAuthAc
 
 func newTestService() (*Service, *memUserStore, *memSessionStore) {
 	users, sessions := newMemUserStore(), newMemSessionStore()
-	return New(users, sessions, &memOAuthStore{}, nil, Options{TTL: time.Hour}), users, sessions
+	return New(users, sessions, &memOAuthStore{}, nil, nil, Options{TTL: time.Hour}), users, sessions
 }
 
 // ---------------------------------------------------------------------------

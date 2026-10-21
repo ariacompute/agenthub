@@ -213,6 +213,16 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `GET` | `/api/backups/{id}/download` | `backups:manage` — 管理数据库检查点 | 下载一个检查点归档。 | — | `application/gzip` |
 | `POST` | `/api/backups/{id}/restore` | `backups:manage` — 管理数据库检查点 | 恢复一个检查点；confirm 需回显其 id。 | `{ confirm } — must echo the checkpoint id` | `{ checkpoint }` |
 
+### API 密钥
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/api-keys` | — | 列出 API 密钥。持有 apikeys:manage 者可查看全部，其他人只能查看自己的。 | — | `{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }` |
+| `POST` | `/api/api-keys` | — | 创建密钥。令牌仅返回一次且不会存储；权限范围不得超过你可授予的权限。 | `{ name, scopes[], userId?, expiresInDays? }` | `{ apiKey, token } — 201, token shown once` |
+| `GET` | `/api/api-keys/{id}` | — | 获取你自己的某个密钥，或（持有 apikeys:manage 时）任意密钥。 | — | `{ apiKey }` |
+| `PUT` | `/api/api-keys/{id}` | — | 重命名、设置过期时间，或替换你可管理的密钥的权限范围。 | `{ name?, scopes[], expiresAt? }` | `{ apiKey }` |
+| `DELETE` | `/api/api-keys/{id}` | — | 吊销密钥。它将立即停止认证，但会保留记录以供审计。 | — | `204, no body` |
+
 ### 运维
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
@@ -234,6 +244,12 @@ POST /api/auth/login 会下发一个仅 http 的 cookie。OAuth 流程从 /api/a
 一条路由由一项权限或一个权限清单守卫，满足其中任意一项即可进入。
 
 owner 账号持有全部已知权限，完全绕过权限矩阵。
+
+### API 密钥
+
+API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证，但仅拥有创建时选定的权限。在 /api 路由上通过 `Authorization: Bearer ahk_…` 或 `X-AgentHub-Key` 发送，A2A 端点同样支持。
+
+请按最小权限为密钥授权；密钥的权限绝不会超过其所属用户。密钥等同于秘密——它仅显示一次，库中只保存其哈希值。
 
 ## 错误
 

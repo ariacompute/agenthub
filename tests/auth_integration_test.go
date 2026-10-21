@@ -46,7 +46,7 @@ func TestIntegrationUserLifecycle(t *testing.T) {
 	users := store.NewUserStore(db)
 	sessions := store.NewSessionStore(db)
 	az := authz.New(store.NewAuthzStore(db))
-	svc := auth.New(users, sessions, store.NewOAuthStore(db), az, auth.Options{TTL: time.Hour})
+	svc := auth.New(users, sessions, store.NewOAuthStore(db), nil, az, auth.Options{TTL: time.Hour})
 
 	email := uniqueEmail("lifecycle")
 	u, err := svc.Register(ctx, email, "correct horse", "Lifecycle")
@@ -119,7 +119,7 @@ func TestIntegrationRBACResolution(t *testing.T) {
 	users := store.NewUserStore(db)
 	azs := store.NewAuthzStore(db)
 	az := authz.New(azs)
-	svc := auth.New(users, store.NewSessionStore(db), store.NewOAuthStore(db), az, auth.Options{TTL: time.Hour})
+	svc := auth.New(users, store.NewSessionStore(db), store.NewOAuthStore(db), nil, az, auth.Options{TTL: time.Hour})
 
 	roles, err := azs.ListRoles(ctx)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestIntegrationResourceGrantRestricts(t *testing.T) {
 // user row on the real database.
 func svcHolder(t *testing.T, db *gorm.DB) *auth.Service {
 	t.Helper()
-	return auth.New(store.NewUserStore(db), store.NewSessionStore(db), store.NewOAuthStore(db), nil,
+	return auth.New(store.NewUserStore(db), store.NewSessionStore(db), store.NewOAuthStore(db), nil, nil,
 		auth.Options{TTL: time.Hour})
 }
 

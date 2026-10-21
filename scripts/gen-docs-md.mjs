@@ -206,6 +206,12 @@ function render(lang) {
     '',
     t(dict, 'authOwnerNote'),
     '',
+    `### ${t(dict, 'authApiKeyTitle')}`,
+    '',
+    t(dict, 'authApiKeyBody'),
+    '',
+    t(dict, 'authApiKeyScopeNote'),
+    '',
   )
 
   // --- Errors ---

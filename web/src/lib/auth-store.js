@@ -19,6 +19,7 @@ export const PERMISSIONS = [
   'grants:manage',
   'sessions:manage',
   'backups:manage',
+  'apikeys:manage',
   'registries:manage',
   'registry:curate',
   'sources:manage',
@@ -42,6 +43,7 @@ export const useAuthStore = defineStore('auth', {
     groupsCatalogue: [],
     permissionsCatalogue: [],
     grants: [],
+    apiKeys: [],
     errorCode: '',
     loading: false,
   }),
@@ -118,6 +120,7 @@ export const useAuthStore = defineStore('auth', {
       this.user = null
       this.permissions = []
       this.sessions = []
+      this.apiKeys = []
     },
     async loadSessions() {
       try {
@@ -307,6 +310,59 @@ export const useAuthStore = defineStore('auth', {
     },
     clearError() {
       this.errorCode = ''
+    },
+
+    // --- API keys ----------------------------------------------------------
+    async loadAPIKeys() {
+      try {
+        const data = await api.listAPIKeys()
+        this.apiKeys = data?.apiKeys ?? []
+        this.errorCode = ''
+      } catch (error) {
+        this.errorCode = code(error)
+      }
+    },
+    /** Mint a new key. The resolver returns the key plus its one-time token. */
+    async createAPIKey(payload) {
+      try {
+        const data = await api.createAPIKey(payload)
+        const created = data?.apiKey
+        if (created) {
+          this.apiKeys = [created, ...this.apiKeys]
+        }
+        this.errorCode = ''
+        return data ?? {}
+      } catch (error) {
+        this.errorCode = code(error)
+        return null
+      }
+    },
+    async updateAPIKey(id, payload) {
+      try {
+        const data = await api.updateAPIKey(id, payload)
+        const updated = data?.apiKey
+        if (updated) {
+          this.apiKeys = this.apiKeys.map((key) => (key.id === id ? updated : key))
+        }
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = code(error)
+        return false
+      }
+    },
+    async revokeAPIKey(id) {
+      try {
+        await api.revokeAPIKey(id)
+        // A revoked key stays in the list but is shown as revoked; the backend
+        // keeps it for the audit trail rather than hard-deleting it.
+        this.apiKeys = this.apiKeys.filter((key) => key.id !== id)
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = code(error)
+        return false
+      }
     },
   },
 })

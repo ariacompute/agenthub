@@ -213,6 +213,16 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `GET` | `/api/backups/{id}/download` | `backups:manage` — Manage database checkpoints | Download one checkpoint archive. | — | `application/gzip` |
 | `POST` | `/api/backups/{id}/restore` | `backups:manage` — Manage database checkpoints | Restore a checkpoint; confirm echoes its id. | `{ confirm } — must echo the checkpoint id` | `{ checkpoint }` |
 
+### API keys
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/api-keys` | — | List API keys. A holder of apikeys:manage sees every key; anyone else sees only their own. | — | `{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }` |
+| `POST` | `/api/api-keys` | — | Create a key. The token is returned once and never stored; scopes may not exceed what you can grant. | `{ name, scopes[], userId?, expiresInDays? }` | `{ apiKey, token } — 201, token shown once` |
+| `GET` | `/api/api-keys/{id}` | — | Fetch one of your own keys, or any key with apikeys:manage. | — | `{ apiKey }` |
+| `PUT` | `/api/api-keys/{id}` | — | Rename, set an expiry, or replace the scopes of a key you may manage. | `{ name?, scopes[], expiresAt? }` | `{ apiKey }` |
+| `DELETE` | `/api/api-keys/{id}` | — | Revoke a key. It stops authenticating immediately but the row is kept for audit. | — | `204, no body` |
+
 ### Operations
 
 | Method | Path | Permission | What it does | Request | Response |
@@ -234,6 +244,12 @@ POST /api/auth/login sets an http-only cookie. An OAuth round trip starts at /ap
 A route is guarded by one permission or a list, and any single one of them is enough to enter.
 
 The owner account holds every known permission and bypasses the matrix entirely.
+
+### API keys
+
+A key is a long-lived bearer credential that authenticates as its owner but only with the permissions chosen at creation. Send it as `Authorization: Bearer ahk_…` on /api routes, or as `X-AgentHub-Key`, and on the A2A endpoint.
+
+Scope a key to the least permission it needs; a key can never be granted more than its owner holds. Treat the token as a secret — it is shown once and only its hash is stored.
 
 ## Errors
 

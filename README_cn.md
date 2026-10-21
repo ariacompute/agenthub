@@ -250,11 +250,16 @@ AGENTHUB_SEED_DEMO=true make run                    # 或本地运行
 ./scripts/test-api.sh                               # 默认 http://127.0.0.1:3500
 BASE_URL=https://hub.example.com ./scripts/test-api.sh
 AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
+AGENTHUB_API_KEY=ahk_xxx ./scripts/test-api.sh      # 用长效密钥鉴权
 MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时放宽超时
 ```
 
 脚本会先登录（实例全新时注册第一个账号），断言无会话时 `/api/*` 被拦，随后遍历用户、角色、
 权限矩阵与资源授权，并验证「被授权的资源会从发现文档里消失」。
+
+也可以设置 `AGENTHUB_API_KEY=ahk_…`，改用长效 bearer 密钥为每次请求鉴权、而非登录：脚本会跳过登录、
+以该密钥作为身份；API 密钥小节转而**校验这条导入的密钥**，而不是现造现销（以免误废掉本轮运行所依赖的
+凭证）。密钥必须拥有本脚本用到的全部权限——完整冒烟测试需要近似 owner 的权限范围。
 
 它还覆盖目录治理：建命名空间 → 在其中注册 → 记录走 `draft → pending → approved`（草稿不得出现在
 可发现列表，`draft → approved` 必须被拒）、`(namespace, name, version)` 去重启用键，以及一个上游
@@ -298,6 +303,23 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 - HTTP：`{"code":"..."}`（`bad_request` / `unauthorized` / `not_found` / ...）
 - JSON-RPC：标准码 + A2A 自定义 `-32001 task_not_found`、`-32002 task_not_cancelable`、`-32003 push_notification_not_supported`、`-32004 unsupported_operation`、`-32005 invalid_state_transition`、`-32006 resource_not_found`、`-32007 resource_unreachable`、`-32008 task_not_resumable`
 
+## API 密钥
+
+密钥是面向非交互访问（脚本、其他语言、CI）的长效 bearer 凭证。它以**所属用户**身份鉴权，但只拥有**创建时选定的权限**，且明文令牌仅返回一次——库内仅存其 `sha256`（`token_hash`），绝不存明文。
+
+- **创建**：`POST /api/api-keys`，请求体 `{ "name", "scopes": [...], "expiresInDays"? }`。响应中的 `token`（`ahk_…` 字符串）只出现一次，请立即复制。
+- **使用**：在任意 `/api/*` 路由上以 `Authorization: Bearer ahk_…` 发送，或以对称头 `X-AgentHub-Key` 发送，亦可用于 A2A 端点。密钥的权限 = 其 scopes 与所属用户权限的交集，因此永远不会超过所属用户。
+- **管理**：`GET /api/api-keys` 列出你自己的密钥（持有 `apikeys:manage` 时列出全部）；`PUT /api/api-keys/{id}` 轮换名称 / 权限 / 过期时间；`DELETE /api/api-keys/{id}` 吊销——令牌立即失效，但行记录保留以供审计。
+
+```bash
+# 创建一个可读资源与任务的密钥，并用它调用控制面。
+TOKEN=$(curl -s -X POST localhost:3500/api/api-keys \
+  -H 'Content-Type: application/json' \
+  -H 'X-AgentHub-Session: <session>' \
+  -d '{"name":"ci","scopes":["resources:read","tasks:read"]}' | jq -r .token)
+curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
+```
+
 ## 持久化
 
 | 表 | 内容 |
@@ -310,6 +332,7 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
 | `schema_migrations` | 已执行的迁移文件，启动时跳过 |
 | `backup_checkpoints` / `backup_schedules` | 检查点目录与定时策略——两者**不参与**任何导出与恢复，因此操作员在恢复之后仍能看到自己所用的那个归档 |
+| `api_keys` / `api_key_scopes` | 长效 bearer 凭证；只存令牌的 `sha256`（`token_hash`，唯一索引）与展示用 `prefix`（绝不存明文），含可选 `expires_at` 与软 `revoked_at`；`api_key_scopes` 是 key → 权限 的边表 |
 
 - 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
 - 写入策略：任务/artifact/span **同步写**（状态迁移为条件更新 `WHERE state=?`，防并发丢更新）；

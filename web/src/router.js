@@ -31,14 +31,14 @@ const router = createRouter({
     // The playground runs tasks, so it answers to the same permission as
     // cancelling and resuming one rather than to anything registry specific.
     { path: '/playground', name: 'playground', component: PlaygroundView, meta: { permissions: ['tasks:write'] } },
-    // The administration screen carries several tabs, each with its own
-    // permission: an operator who may only manage database checkpoints must
-    // still be able to reach it.
+    // The administration screen carries several tabs, each gated by its own
+    // permission inside AdminView: the API keys tab is reachable by any signed-in
+    // user (they manage their own keys), so the route itself only needs a session.
     {
       path: '/admin',
       name: 'admin',
       component: AdminView,
-      meta: { permissions: ['users:manage', 'backups:manage'] },
+      meta: {},
     },
     // Documentation is deliberately ungated: it explains what the console does,
     // so anyone who can sign in should be able to read it. Leaving

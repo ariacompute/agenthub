@@ -68,6 +68,14 @@ const (
 	CodeRestoreBusy           Code = "restore_busy"
 	CodeRestoreInProgress     Code = "restore_in_progress"
 	CodeRestoreFailed         Code = "restore_failed"
+
+	// API keys: programmatic credentials. Each code names the guardrail that
+	// stopped the call, which is more useful to a script than a generic failure.
+	CodeAPIKeyNotFound     Code = "api_key_not_found"
+	CodeAPIKeyInvalidScope Code = "api_key_invalid_scope"
+	CodeAPIKeyExpired      Code = "api_key_expired"
+	CodeAPIKeyRevoked      Code = "api_key_revoked"
+	CodeAPIKeyNameRequired Code = "api_key_name_required"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -139,6 +147,14 @@ func WriteErr(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusServiceUnavailable, e.Code)
 	case CodeBackupEngineFailed, CodeBackupFailed, CodeBackupInterrupted, CodeRestoreFailed:
 		WriteError(w, http.StatusInternalServerError, e.Code)
+	case CodeAPIKeyNotFound:
+		WriteError(w, http.StatusNotFound, e.Code)
+	case CodeAPIKeyNameRequired, CodeAPIKeyInvalidScope:
+		WriteError(w, http.StatusBadRequest, e.Code)
+	// An expired or revoked key is an authentication failure, so a script treats
+	// it like a stale session and re-issues rather than retrying blindly.
+	case CodeAPIKeyExpired, CodeAPIKeyRevoked:
+		WriteError(w, http.StatusUnauthorized, e.Code)
 	default:
 		WriteError(w, http.StatusInternalServerError, e.Code)
 	}

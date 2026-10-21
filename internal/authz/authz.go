@@ -74,6 +74,9 @@ const (
 	PermRegistriesManage = "registries:manage"
 	PermRegistryCurate   = "registry:curate"
 	PermSourcesManage    = "sources:manage"
+	// API keys. Issuing or revoking a key is its own permission so a key can
+	// read and act but never silently mint more keys with powers it lacks.
+	PermAPIKeysManage = "apikeys:manage"
 )
 
 // AllPermissions is the full grantable set, in the order the admin matrix shows
@@ -91,6 +94,7 @@ var AllPermissions = []string{
 	PermRegistriesManage,
 	PermRegistryCurate,
 	PermSourcesManage,
+	PermAPIKeysManage,
 }
 
 // Principal kinds and grant levels of a ResourceGrant.

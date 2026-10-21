@@ -116,6 +116,7 @@ export const endpointGroups = [
   { id: 'users', groupKey: 'groupUsers' },
   { id: 'roles', groupKey: 'groupRoles' },
   { id: 'backups', groupKey: 'groupBackups' },
+  { id: 'apikeys', groupKey: 'groupApiKeys' },
   { id: 'ops', groupKey: 'groupOps' },
 ]
 
@@ -768,6 +769,53 @@ export const httpEndpoints = [
     descKey: 'epBackupRestore',
     request: '{ confirm } — must echo the checkpoint id',
     response: '{ checkpoint }',
+  },
+
+  // ---- api keys ----
+  {
+    group: 'apikeys',
+    method: 'GET',
+    path: '/api/api-keys',
+    permission: '',
+    descKey: 'epApiKeyList',
+    request: '',
+    response: '{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }',
+  },
+  {
+    group: 'apikeys',
+    method: 'POST',
+    path: '/api/api-keys',
+    permission: '',
+    descKey: 'epApiKeyCreate',
+    request: '{ name, scopes[], userId?, expiresInDays? }',
+    response: '{ apiKey, token } — 201, token shown once',
+  },
+  {
+    group: 'apikeys',
+    method: 'GET',
+    path: '/api/api-keys/{id}',
+    permission: '',
+    descKey: 'epApiKeyGet',
+    request: '',
+    response: '{ apiKey }',
+  },
+  {
+    group: 'apikeys',
+    method: 'PUT',
+    path: '/api/api-keys/{id}',
+    permission: '',
+    descKey: 'epApiKeyUpdate',
+    request: '{ name?, scopes[], expiresAt? }',
+    response: '{ apiKey }',
+  },
+  {
+    group: 'apikeys',
+    method: 'DELETE',
+    path: '/api/api-keys/{id}',
+    permission: '',
+    descKey: 'epApiKeyRevoke',
+    request: '',
+    response: '204, no body',
   },
 
   // ---- ops ----

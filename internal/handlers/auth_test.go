@@ -356,7 +356,7 @@ func authTestDeps(t *testing.T, staticDir string, entries ...*registry.Entry) (D
 		MaxOutputBytes: 1024,
 	}, &hub.MockNotifier{}, hub.Persistence{})
 	az := newMemAuthz()
-	svc := auth.New(newMemUsers(), newMemSessions(), nil, authz.New(az), auth.Options{
+	svc := auth.New(newMemUsers(), newMemSessions(), nil, nil, authz.New(az), auth.Options{
 		CookieName: "agenthub_session",
 		TTL:        cfg.SessionTTL,
 	})

@@ -69,6 +69,11 @@ const CODE_KEYS = {
   restore_busy: 'restoreBusy',
   restore_in_progress: 'restoreInProgress',
   restore_failed: 'restoreFailed',
+  api_key_not_found: 'apiKeyNotFound',
+  api_key_invalid_scope: 'apiKeyInvalidScope',
+  api_key_expired: 'apiKeyExpired',
+  api_key_revoked: 'apiKeyRevoked',
+  api_key_name_required: 'apiKeyNameRequired',
 }
 
 /** Returns the localised message for a machine readable code. */

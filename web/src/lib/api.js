@@ -399,6 +399,26 @@ function filenameFrom(header) {
   return match ? match[1].trim() : 'checkpoint.tar.gz'
 }
 
+// --- API keys ------------------------------------------------------------
+// Programmatic credentials. The create call returns the key plus a one-time
+// `token` that the console shows exactly once; list/get/revoke never expose it.
+
+export function listAPIKeys() {
+  return request('/api/api-keys')
+}
+
+export function createAPIKey(payload) {
+  return request('/api/api-keys', { method: 'POST', ...body(payload) })
+}
+
+export function updateAPIKey(id, payload) {
+  return request(`/api/api-keys/${encodeURIComponent(id)}`, { method: 'PUT', ...body(payload) })
+}
+
+export function revokeAPIKey(id) {
+  return request(`/api/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 // saveBlob hands a downloaded archive to the browser. The object URL is revoked
 // straight after the click so a large checkpoint does not stay pinned in memory.
 export function saveBlob(blob, filename) {

@@ -252,6 +252,10 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           <h4>{{ t('authPermTitle') }}</h4>
           <p>{{ t('authPermBody') }}</p>
           <p class="note">{{ t('authOwnerNote') }}</p>
+
+          <h4>{{ t('authApiKeyTitle') }}</h4>
+          <p>{{ t('authApiKeyBody') }}</p>
+          <p class="note">{{ t('authApiKeyScopeNote') }}</p>
         </section>
 
         <!-- Errors -->

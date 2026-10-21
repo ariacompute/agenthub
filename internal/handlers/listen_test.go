@@ -49,7 +49,10 @@ func TestListenersCoverRoutes(t *testing.T) {
 		// Backups answer "disabled" rather than 404 when no service is wired
 		// in, which is the state an instance without a backup volume is in.
 		"GET /api/backups": {http.MethodGet, "/api/backups", ""},
-		"GET /healthz":     {http.MethodGet, "/healthz", ""},
+		// API keys answer 401 without a session: there is no key service to wire
+		// into the test harness, so the auth gate itself is what is exercised.
+		"GET /api/api-keys": {http.MethodGet, "/api/api-keys", ""},
+		"GET /healthz":      {http.MethodGet, "/healthz", ""},
 	}
 
 	listeners := Listeners()

@@ -65,7 +65,7 @@ func TestOAuthProvidersOnlyOfferConfiguredOnes(t *testing.T) {
 // The redirect has to carry PKCE and the state the callback is checked against,
 // and it must never carry the secret.
 func TestBeginOAuthBuildsACompleteRedirect(t *testing.T) {
-	svc := New(nil, nil, nil, nil, Options{
+	svc := New(nil, nil, nil, nil, nil, Options{
 		OAuth: OAuthConfig{
 			Enabled: true,
 			Google:  ProviderConfig{ClientID: "gid", ClientSecret: "gsecret"},
@@ -112,7 +112,7 @@ func TestBeginOAuthBuildsACompleteRedirect(t *testing.T) {
 // A callback for a provider that is not configured must fail before anything is
 // exchanged or written.
 func TestCompleteOAuthRefusesUnconfiguredProviders(t *testing.T) {
-	svc := New(newMemUserStore(), newMemSessionStore(), nil, nil, Options{})
+	svc := New(newMemUserStore(), newMemSessionStore(), nil, nil, nil, Options{})
 	if _, _, _, err := svc.CompleteOAuth(context.Background(), "google", "code", "verifier", "https://hub.test/cb", "ua", "1.2.3.4"); err != ErrOAuthNotConfigured {
 		t.Fatalf("err = %v, want ErrOAuthNotConfigured", err)
 	}
@@ -160,7 +160,7 @@ func TestOAuthHelpers(t *testing.T) {
 // The cookie is the only thing a browser holds, so its flags are part of the
 // contract: HttpOnly, SameSite=Lax, and Secure only when configured for it.
 func TestSessionCookieFlags(t *testing.T) {
-	insecure := New(nil, nil, nil, nil, Options{CookieName: "agenthub_session", Secure: false})
+	insecure := New(nil, nil, nil, nil, nil, Options{CookieName: "agenthub_session", Secure: false})
 	rec := httptest.NewRecorder()
 	expires := time.Now().UTC().Add(time.Hour)
 	insecure.SetCookie(rec, "token", expires)
@@ -185,7 +185,7 @@ func TestSessionCookieFlags(t *testing.T) {
 	}
 
 	// A secure deployment marks the cookie, and the defaults fill in.
-	secure := New(nil, nil, nil, nil, Options{Secure: true})
+	secure := New(nil, nil, nil, nil, nil, Options{Secure: true})
 	if secure.Options().CookieName != "agenthub_session" {
 		t.Fatalf("cookie name = %q, want the default", secure.Options().CookieName)
 	}
@@ -202,7 +202,7 @@ func TestSessionCookieFlags(t *testing.T) {
 // The accessors and the inert paths are what let an instance run without an
 // identity stack at all.
 func TestServiceWithoutStoresStaysInert(t *testing.T) {
-	svc := New(nil, nil, nil, nil, Options{})
+	svc := New(nil, nil, nil, nil, nil, Options{})
 	if svc.Users() != nil || svc.Authz() != nil {
 		t.Fatal("a service without stores must expose nil ports")
 	}

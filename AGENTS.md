@@ -208,6 +208,12 @@ persistence ← internal/store（GORM 实现）
   否则一律退化为 500；前端同步登记 `errors.js` 的 `CODE_KEYS` 与 `errors-copy.js` 的 13 语。
 - **新权限需同步四处**：`authz.Perm*` 常量 → `AllPermissions` → 迁移里的权限种子与 admin 角色关联 →
   前端 `auth-store.js` 的 `PERMISSIONS` 与 `enums-copy.js` 的 `permission` 分组（13 语）。
+- **API 密钥**：`api_keys` 只存 `sha256(token)`（`token_hash` 唯一索引）与展示 `prefix`，**绝不存明文**；
+  软吊销（`revoked_at`）、可选 `expires_at`、`last_used_at` 由 `ByTokenHash` 命中后 `Touch` 写入。密钥
+  解析收敛在 `auth.Service.Principal` 一处（先于会话 cookie 尝试 `Authorization: Bearer` / `X-AgentHub-Key`），
+  构造 `IsOwner=false` 且 `permissions = scopes ∩ 所属用户权限` 的 Principal，一处改动即覆盖 `/api/*`
+  与 `/a2a`（含 SSE stream）。错误码 `api_key_*` 已在 `httputil` 与 `errors-copy.js` 13 语登记；
+  新增表走 `010_api_keys.sql`（`//go:embed *.sql` 自动收录，SQL 幂等）。
 - **目录治理四条**：
   1. **消费方只见 approved**：`registry.Discoverable` 是唯一过滤出口，列表 / MCP 导出 / Agent Card /
      A2A 寻址全部走它；空 `status` 按 `approved` 处理，保证升级后既有资源不消失。

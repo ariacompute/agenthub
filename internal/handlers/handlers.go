@@ -144,6 +144,16 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/backups/{id}/download", d.requirePermission(authz.PermBackupsManage, d.handleDownloadBackup))
 	mux.HandleFunc("POST /api/backups/{id}/restore", d.requirePermission(authz.PermBackupsManage, d.handleRestoreBackup))
 
+	// API keys. Any signed-in user may manage their own keys; apikeys:manage may
+	// list and act on everyone's. The list/create routes branch on that inside the
+	// handler (own vs all is the same endpoint with a different scope), so the
+	// permission is not on the route itself.
+	mux.HandleFunc("GET /api/api-keys", d.requireAuth(d.handleListAPIKeys))
+	mux.HandleFunc("POST /api/api-keys", d.requireAuth(d.handleCreateAPIKey))
+	mux.HandleFunc("GET /api/api-keys/{id}", d.requireAuth(d.handleGetAPIKey))
+	mux.HandleFunc("PUT /api/api-keys/{id}", d.requireAuth(d.handleUpdateAPIKey))
+	mux.HandleFunc("DELETE /api/api-keys/{id}", d.requireAuth(d.handleRevokeAPIKey))
+
 	// Operations.
 	mux.HandleFunc("GET /healthz", d.identify(d.handleHealthz))
 

@@ -69,6 +69,7 @@ func main() {
 		store.NewUserStore(db),
 		store.NewSessionStore(db),
 		store.NewOAuthStore(db),
+		store.NewAPIKeyStore(db),
 		az,
 		auth.Options{
 			CookieName: "agenthub_session",

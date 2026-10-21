@@ -8,6 +8,7 @@ import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
 import UnsavedPrompt from '../components/UnsavedPrompt.vue'
 import { KeyRound, Plus, Shield, Trash2, UserPlus, Users, DatabaseBackup } from 'lucide-vue-next'
 import BackupsPanel from './admin/BackupsPanel.vue'
+import ApiKeysPanel from './admin/ApiKeysPanel.vue'
 
 const auth = useAuthStore()
 const hub = useHubStore()
@@ -47,12 +48,31 @@ const matrixColumns = computed(
 // schedule form and a drawer, which is more than an inline section should own.
 const backup = useCopy('backup')
 
-const tabs = computed(() => [
-  { key: 'users', label: t('tabUsers'), icon: Users },
-  { key: 'roles', label: t('tabRoles'), icon: Shield },
-  { key: 'grants', label: t('tabGrants'), icon: KeyRound },
-  { key: 'backups', label: backup.t('tabBackups'), icon: DatabaseBackup },
-])
+// The API keys tab is always present: any signed-in user may manage their own
+// keys, so reaching /admin must not depend on holding a management permission. The
+// other tabs appear only when the user may act on them, so the screen stays
+// honest about what the session can do.
+const tabs = computed(() => {
+  const items = []
+  if (auth.can('users:manage')) items.push({ key: 'users', label: t('tabUsers'), icon: Users })
+  if (auth.can('roles:manage')) items.push({ key: 'roles', label: t('tabRoles'), icon: Shield })
+  if (auth.can('grants:manage')) items.push({ key: 'grants', label: t('tabGrants'), icon: KeyRound })
+  if (auth.can('backups:manage')) items.push({ key: 'backups', label: backup.t('tabBackups'), icon: DatabaseBackup })
+  items.push({ key: 'apikeys', label: t('tabApiKeys'), icon: KeyRound })
+  return items
+})
+
+// Keep the active tab valid: a session whose permissions change (or simply cannot
+// see a tab) falls back to the first one it can.
+watch(
+  tabs,
+  (list) => {
+    if (!list.some((item) => item.key === tab.value)) {
+      tab.value = list[0]?.key ?? 'apikeys'
+    }
+  },
+  { immediate: true },
+)
 
 const statusLabel = (value) => enumLabel('userStatus', value)
 const permissionLabel = (code) => enumLabel('permission', code)
@@ -190,7 +210,14 @@ async function submitGrant() {
 }
 
 onMounted(async () => {
-  await Promise.all([auth.loadUsers(), auth.loadRoles(), auth.loadGroups(), auth.loadGrants(), auth.loadPermissions()])
+  await Promise.all([
+    auth.loadUsers(),
+    auth.loadRoles(),
+    auth.loadGroups(),
+    auth.loadGrants(),
+    auth.loadPermissions(),
+    auth.loadAPIKeys(),
+  ])
   if (!hub.resources.length) hub.refreshResources()
 })
 
@@ -438,6 +465,9 @@ watch(query, (value) => {
 
     <!-- ---------- database checkpoints ---------- -->
     <BackupsPanel v-if="tab === 'backups'" />
+
+    <!-- ---------- API keys ---------- -->
+    <ApiKeysPanel v-if="tab === 'apikeys'" />
 
     <!-- ---------- user drawer ---------- -->
     <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">

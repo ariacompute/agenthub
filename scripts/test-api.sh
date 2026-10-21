@@ -11,6 +11,7 @@
 #   ./scripts/test-api.sh                       # http://127.0.0.1:3500
 #   BASE_URL=https://hub.example.com ./scripts/test-api.sh
 #   AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
+#   AGENTHUB_API_KEY=ahk_xxx ./scripts/test-api.sh   # authenticate with a long-lived key
 #   MAX_TIME=60 ./scripts/test-api.sh           # per-request curl timeout
 #
 # The control plane is behind a session, so the script logs in first and keeps
@@ -18,6 +19,14 @@
 # AGENTHUB_TEST_EMAIL / AGENTHUB_TEST_PASSWORD, falling back to the bootstrap
 # administrator (AGENTHUB_BOOTSTRAP_ADMIN_*). On a fresh instance without any
 # account it registers the first one, which becomes the owner.
+#
+# AGENTHUB_API_KEY authenticates every request with `Authorization: Bearer`, the
+# same role a session cookie plays. When it is set the script skips login and
+# uses the key as its identity; the API-keys section then verifies the imported
+# key instead of minting and revoking one (so it never disables the credential
+# the rest of the run depends on). The key must carry every permission the run
+# exercises — a full smoke test needs owner-equivalent scopes (resources / tasks
+# / users / roles / grants / registries / sources / backups / apikeys).
 #
 # Start a stack that carries the demo resources first — they are opt-in, so the
 # flag is required:
@@ -41,6 +50,9 @@ READY_TIMEOUT=${READY_TIMEOUT:-30}
 TEST_EMAIL=${AGENTHUB_TEST_EMAIL:-${AGENTHUB_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}}
 TEST_PASSWORD=${AGENTHUB_TEST_PASSWORD:-${AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD:-agenthub-admin-pass}}
 SESSION_TOKEN=${AGENTHUB_SESSION_TOKEN:-}
+# A long-lived key handed in via AGENTHUB_API_KEY stands in for the login
+# session: every non-anonymous request carries it as a bearer token.
+API_KEY=${AGENTHUB_API_KEY:-}
 
 TMP=$(mktemp -d)
 BODY="$TMP/body"
@@ -113,10 +125,23 @@ http() {
 	__p=$2
 	__d=${3:-}
 	__h=${4:-}
-	set -- -s -S --max-time "$MAX_TIME" -X "$__m" -o "$BODY" -w '%{http_code}' "$BASE_URL$__p"
-	if [ "${ANON:-0}" != "1" ]; then
-		set -- "$@" -b "$COOKIES" -c "$COOKIES"
-		[ -n "$SESSION_TOKEN" ] && set -- "$@" -H "X-AgentHub-Session: $SESSION_TOKEN"
+	if [ "${KEYONLY:-0}" = "1" ]; then
+		# key-only auth: no session cookie. An explicit Authorization header
+		# (e.g. a bogus token) wins over the imported key.
+		set -- -s -S --max-time "$MAX_TIME" -X "$__m" -o "$BODY" -w '%{http_code}' "$BASE_URL$__p"
+		if [ -n "$__h" ] && [ "${__h#Authorization:}" != "$__h" ]; then
+			set -- "$@" -H "$__h"
+			__h=''
+		elif [ -n "$API_KEY" ]; then
+			set -- "$@" -H "Authorization: Bearer $API_KEY"
+		fi
+	else
+		set -- -s -S --max-time "$MAX_TIME" -X "$__m" -o "$BODY" -w '%{http_code}' "$BASE_URL$__p"
+		if [ "${ANON:-0}" != "1" ]; then
+			set -- "$@" -b "$COOKIES" -c "$COOKIES"
+			[ -n "$SESSION_TOKEN" ] && set -- "$@" -H "X-AgentHub-Session: $SESSION_TOKEN"
+			[ -n "$API_KEY" ] && set -- "$@" -H "Authorization: Bearer $API_KEY"
+		fi
 	fi
 	case "$__m" in
 	POST | PUT) set -- "$@" -H 'Content-Type: application/json' ;;
@@ -135,6 +160,14 @@ http_anon() {
 	ANON=0
 }
 
+# http_key <method> <path> [body] [extra header] — authenticate with the imported
+# API key only (no session cookie), so a request proves the key itself works.
+http_key() {
+	KEYONLY=1
+	http "$@"
+	KEYONLY=0
+}
+
 # sse <method> <path> [body] — keep the connection open and capture the frames.
 sse() {
 	__m=$1
@@ -143,6 +176,7 @@ sse() {
 	set -- -sN --max-time "$MAX_TIME" -X "$__m" "$BASE_URL$__p"
 	set -- "$@" -b "$COOKIES" -c "$COOKIES"
 	[ -n "$SESSION_TOKEN" ] && set -- "$@" -H "X-AgentHub-Session: $SESSION_TOKEN"
+	[ -n "$API_KEY" ] && set -- "$@" -H "Authorization: Bearer $API_KEY"
 	[ -n "$__d" ] && set -- "$@" -H 'Content-Type: application/json' --data-binary "$__d"
 	STREAM=$(curl "$@" 2>/dev/null) || true
 }
@@ -263,7 +297,7 @@ expect 'the code on the wire is unauthenticated' unauthenticated "$(jget code)"
 # Kept in a variable because the checkpoint section logs in a second time: a
 # restore puts the database back, which drops the session it created.
 LOGIN_BODY=$(printf '{"email":"%s","password":"%s"}' "$TEST_EMAIL" "$TEST_PASSWORD")
-if [ -z "$SESSION_TOKEN" ]; then
+if [ -z "$SESSION_TOKEN" ] && [ -z "$API_KEY" ]; then
 	http POST /api/auth/login "$LOGIN_BODY"
 	if [ "$STATUS" != "200" ]; then
 		# A fresh instance has no account yet: register the first one, which
@@ -279,16 +313,26 @@ if [ -z "$SESSION_TOKEN" ]; then
 	fi
 	expect 'login returns 200' 200 "$STATUS"
 else
-	skip 'login' 'AGENTHUB_SESSION_TOKEN was supplied'
+	skip 'login' 'AGENTHUB_SESSION_TOKEN or AGENTHUB_API_KEY was supplied'
 fi
 
 http GET /api/auth/me
 expect 'me returns 200' 200 "$STATUS"
-expect 'me reports the account' "$TEST_EMAIL" "$(jget user.email)"
-case "$(jget permissions)" in
-*'resources:read'*) pass 'the session carries resources:read' ;;
-*) fail 'the session carries resources:read' "$(jget permissions)" ;;
-esac
+if [ -z "$API_KEY" ]; then
+	expect 'me reports the account' "$TEST_EMAIL" "$(jget user.email)"
+fi
+PERMS=$(jget permissions)
+if [ -z "$API_KEY" ]; then
+	case "$PERMS" in
+	*'resources:read'*) pass 'the session carries resources:read' ;;
+	*) fail 'the session carries resources:read' "$PERMS" ;;
+	esac
+else
+	case "$PERMS" in
+	'[]' | '') fail 'the API key carries no permissions' "$PERMS" ;;
+	*) pass 'the API key carries permissions' ;;
+	esac
+fi
 http GET /api/auth/sessions
 expect 'my sessions return 200' 200 "$STATUS"
 
@@ -730,6 +774,82 @@ http DELETE "/api/resources/$GRANT_RESOURCE"
 expect 'the granted resource is cleaned up' 204 "$STATUS"
 http DELETE "/api/users/$MEMBER_ID"
 expect 'a user can be disabled' 204 "$STATUS"
+
+# ---------------------------------------------------------------------------
+# API keys: programmatic credentials for non-interactive access
+#
+# A key is minted with an explicit permission subset and shown exactly once; the
+# raw value is what a script puts in Authorization, while the console only ever
+# sees the prefix. Everything here runs as the logged-in owner, so it also
+# exercises the apikeys:manage path.
+# ---------------------------------------------------------------------------
+
+section 'API keys'
+http GET /api/api-keys
+expect 'list API keys returns 200' 200 "$STATUS"
+
+if [ -z "$API_KEY" ]; then
+	# Minted here: shown once, then revoked at the end. Runs as the logged-in
+	# owner, which also exercises the apikeys:manage path.
+	expect 'a fresh account has no keys' '[]' "$(jget apiKeys)"
+
+	# An empty name is refused before any token is minted.
+	http POST /api/api-keys '{"name":"","scopes":["resources:read"]}'
+	expect 'an empty key name is rejected' 400 "$STATUS"
+	expect 'the rejection names the reason' api_key_name_required "$(jget code)"
+
+	# A scope that is not a known permission is refused.
+	http POST /api/api-keys '{"name":"bad","scopes":["not_a_permission"]}'
+	expect 'an unknown scope is rejected' 400 "$STATUS"
+	expect 'the rejection names the reason' api_key_invalid_scope "$(jget code)"
+
+	# A valid key: shown once with its plain-text token.
+	http POST /api/api-keys '{"name":"ci-key","scopes":["resources:read","tasks:read"]}'
+	expect 'a key can be created' 201 "$STATUS"
+	KEY_ID=$(jget apiKey.id)
+	API_TOKEN=$(jget token)
+	case "$API_TOKEN" in
+	ahk_*) pass 'the key is prefixed ahk_ and returned once' ;;
+	*) fail 'the key is prefixed ahk_' "[$API_TOKEN]" ;;
+	esac
+	if [ -z "$KEY_ID" ] || [ -z "$API_TOKEN" ]; then
+		fail 'a key can be created' "no id or token in the response ($(cat "$BODY"))"
+	else
+		pass 'the key carried an id and a one-time token'
+	fi
+
+	# The token authenticates a control-plane call without a session cookie.
+	http_key GET /api/resources
+	expect 'the bearer token reaches the control plane' 200 "$STATUS"
+
+	# The X-AgentHub-Key header is accepted too, for symmetry with X-AgentHub-Session.
+	http_key GET /api/resources '' "X-AgentHub-Key: $API_TOKEN"
+	expect 'the X-AgentHub-Key header is accepted' 200 "$STATUS"
+
+	# Revoking the key turns the token dead.
+	http DELETE "/api/api-keys/$KEY_ID"
+	expect 'a key can be revoked' 204 "$STATUS"
+	http GET /api/api-keys
+	expect 'the revoked key leaves the active list' '[]' "$(jget apiKeys)"
+
+	# A dead token no longer authenticates.
+	http_key GET /api/resources
+	expect 'a revoked token is rejected' 401 "$STATUS"
+	expect 'the rejection is unauthenticated' unauthenticated "$(jget code)"
+else
+	# Imported via AGENTHUB_API_KEY: verify it authenticates and never revoke it,
+	# since the rest of the run depends on this credential.
+	KEY_PREFIX=$(jget apiKeys.0.prefix)
+	if [ -n "$KEY_PREFIX" ]; then
+		pass "the imported key ($KEY_PREFIX…) is listed"
+	else
+		fail 'the imported key is listed' "$(cat "$BODY")"
+	fi
+	http_key GET /api/resources
+	expect 'the imported key reaches the control plane' 200 "$STATUS"
+	http_key GET /api/resources '' 'Authorization: Bearer ahk_bogus'
+	expect 'a bogus token is rejected' 401 "$STATUS"
+fi
 
 # ---------------------------------------------------------------------------
 # database checkpoints
