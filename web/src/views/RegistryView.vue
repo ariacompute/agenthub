@@ -222,14 +222,21 @@ async function tryRun(resource) {
   running.value = resource.id
   try {
     let taskID = ''
+    // Jump to the task trace view first, then let the run stream live there
+    // instead of blocking on the registry card until it reaches a terminal state.
+    // The task is selected the moment its id arrives so the trace view can attach
+    // its live feed to exactly this run, in every language.
+    router.push('/trace')
     await streamTask({ resourceId: resource.id, text: `probe ${resource.name}` }, (frame) => {
       const data = frame.data ?? {}
-      if (data.taskId) taskID = data.taskId
+      if (data.taskId) {
+        taskID = data.taskId
+        store.selectTask(taskID)
+      }
       if (data.kind === 'status-update') taskID = data.taskId || taskID
     })
     await store.refreshTasks()
-    store.selectTask(taskID)
-    router.push('/trace')
+    if (taskID) store.selectTask(taskID)
   } catch (error) {
     console.error('agenthub: try run failed', error)
   } finally {

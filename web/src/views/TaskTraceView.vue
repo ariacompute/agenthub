@@ -85,8 +85,14 @@ watch(
 
 onMounted(async () => {
   await store.refreshTasks()
+  // A run may already be selected before this screen mounts — for example when
+  // the registry's "试跑" button jumps here mid-stream — so attach the live feed
+  // to whatever is selected rather than only to the first row.
   if (!store.selectedTaskID && store.tasks.length) store.selectTask(store.tasks[0].id)
-  else await loadSpans(store.selectedTaskID)
+  if (store.selectedTaskID) {
+    await loadSpans(store.selectedTaskID)
+    attachStream(store.selectedTaskID)
+  }
 })
 
 async function refresh() {
