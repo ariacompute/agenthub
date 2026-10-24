@@ -252,6 +252,36 @@ per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批
 93. [x] `make test-cover`：`go test -coverprofile` + `go tool cover -func` 的一键覆盖率入口，
      `coverage.out` 进 `.gitignore` 与 `make clean`
 
+## M2.1 — agentbuddy 协作会话端点（已完成）
+
+为 agentbuddy 桌面客户端（独立仓库，自身无后端，指向 agenthub 服务端）新增多 agent 协作能力。
+沿用既有 `resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组；线程归单一主体
+所有，消息中的 `@mention` 经 `Hub.Send` 走 A2A 委派给对应 agent，并以任务 id 关联，实时回复经 SSE 透传。
+
+### 1. 端点（`internal/handlers`）
+101. [x] `handlers.go`：`Deps` 新增 `Threads threads.Store`；追加 7 条路由（workspace 用 `resources:read`，
+    threads 用 `tasks:read` / `tasks:write`），沿用 `requirePermission` 包装器，不改既有路由
+102. [x] `workspace.go`：聚合视图，`visibleEntries(r, Reg.List(agent, ""))` 取可见 agent + `Hub.Store().List()` 近期任务
+103. [x] `threads.go`：`handleListThreads` / `handleCreateThread` / `handleGetThread` /
+    `handlePostThreadMessage`（解析 `@mention` → `Hub.Send` 建任务并 `UpsertAgentMessage` 占位）/
+    `handleThreadEventStream`（SSE：回访历史 + 订阅 `Broker` 跟随被委派任务，经 `UpsertAgentMessage` 落 agent 回复）
+104. [x] `threads_test.go`：`taskIDsOf` 单测
+
+### 2. 领域与持久化（依赖倒置）
+105. [x] `internal/threads/types.go`：`Thread` / `Message` 类型 + `Store` 端口 + `ErrNotFound`（端口定义在领域包，
+    与 `registry.ResourceStore` 同款模式，`internal/threads` 不 import GORM）
+106. [x] `internal/store/threads_store.go`：`NewThreadsStore(db)` 的 GORM 实现；`UpsertAgentMessage` 以
+    `task_id` 为键 upsert，agent 消息首建以 `resource_id` 写入
+107. [x] `migrations/012_threads.sql`：幂等 `threads` + `thread_messages`（`CREATE TABLE IF NOT EXISTS` + `ON DELETE CASCADE`）
+
+### 3. 装配与文档
+108. [x] `cmd/agenthub-server/main.go`：`threadsStore := store.NewThreadsStore(db)` 注入 `deps.Threads`
+109. [x] `AGENTS.md`：「agentbuddy 接入」章记录端点、权限复用、迁移与桌面壳前缀白名单
+    （`/api/workspace`、`/api/threads` 已被 `is_remote_path` 覆盖，新增服务端端点无需改桌面端代码）
+
+### 4. 验证
+110. [x] `go build ./...`、`go vet`、全量 `go test ./...` 绿；`store_test.go` 迁移顺序测试补 `012_threads.sql`
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

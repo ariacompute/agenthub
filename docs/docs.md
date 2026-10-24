@@ -229,6 +229,17 @@ The control plane the console itself talks to. Each route needs a session cookie
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/healthz` | — | Liveness, version and what the build was made from. | — | `{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down` |
 
+### Collaboration
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/workspace` | `resources:read` — Read resources | Aggregated view of visible agents and recent task activity. | — | `{ agents: [Entry], activity: [{ id, resourceId, state, updatedAt }] }` |
+| `GET` | `/api/threads` | `tasks:read` — Read tasks | List threads owned by the caller. | — | `{ threads: [Thread] }` |
+| `POST` | `/api/threads` | `tasks:write` — Cancel and resume tasks | Create a thread owned by the caller. | `{ title?, participants?: [resourceId] }` | `Thread — 201` |
+| `GET` | `/api/threads/{id}` | `tasks:read` — Read tasks | Read a thread and its message history. | — | `{ thread, messages: [Message] }` |
+| `POST` | `/api/threads/{id}/messages` | `tasks:write` — Cancel and resume tasks | Append a message; each @mention delegates to that agent over A2A (Hub.Send), keyed by task id. | `{ body, mentions?: [resourceId] }` | `{ message, delegated: [taskId], failed: [resourceId] } — 201` |
+| `GET` | `/api/threads/{id}/events` | `tasks:read` — Read tasks | SSE: replay history, then follow delegated tasks and persist agent replies. | — | `text/event-stream of { thread.message, thread.agent }` |
+
 Open a row to see its request and response.
 
 ## Authentication and permissions

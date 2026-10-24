@@ -391,3 +391,24 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
 - 前端未执行 `make web-build` 时 `/` 返回 404（机器可读 `not_found`），不是服务故障。
 - 不实现：RAG、语音、浏览器自动化、渠道接入、多语言 SDK、LLM-as-judge 评分（属 `memo` /
   `bankmind` / `playground` 或后续项）。
+
+## agentbuddy 接入（桌面客户端）
+
+`agentbuddy` 是一个独立仓库的 **Tauri v2 桌面壳 + Vue 3 工作台前端**，以本 agenthub 作为服务端：
+它把 `http://127.0.0.1:<随机端口>` 上的相对请求（`/api`、`/a2a`、`/healthz`、`.well-known` 及下方
+两个端点）环回转发到用户配置的 agenthub 服务端，从而复用本仓的认证、A2A 与 hub 编排能力。
+
+- `GET /api/workspace`：聚合视图。先 `visibleEntries(r, Reg.List())` 取可见条目，按
+  `registry.ParseKind("agent")` 过滤出 agent，并附 `Hub.Store().List()` 的最近 8 条任务活动。
+  只读聚合，不引入新查询面。
+- `GET/POST /api/threads`、`GET /api/threads/{id}`、`POST /api/threads/{id}/messages`、
+  `GET /api/threads/{id}/events`：多 agent 协作会话。
+  - 线程归属 `owner_id`（取自 `authz.PrincipalFrom(r).UserID`），`threads_store` 在 `internal/store`
+    实现，`threads.Store` 端口定义在 `internal/threads`。
+  - `messages` 中带 `mentions`（agent 资源 id）时，逐一对每个目标调用 `Hub.Send` 并写入
+    `Message.Metadata["resourceId"]` 进行 A2A 委派；结果以 `events` SSE 透传回前端
+    （实现参考 `handlers/api.go` 的 `streamTaskEvents`）。
+  - 迁移见 `migrations/012_threads.sql`（幂等：`CREATE TABLE IF NOT EXISTS` + `ON DELETE CASCADE`）。
+- 权限点复用既有 `PermResourcesRead` / `PermTasksRead` / `PermTasksWrite`，不新增角色或组。
+- 桌面壳前缀白名单（`internal/proxy/mod.rs` 的 `is_remote_path`）已含 `/api/workspace` 与
+  `/api/threads`，新增服务端端点无需改桌面端代码。

@@ -152,6 +152,11 @@ search, CloudTrail-equivalent auditing, cross-account RAM sharing, VPC PrivateLi
   only.
 - **Aggregated Agent Card**: `GET /api/export/agent-card`, one skill per resource —
   approved records only.
+- **Collaboration (agentbuddy)**: `GET /api/workspace` aggregates visible agents + recent task
+  activity; `GET/POST /api/threads`, `GET /api/threads/{id}`, `POST /api/threads/{id}/messages`
+  (each `@mention` delegates to that agent over A2A via `Hub.Send`, keyed by task id) and
+  `GET /api/threads/{id}/events` (SSE replay + live delegated-task replies). Reuses
+  `resources:read` / `tasks:read` / `tasks:write`; no new roles or groups.
 
 ---
 
@@ -594,6 +599,7 @@ desktop --http://127.0.0.1:<port> (loopback proxy)--> embedded console + /api, /
 caller --POST /a2a (single JSON-RPC 2.0 entry)--> handlers -> hub -> adapter -> resource
 caller --GET /.well-known/agent.json-----------> Agent Card (one skill per resource)
 console --GET /api/tasks/{id}/events?since=seq--> SSE replay + live stream
+agentbuddy --GET /api/threads/{id}/events------> SSE: replay thread + follow delegated tasks (Hub.Send over A2A)
 hub ----store (GORM, four port interfaces)------> PostgreSQL 16 (embedded idempotent migrations)
 console --GET /api/*---------------------------> Registry / Registries / Sources / Task trace / Topology
 upstream registry --HTTPS----------------------> registry source -> dedup on (name, version) -> Upsert

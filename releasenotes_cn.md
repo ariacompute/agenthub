@@ -122,6 +122,10 @@ Agent 调用。
   `POST /api/registry-sources/{id}/sync`。
 - **MCP 导出**：`GET /api/export/mcp` 输出 MCP server 描述——仅 approved。
 - **聚合 Agent Card**：`GET /api/export/agent-card`，每资源渲染为一个 skill——仅 approved。
+- **协作（agentbuddy）**：`GET /api/workspace` 聚合可见 agent + 近期任务活动；`GET/POST /api/threads`、
+  `GET /api/threads/{id}`、`POST /api/threads/{id}/messages`（每个 `@mention` 经 `Hub.Send` 走 A2A
+  委派，以任务 id 关联）、`GET /api/threads/{id}/events`（SSE 回访 + 被委派任务实时回复）。复用
+  `resources:read` / `tasks:read` / `tasks:write`，不新增角色或用户组。
 
 ---
 
@@ -480,6 +484,7 @@ cp .env.example .env          # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true�
 控制台 ──GET /api/tasks/{id}/events?since=seq──> SSE 回放 + 实时流
 hub ────store（GORM，四个端口接口）────────> PostgreSQL 16（内嵌幂等迁移）
 控制台 ──GET /api/*─────────────────────> 注册中心 / 命名空间 / 上游源 / 任务追踪 / 拓扑视图
+agentbuddy ──GET /api/threads/{id}/events──> SSE：回访线程 + 跟随被委派任务（Hub.Send 经 A2A）
 上游注册中心 ──HTTPS────────────────────> registry source → 按 (name, version) 去重 → Upsert
 ```
 

@@ -228,6 +228,12 @@ POST   /api/tasks/{id}/cancel                  → Task
 POST   /api/tasks/{id}/resume                  → Task
 GET    /api/export/mcp                         → {servers}
 GET    /api/export/agent-card                  → AgentCard
+GET    /api/workspace                         → {agents, activity}（resources:read；agentbuddy 聚合视图：可见 agent + 近期任务）
+GET    /api/threads                           → {threads}（tasks:read，调用者拥有的线程）
+POST   /api/threads                           → 201 Thread（tasks:write；title?、participants?）
+GET    /api/threads/{id}                      → {thread, messages} | 404
+POST   /api/threads/{id}/messages             → 201 {message, delegated, failed}（tasks:write；@mention → Hub.Send 委派，task id 关联）
+GET    /api/threads/{id}/events               → SSE（tasks:read；回访线程历史 + 跟随被委派任务，agent 回复落库）
 GET    /a2a/stream?task=<id>                   → SSE（控制台用，无 JSON-RPC 封装）
 GET    /healthz                                → 状态与计数（无鉴权）
 ```

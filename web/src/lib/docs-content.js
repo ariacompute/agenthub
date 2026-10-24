@@ -118,6 +118,7 @@ export const endpointGroups = [
   { id: 'backups', groupKey: 'groupBackups' },
   { id: 'apikeys', groupKey: 'groupApiKeys' },
   { id: 'ops', groupKey: 'groupOps' },
+  { id: 'collaboration', groupKey: 'groupCollaboration' },
 ]
 
 /**
@@ -827,6 +828,62 @@ export const httpEndpoints = [
     descKey: 'epHealthz',
     request: '',
     response: '{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down',
+  },
+
+  // ---- collaboration (agentbuddy) ----
+  {
+    group: 'collaboration',
+    method: 'GET',
+    path: '/api/workspace',
+    permission: 'resources:read',
+    descKey: 'epWorkspace',
+    request: '',
+    response: '{ agents: [Entry], activity: [{ id, resourceId, state, updatedAt }] }',
+  },
+  {
+    group: 'collaboration',
+    method: 'GET',
+    path: '/api/threads',
+    permission: 'tasks:read',
+    descKey: 'epThreadsList',
+    request: '',
+    response: '{ threads: [Thread] }',
+  },
+  {
+    group: 'collaboration',
+    method: 'POST',
+    path: '/api/threads',
+    permission: 'tasks:write',
+    descKey: 'epThreadCreate',
+    request: '{ title?, participants?: [resourceId] }',
+    response: 'Thread — 201',
+  },
+  {
+    group: 'collaboration',
+    method: 'GET',
+    path: '/api/threads/{id}',
+    permission: 'tasks:read',
+    descKey: 'epThreadGet',
+    request: '',
+    response: '{ thread, messages: [Message] }',
+  },
+  {
+    group: 'collaboration',
+    method: 'POST',
+    path: '/api/threads/{id}/messages',
+    permission: 'tasks:write',
+    descKey: 'epThreadMessage',
+    request: '{ body, mentions?: [resourceId] }',
+    response: '{ message, delegated: [taskId], failed: [resourceId] } — 201',
+  },
+  {
+    group: 'collaboration',
+    method: 'GET',
+    path: '/api/threads/{id}/events',
+    permission: 'tasks:read',
+    descKey: 'epThreadEvents',
+    request: '',
+    response: 'text/event-stream of { thread.message, thread.agent }',
   },
 ]
 

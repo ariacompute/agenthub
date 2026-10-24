@@ -229,6 +229,17 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/healthz` | — | 存活状态、版本，以及这个构建由什么构成。 | — | `{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down` |
 
+### 协作
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/workspace` | `resources:read` — 查看资源 | 可见 agent 与近期任务活动的聚合视图。 | — | `{ agents: [Entry], activity: [{ id, resourceId, state, updatedAt }] }` |
+| `GET` | `/api/threads` | `tasks:read` — 查看任务 | 列出调用者拥有的线程。 | — | `{ threads: [Thread] }` |
+| `POST` | `/api/threads` | `tasks:write` — 取消与恢复任务 | 创建调用者拥有的线程。 | `{ title?, participants?: [resourceId] }` | `Thread — 201` |
+| `GET` | `/api/threads/{id}` | `tasks:read` — 查看任务 | 读取线程及其消息历史。 | — | `{ thread, messages: [Message] }` |
+| `POST` | `/api/threads/{id}/messages` | `tasks:write` — 取消与恢复任务 | 追加一条消息；每个 @mention 经 A2A 委派给对应 agent（Hub.Send），以任务 id 关联。 | `{ body, mentions?: [resourceId] }` | `{ message, delegated: [taskId], failed: [resourceId] } — 201` |
+| `GET` | `/api/threads/{id}/events` | `tasks:read` — 查看任务 | SSE：先回访历史，再跟随被委派任务并落库 agent 回复。 | — | `text/event-stream of { thread.message, thread.agent }` |
+
 展开一行即可看到它的请求与响应。
 
 ## 认证与权限

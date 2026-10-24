@@ -188,7 +188,11 @@ func main() {
 			"hint", "set AGENTHUB_REGISTRY_SYNC_ENABLED=true, or trigger a source from the console")
 	}
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources}
+	// Collaboration threads (agentbuddy) share the same database as the rest of
+	// the hub; nil when the instance runs without one, like every other store.
+	threadsStore := store.NewThreadsStore(db)
+
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Wrap(handlers.Register(deps), cfg),

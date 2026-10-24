@@ -19,6 +19,7 @@ import (
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
 	"agenthub/internal/store"
+	"agenthub/internal/threads"
 
 	"gorm.io/gorm"
 )
@@ -45,6 +46,10 @@ type Deps struct {
 	// when the instance does not federate any external catalogue, which is the
 	// default and must keep working.
 	Sources *registry.SourceService
+	// Threads persists agentbuddy's collaboration threads. It is nil when the
+	// instance has no database, in which case the /api/threads endpoints report
+	// the feature as unavailable rather than panicking.
+	Threads threads.Store
 }
 
 // Register builds the router.
@@ -108,6 +113,16 @@ func Register(d Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/export/mcp", d.requirePermission(authz.PermResourcesRead, d.handleExportMCP))
 	mux.HandleFunc("GET /api/export/agent-card", d.requirePermission(authz.PermResourcesRead, d.handleExportAgentCard))
+
+	// agentbuddy: the unified workspace and multi-agent collaboration threads.
+	// Read routes hang off resources/tasks permissions so an operator does not
+	// grant anything new to let a desktop client in.
+	mux.HandleFunc("GET /api/workspace", d.requirePermission(authz.PermResourcesRead, d.handleWorkspace))
+	mux.HandleFunc("GET /api/threads", d.requirePermission(authz.PermTasksRead, d.handleListThreads))
+	mux.HandleFunc("POST /api/threads", d.requirePermission(authz.PermTasksWrite, d.handleCreateThread))
+	mux.HandleFunc("GET /api/threads/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetThread))
+	mux.HandleFunc("POST /api/threads/{id}/messages", d.requirePermission(authz.PermTasksWrite, d.handlePostThreadMessage))
+	mux.HandleFunc("GET /api/threads/{id}/events", d.requirePermission(authz.PermTasksRead, d.handleThreadEventStream))
 
 	// Administration: users, groups, roles, permissions and resource grants.
 	mux.HandleFunc("GET /api/users", d.requirePermission(authz.PermUsersManage, d.handleListUsers))
