@@ -40,13 +40,14 @@ GOPROXY ?= https://goproxy.cn,direct
 # that host is unreachable, e.g. ALPINE_MIRROR=https://mirrors.aliyun.com
 ALPINE_MIRROR ?=
 
-# Local compose database. Postgres listens on 5434 (the bundled container's
-# internal port, also published to the host as 5434) to avoid postgres 5432 /
-# bankmind 5433. Keep POSTGRES_PORT in sync with docker-compose.yml's postgres
-# command/ports and the DATABASE_URL host:port below.
+# Local dev only: Postgres publishes 5434 to the host so a host-run server
+# (make run) reaches it at localhost:5434. Keep POSTGRES_PORT in sync with
+# docker-compose.yml's postgres command/ports. The host-run server's DSN is set
+# INLINE in the `run` target below — deliberately NOT exported, because an
+# exported DATABASE_URL=localhost:5434 would leak into `make up`'s
+# `docker compose up` and override the .env file's DATABASE_URL (postgres:5434),
+# breaking the containerized deploy with a "connection refused".
 POSTGRES_PORT ?= 5434
-DATABASE_URL ?= postgres://agenthub:agenthub@localhost:$(POSTGRES_PORT)/agenthub
-export DATABASE_URL
 
 .PHONY: run build test test-integration test-cover vet fmt version up down ports \
         docker-build compose-build \
@@ -61,7 +62,10 @@ export DATABASE_URL
 # cost is ~2s of bun install + vite build; use web-dev (5173, HMR) when the
 # bundle is what you are actually iterating on.
 run: db-up web-build
-	go run -ldflags="$(LDFLAGS)" ./cmd/$(BINARY)
+	# Host-run server: reach the postgres container on the published host port.
+	# Set inline so it does NOT leak into `make up` (see POSTGRES_PORT note).
+	DATABASE_URL=postgres://agenthub:agenthub@localhost:$(POSTGRES_PORT)/agenthub \
+		go run -ldflags="$(LDFLAGS)" ./cmd/$(BINARY)
 
 build: web-build
 	go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
@@ -121,10 +125,11 @@ compose-build:
 # (scripts/compose-ports.sh); `make ports` prints the same table later, and
 # `docker compose up` (attached) shows it in the server log instead.
 up:
-	# --force-recreate: Compose does not reliably detect changes to the env_file
-	# (.env) content, so a plain `up -d --build` can keep a stale container whose
-	# DATABASE_URL (etc.) still points at the old value. Force recreation so edits
-	# to .env always reach the container.
+	# --force-recreate so edits to .env always reach the container (Compose does
+	# not reliably detect env_file content changes). NB: this target must NOT run
+	# with DATABASE_URL exported — the top of this Makefile deliberately does not
+	# export it, so `docker compose up` uses the .env file's DATABASE_URL
+	# (postgres:5434) instead of a leaked localhost:5434.
 	docker compose up -d --build --force-recreate
 	@scripts/compose-ports.sh
 
@@ -138,7 +143,7 @@ down:
 
 db-up:
 	docker compose up -d postgres
-	@echo "waiting for postgres to accept connections on $(DATABASE_URL)"
+	@echo "waiting for postgres to accept connections on localhost:$(POSTGRES_PORT)"
 	@for i in $$(seq 1 30); do \
 		docker compose exec -T postgres pg_isready -q -U agenthub -p $(POSTGRES_PORT) && exit 0; \
 		sleep 1; \
