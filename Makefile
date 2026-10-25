@@ -121,7 +121,11 @@ compose-build:
 # (scripts/compose-ports.sh); `make ports` prints the same table later, and
 # `docker compose up` (attached) shows it in the server log instead.
 up:
-	docker compose up -d --build
+	# --force-recreate: Compose does not reliably detect changes to the env_file
+	# (.env) content, so a plain `up -d --build` can keep a stale container whose
+	# DATABASE_URL (etc.) still points at the old value. Force recreation so edits
+	# to .env always reach the container.
+	docker compose up -d --build --force-recreate
 	@scripts/compose-ports.sh
 
 # Port map of an already running stack: service → host → container → purpose.
