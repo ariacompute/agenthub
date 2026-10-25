@@ -50,27 +50,10 @@ func main() {
 			slog.Error("database close", "error", err)
 		}
 	}()
-	// Migrations run as a separate, higher-privilege role when one is configured,
-	// keeping the runtime app role to least privilege (see
-	// scripts/provision-db-roles.sql). Otherwise they run on the app connection.
-	if cfg.MigratorDatabaseURL != "" {
-		mdb, err := store.Open(cfg.MigratorDatabaseURL, cfg.Env == "dev")
-		if err != nil {
-			slog.Error("migrator database", "error", err)
-			os.Exit(1)
-		}
-		if err := store.Migrate(mdb); err != nil {
-			slog.Error("migrate", "error", err)
-			os.Exit(1)
-		}
-		if err := store.Close(mdb); err != nil {
-			slog.Error("migrator database close", "error", err)
-		}
-	} else {
-		if err := store.Migrate(db); err != nil {
-			slog.Error("migrate", "error", err)
-			os.Exit(1)
-		}
+	// Migrations run on the application connection at startup.
+	if err := store.Migrate(db); err != nil {
+		slog.Error("migrate", "error", err)
+		os.Exit(1)
 	}
 	// Demo resources are opt-in (AGENTHUB_SEED_DEMO=true): a default instance
 	// starts empty, which is what the README scripts switch on explicitly.

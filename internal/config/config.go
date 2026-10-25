@@ -90,10 +90,6 @@ type Config struct {
 	// redirect URI. Empty falls back to the request host at redirect time.
 	PublicBaseURL string
 	DatabaseURL   string
-	// MigratorDatabaseURL, when set, is a higher-privilege DSN used only to run
-	// schema migrations. The runtime DatabaseURL should be the least-privilege
-	// app role; the migrator role owns DDL. See scripts/provision-db-roles.sql.
-	MigratorDatabaseURL string
 	// SeedDemo inserts the five demo resources at startup. It is off by
 	// default: an instance should start with whatever the operator registers,
 	// not with sample rows nobody asked for. Turn it on for a local walkthrough
@@ -186,19 +182,18 @@ func Load() (*Config, error) {
 		SessionTTL:             envDur("AGENTHUB_SESSION_TTL", 12*time.Hour),
 		// Secure cookies by default in production; a plain http dev box can
 		// turn them off.
-		CookieSecure:        envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
-		PublicBaseURL:       envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
-		DatabaseURL:         envStr("DATABASE_URL", ""),
-		MigratorDatabaseURL: envStr("AGENTHUB_MIGRATOR_DATABASE_URL", ""),
-		SeedDemo:            envBool("AGENTHUB_SEED_DEMO", false),
-		LegacyMethods:       envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
-		MaxParallel:         envInt("AGENTHUB_MAX_PARALLEL", 8),
-		CLITimeout:          envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
-		CLIAllowlist:        envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
-		AgentTimeout:        envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
-		MaxOutputBytes:      envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
-		EventBuffer:         envInt("AGENTHUB_EVENT_BUFFER", 512),
-		PushEnabled:         envBool("AGENTHUB_PUSH_ENABLED", true),
+		CookieSecure:   envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
+		PublicBaseURL:  envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
+		DatabaseURL:    envStr("DATABASE_URL", ""),
+		SeedDemo:       envBool("AGENTHUB_SEED_DEMO", false),
+		LegacyMethods:  envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
+		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
+		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
+		CLIAllowlist:   envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
+		AgentTimeout:   envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
+		MaxOutputBytes: envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
+		EventBuffer:    envInt("AGENTHUB_EVENT_BUFFER", 512),
+		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
 		// Retention cap for the push callback audit trail, per task.
 		PushRecordLimit: envInt("AGENTHUB_PUSH_RECORD_LIMIT", 100),
 		PushSecret:      os.Getenv("AGENTHUB_PUSH_SECRET"),

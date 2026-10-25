@@ -57,10 +57,10 @@
 ## 5. 数据库安全
 
 23. [x] `internal/store/db.go`：`Open` 连接池改由 `dbPoolFromEnv`（默认 25/10/30m，可经环境变量覆盖）。
-24. [x] `internal/config/config.go`：新增 `MigratorDatabaseURL`（`AGENTHUB_MIGRATOR_DATABASE_URL`）；
+24. [x] `internal/config/config.go`：曾新增 `MigratorDatabaseURL`（`AGENTHUB_MIGRATOR_DATABASE_URL`），该配置后续已移除，迁移现运行于运行期连接；
     注：`Validate` 曾于生产强制 `DATABASE_URL` 的 `sslmode`，该要求已移除（见后续配置变更）；连接是否启用 TLS 现由部署方自行决定。
-25. [x] `cmd/agenthub-server/main.go`：若设 `MigratorDatabaseURL`，迁移在其专连上跑，运行期仍用 app 角色。
-26. [x] `scripts/provision-db-roles.sql`：`app` / `migrator` / `readonly` 最小权限三角色与默认权限。
+25. [x] `cmd/agenthub-server/main.go`：迁移在运行期连接上执行；`MigratorDatabaseURL` 专连配置已移除。
+26. [x] `scripts/provision-db-roles.sql`：`app` / `readonly` 两角色（`app` 拥有 schema 并运行迁移）。
 
 ## 6. 备份加密
 
@@ -74,12 +74,12 @@
 ## 7. 收口
 
 32. [x] `go build ./...` / `go vet ./...` 全绿；`go test` 覆盖上述包全绿（无 DB 依赖的包零外部依赖）。
-33. [x] `README.md` / `README_cn.md`：新增「安全加固」章，更新环境变量（加密/Push/Migrator/DB 池）、备份（加密+演练）、生产须知（DB TLS、最小权限、密钥轮换）。
+33. [x] `README.md` / `README_cn.md`：新增「安全加固」章，更新环境变量（加密/Push/DB 池）、备份（加密+演练）、生产须知（DB TLS、最小权限、密钥轮换）。
 34. [x] 文档：`requirements-security.md`（方案）/ 本 `task-security.md`（记录）。
 
 ## 待人工确认 / 后续
 
 - 部署前 `bash -n` 通过的 `scripts/backup-restore-drill.sh` 需在真实环境跑一次；需 `go` 与 `pg_restore/psql`。
 - 灰度后视情把 CSP 由 `Report-Only` 切为强制。
-- 执行 `provision-db-roles.sql` 并将运行期凭据切换到 `app` 角色、迁移切换到 `migrator`。
+- 执行 `provision-db-roles.sql` 并将运行期凭据切换到 `app` 角色（该角色同时负责迁移）。
 - 生产 `AGENTHUB_ENCRYPTION_KEY` 与（若启用）`AGENTHUB_PUSH_SECRET` 须由密钥管理注入，绝不提交入仓。

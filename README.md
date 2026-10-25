@@ -213,7 +213,6 @@ AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<strong-random-string>
 AGENTHUB_COOKIE_SECURE=true                               # behind HTTPS
 AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 AGENTHUB_ENCRYPTION_KEY=<32+ byte random secret>          # required in prod; backs static encryption + backup at-rest
-# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub  # optional: separate high-privilege migration role
 # AGENTHUB_PUSH_SECRET=<16+ byte random secret>           # optional: signed, SSRF-guarded A2A push callbacks
 # AGENTHUB_DB_MAX_OPEN_CONNS=25 AGENTHUB_DB_MAX_IDLE_CONNS=10 AGENTHUB_DB_CONN_MAX_LIFETIME=30m  # pool tuning
 ```
@@ -262,10 +261,10 @@ to the session key with a startup warning. API keys are stored hashed (`token_ha
 secrets are environment-variable references, never database rows — an injection audit confirmed every
 SQL statement is parameterised.
 
-**Database.** Run-time connections should use a least-privilege role; migrations can run as a
-separate role via `AGENTHUB_MIGRATOR_DATABASE_URL`. Provision the roles with
-`scripts/provision-db-roles.sql` (`app` / `migrator` / `readonly`). The connection pool is now
-tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME`).
+**Database.** Run-time connections should use a least-privilege role; migrations run on the same
+connection at startup. Provision the roles with `scripts/provision-db-roles.sql` (`app` /
+`readonly`). The connection pool is tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` /
+`_CONN_MAX_LIFETIME`).
 
 **Backups.** When `AGENTHUB_ENCRYPTION_KEY` is set, checkpoint archives are encrypted at rest
 (AES-256-GCM) into `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest — plaintext never touches
