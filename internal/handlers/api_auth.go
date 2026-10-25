@@ -138,7 +138,7 @@ func (d Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeAuthErr(w, err)
 		return
 	}
-	d.Auth.SetCookie(w, token, sess.ExpiresAt)
+	d.Auth.SetCookie(w, r, token, sess.ExpiresAt)
 	d.Log.Info("handler: login", "user", u.ID)
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"user": userView(u)})
 }
@@ -290,7 +290,7 @@ func (d Deps) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		redirectWithCode(w, r, authCodeOf(err))
 		return
 	}
-	d.Auth.SetCookie(w, token, sess.ExpiresAt)
+	d.Auth.SetCookie(w, r, token, sess.ExpiresAt)
 	d.Log.Info("handler: oauth login", "user", u.ID, "provider", provider)
 	http.Redirect(w, r, "/", http.StatusFound)
 }

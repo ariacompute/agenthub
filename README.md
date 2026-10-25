@@ -160,11 +160,18 @@ an attached `docker compose up` or `docker compose logs -f agenthub` spells it o
 
 ```bash
 docker compose up -d --build                # rebuild from source, then start postgres + agenthub, :3500 / :5434
+docker compose up -d --force-recreate       # re-create containers even when compose detects no change — e.g. after editing .env / env_file, so new env vars reach the container
 docker compose ps                           # STATUS should be Up (healthy)
 docker compose logs -f agenthub
 docker compose --profile dev up -d --build  # rebuild from source; also starts the web dev server on :5173
 docker compose down                         # stop; data survives in the agenthub-pgdata volume
 ```
+
+`--force-recreate` tears down and re-creates the containers unconditionally. Use it
+after editing `.env` (the stack reads your config through `env_file`): a plain
+`up -d` may skip recreation when only the file's contents changed, leaving the old
+environment inside the container — a common cause of "I changed `.env` but the app
+still sees the old value".
 
 Two differences from the `make` flow:
 

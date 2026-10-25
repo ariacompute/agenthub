@@ -162,8 +162,9 @@ func TestOAuthHelpers(t *testing.T) {
 func TestSessionCookieFlags(t *testing.T) {
 	insecure := New(nil, nil, nil, nil, nil, Options{CookieName: "agenthub_session", Secure: false})
 	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	expires := time.Now().UTC().Add(time.Hour)
-	insecure.SetCookie(rec, "token", expires)
+	insecure.SetCookie(rec, req, "token", expires)
 	cookies := rec.Result().Cookies()
 	if len(cookies) != 1 {
 		t.Fatalf("cookies = %d, want 1", len(cookies))
@@ -193,7 +194,8 @@ func TestSessionCookieFlags(t *testing.T) {
 		t.Fatalf("ttl = %v, want a default", secure.Options().TTL)
 	}
 	rec = httptest.NewRecorder()
-	secure.SetCookie(rec, "token", expires)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	secure.SetCookie(rec, req, "token", expires)
 	if !rec.Result().Cookies()[0].Secure {
 		t.Fatal("a secure deployment must mark the cookie")
 	}

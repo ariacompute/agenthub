@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"agenthub/internal/authz"
@@ -367,9 +368,29 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*authz.Princi
 	return p, sess, nil
 }
 
+// isRequestTLS reports whether the connection is (or was terminated as) TLS.
+// Behind a TLS-terminating reverse proxy, r.TLS is nil but X-Forwarded-Proto
+// carries the original scheme.
+func isRequestTLS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// warnSecureCookieOnce records the Secure-over-non-TLS footgun warning at most
+// once per process, so a misconfiguration is obvious without flooding logs.
+var warnSecureCookieOnce sync.Once
+
 // SetCookie writes the session cookie. Secure is driven by configuration so a
-// plain http deployment behind a reverse proxy still works.
-func (s *Service) SetCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+// plain http deployment behind a reverse proxy still works. When Secure is on
+// but the request is not TLS, the browser silently refuses the cookie, which
+// surfaces as a confusing 401 / "please log in" loop — so we warn loudly.
+func (s *Service) SetCookie(w http.ResponseWriter, r *http.Request, token string, expiresAt time.Time) {
+	if s.opts.Secure && r != nil && !isRequestTLS(r) {
+		warnSecureCookieOnce.Do(func() {
+			slog.Warn("auth: secure session cookie set over a non-TLS request",
+				"hint", "browsers drop Secure cookies over http; set AGENTHUB_COOKIE_SECURE=false for plain-http, or serve behind HTTPS (directly or via a TLS-terminating proxy)",
+				"x_forwarded_proto", r.Header.Get("X-Forwarded-Proto"))
+		})
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     s.opts.CookieName,
 		Value:    token,

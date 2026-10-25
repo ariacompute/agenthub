@@ -145,11 +145,14 @@ agenthub listening ports
 
 ```bash
 docker compose up -d --build                # 从源码重建镜像后，再起 postgres + agenthub，:3500 / :5434
+docker compose up -d --force-recreate       # 即便 compose 认为无变化也重建容器——例如改了 .env / env_file 后，确保新环境变量进入容器
 docker compose ps                           # STATUS 应为 Up (healthy)
 docker compose logs -f agenthub
 docker compose --profile dev up -d --build  # 从源码重建；额外起控制台 dev server，:5173
 docker compose down                         # 停止；数据保留在 agenthub-pgdata 卷
 ```
+
+`--force-recreate` 会无条件重建容器。改了 `.env`（栈通过 `env_file` 读取配置）后用它：单独的 `up -d` 在仅文件内容变化、compose 判断“无变更”时可能跳过重建，导致容器内仍是旧环境变量——这正是“明明改了 `.env`，应用却还是读旧值”的常见原因。
 
 与 `make` 路径有两点不同：
 
