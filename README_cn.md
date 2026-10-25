@@ -111,7 +111,7 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 ```bash
 cp .env.example .env  # 本地开发：复制环境变量模板，按需修改取值
 # cp .env.sec.example .env  # 加固生产：复制安全模板，再把每个 <...> 占位符换成真实密钥
-make up               # docker compose up -d，完成后打印端口清单
+make up               # docker compose up -d --build（从源码重建镜像后），完成后打印端口清单
 make ports            # 对已运行的栈重打端口清单
 make down             # 停止；数据保留在 agenthub-pgdata 卷
 ```
@@ -144,11 +144,11 @@ agenthub listening ports
 ### Docker compose
 
 ```bash
-docker compose up -d                # 需要时先构建，再起 postgres + agenthub，:3500 / :5434
-docker compose ps                   # STATUS 应为 Up (healthy)
+docker compose up -d --build                # 从源码重建镜像后，再起 postgres + agenthub，:3500 / :5434
+docker compose ps                           # STATUS 应为 Up (healthy)
 docker compose logs -f agenthub
-docker compose --profile dev up -d  # 额外起控制台 dev server，:5173
-docker compose down                 # 停止；数据保留在 agenthub-pgdata 卷
+docker compose --profile dev up -d --build  # 从源码重建；额外起控制台 dev server，:5173
+docker compose down                         # 停止；数据保留在 agenthub-pgdata 卷
 ```
 
 与 `make` 路径有两点不同：

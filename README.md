@@ -126,7 +126,7 @@ nothing but Docker and Compose.
 ```bash
 cp .env.example .env  # local development: copy the env template, then edit values as needed
 # cp .env.sec.example .env  # hardened production: copy the security template, then replace every <...> placeholder with a real secret
-make up               # docker compose up -d, then prints the port map
+make up               # docker compose up -d --build (rebuilds the image from source), then prints the port map
 make ports            # re-print the port map of a running stack
 make down             # stop; data survives in the agenthub-pgdata volume
 ```
@@ -159,11 +159,11 @@ an attached `docker compose up` or `docker compose logs -f agenthub` spells it o
 ### Docker compose
 
 ```bash
-docker compose up -d                # build if needed, then start postgres + agenthub, :3500 / :5434
-docker compose ps                   # STATUS should be Up (healthy)
+docker compose up -d --build                # rebuild from source, then start postgres + agenthub, :3500 / :5434
+docker compose ps                           # STATUS should be Up (healthy)
 docker compose logs -f agenthub
-docker compose --profile dev up -d  # also starts the web dev server on :5173
-docker compose down                 # stop; data survives in the agenthub-pgdata volume
+docker compose --profile dev up -d --build  # rebuild from source; also starts the web dev server on :5173
+docker compose down                         # stop; data survives in the agenthub-pgdata volume
 ```
 
 Two differences from the `make` flow:

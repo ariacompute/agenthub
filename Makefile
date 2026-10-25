@@ -117,7 +117,7 @@ compose-build:
 # (scripts/compose-ports.sh); `make ports` prints the same table later, and
 # `docker compose up` (attached) shows it in the server log instead.
 up:
-	docker compose up -d
+	docker compose up -d --build
 	@scripts/compose-ports.sh
 
 # Port map of an already running stack: service → host → container → purpose.
