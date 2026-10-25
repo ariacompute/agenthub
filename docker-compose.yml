@@ -54,6 +54,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5432/${POSTGRES_DB:-agenthub}?sslmode=disable
       AGENTHUB_HTTP_PORT: "3500"
       AGENTHUB_ENV: ${AGENTHUB_ENV:-dev}
+      # DATABASE_URL is interpolated from the environment so a hardened/production
+      # deployment can supply sslmode=require|verify-ca|verify-full. The default
+      # keeps the bundled postgres (no TLS) usable for local/dev. When you override
+      # it, the password must match POSTGRES_PASSWORD below.
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5432/${POSTGRES_DB:-agenthub}?sslmode=disable}
       # Identities live in Postgres. The bootstrap administrator is upserted at
       # every boot; without it the first registered account becomes the owner.
       AGENTHUB_BOOTSTRAP_ADMIN_EMAIL: ${AGENTHUB_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
