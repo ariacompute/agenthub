@@ -15,7 +15,7 @@ import (
 )
 
 func TestConnArgsCarryTheConnectionButNeverThePassword(t *testing.T) {
-	cfg, err := pgconn.ParseConfig("postgres://agenthub:s3cr3t@db.internal:5434/agenthub?sslmode=disable")
+	cfg, err := pgconn.ParseConfig("postgres://agenthub:s3cr3t@db.internal:5434/agenthub")
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
 	}

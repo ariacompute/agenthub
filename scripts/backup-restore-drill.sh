@@ -19,7 +19,7 @@
 #   AGENTHUB_ENCRYPTION_KEY  the same key agenthub uses; required for .enc files
 #
 # Example:
-#   BACKUP_DIR=/var/backups DRILL_DB_URL='postgres://postgres@localhost:5432/drill?sslmode=disable' \
+#   BACKUP_DIR=/var/backups DRILL_DB_URL='postgres://postgres@localhost:5432/drill' \
 #     AGENTHUB_ENCRYPTION_KEY="$(cat /run/secrets/backup_key)" \
 #     ./scripts/backup-restore-drill.sh
 

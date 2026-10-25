@@ -43,7 +43,7 @@
 
 ## 5. 数据库安全
 
-- 生产 `DATABASE_URL` 强制 `sslmode=require|verify-ca|verify-full`（`config.HasSecureSSLMode` + `Validate`；dev/staging 豁免）。
+- `DATABASE_URL` 不再强制 `sslmode`：是否对数据库连接启用 TLS 由部署方自行决定（如需传输加密，可在 DSN 中设置 `sslmode=require|verify-ca|verify-full`）。
 - 连接池可配置：`AGENTHUB_DB_MAX_OPEN_CONNS`（默认 25）/`AGENTHUB_DB_MAX_IDLE_CONNS`（10）/`AGENTHUB_DB_CONN_MAX_LIFETIME`（30m），见 `store/db.go`。
 - 最小权限三角色：`AGENTHUB_MIGRATOR_DATABASE_URL` 提供迁移专用高权限 DSN；运行期 `DATABASE_URL` 用 `app` 角色。`scripts/provision-db-roles.sql` 生成 `app` / `migrator` / `readonly`。
 - 备份静态加密：`internal/backup/crypto.go`（AES-256-GCM，nonce‖密文）+ `service.go` 在落盘时加密为 `*.tar.gz.enc` 并写 `<file>.sha256` 清单；恢复时透明解密。`scripts/backup-restore-drill.sh` 定期演练。

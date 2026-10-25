@@ -41,7 +41,7 @@ curl localhost:3500/.well-known/agent.json
 ```
 
 `DATABASE_URL` **必填**：缺失时 `config.Validate` 拒绝启动（不存在无库降级路径）。
-本地地址：`postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable`（见 `.env.example`）。
+本地地址：`postgres://agenthub:agenthub@localhost:5434/agenthub`（见 `.env.example`）。
 
 若是加固的生产部署而非本地开发，从加固模板起步更省事：`cp .env.sec.example .env`（见
 [安全加固](#安全加固)）。它已预先套用下面全部生产防护项，并仅带占位密钥，需你先替换才能启动。
@@ -191,7 +191,7 @@ AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<强随机串>
 AGENTHUB_COOKIE_SECURE=true                       # 走 HTTPS 时开启
 AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支撑静态加密与备份静态加密
-# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub?sslmode=require  # 可选：独立高权限迁移角色
+# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub  # 可选：独立高权限迁移角色
 # AGENTHUB_PUSH_SECRET=<16+ 字节随机密钥>          # 可选：签名 + SSRF 护航的 A2A push 回调
 # AGENTHUB_DB_MAX_OPEN_CONNS=25 AGENTHUB_DB_MAX_IDLE_CONNS=10 AGENTHUB_DB_CONN_MAX_LIFETIME=30m  # 连接池调优
 ```
@@ -228,8 +228,7 @@ mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`
 缺失时回退到会话密钥并告警。API key 以 `token_hash` 哈希存储，OAuth 客户端密钥为环境变量引用、绝不入库——
 注入审计确认全部 SQL 已参数化。
 
-**数据库**：生产 `DATABASE_URL` 须 `sslmode=require|verify-ca|verify-full`（否则退出）；运行期建议用最小权限
-角色，迁移可经 `AGENTHUB_MIGRATOR_DATABASE_URL` 单独高权限角色。`scripts/provision-db-roles.sql` 生成
+**数据库**：运行期建议用最小权限角色，迁移可经 `AGENTHUB_MIGRATOR_DATABASE_URL` 单独高权限角色。`scripts/provision-db-roles.sql` 生成
 `app` / `migrator` / `readonly` 三角色。连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` /
 `_CONN_MAX_LIFETIME` 调优。
 

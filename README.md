@@ -46,7 +46,7 @@ curl localhost:3500/.well-known/agent.json
 
 `DATABASE_URL` is **mandatory**: `config.Validate` refuses to start without it (there is no
 database-less fallback). Local value:
-`postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable` (see `.env.example`).
+`postgres://agenthub:agenthub@localhost:5434/agenthub` (see `.env.example`).
 
 For a hardened production deployment rather than local development, start from the
 security-hardened template instead: `cp .env.sec.example .env` (see
@@ -213,7 +213,7 @@ AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<strong-random-string>
 AGENTHUB_COOKIE_SECURE=true                               # behind HTTPS
 AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
 AGENTHUB_ENCRYPTION_KEY=<32+ byte random secret>          # required in prod; backs static encryption + backup at-rest
-# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub?sslmode=require  # optional: separate high-privilege migration role
+# AGENTHUB_MIGRATOR_DATABASE_URL=postgres://migrator@db:5432/agenthub  # optional: separate high-privilege migration role
 # AGENTHUB_PUSH_SECRET=<16+ byte random secret>           # optional: signed, SSRF-guarded A2A push callbacks
 # AGENTHUB_DB_MAX_OPEN_CONNS=25 AGENTHUB_DB_MAX_IDLE_CONNS=10 AGENTHUB_DB_CONN_MAX_LIFETIME=30m  # pool tuning
 ```
@@ -262,8 +262,7 @@ to the session key with a startup warning. API keys are stored hashed (`token_ha
 secrets are environment-variable references, never database rows — an injection audit confirmed every
 SQL statement is parameterised.
 
-**Database.** Production `DATABASE_URL` must use `sslmode=require|verify-ca|verify-full` (the server
-exits otherwise). Run-time connections should use a least-privilege role; migrations can run as a
+**Database.** Run-time connections should use a least-privilege role; migrations can run as a
 separate role via `AGENTHUB_MIGRATOR_DATABASE_URL`. Provision the roles with
 `scripts/provision-db-roles.sql` (`app` / `migrator` / `readonly`). The connection pool is now
 tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME`).

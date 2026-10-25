@@ -7,7 +7,6 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -283,12 +282,6 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL must be set")
 	}
-	// In production the database connection must not be cleartext: a missing or
-	// disabled sslmode would let credentials and data traverse the wire in the
-	// clear. dev/staging are exempt so a laptop can use a local no-TLS postgres.
-	if c.Env == "prod" && !HasSecureSSLMode(c.DatabaseURL) {
-		return fmt.Errorf("DATABASE_URL must set sslmode=require|verify-ca|verify-full in production")
-	}
 	if c.PushRecordLimit < 1 {
 		return fmt.Errorf("AGENTHUB_PUSH_RECORD_LIMIT must be positive, got %d", c.PushRecordLimit)
 	}
@@ -347,27 +340,6 @@ func (c *Config) Validate() error {
 // AuthMode is the identity mode reported by /healthz. agenthub always
 // authenticates against the users table now: the shared admin token is gone.
 func (c *Config) AuthMode() string { return "session" }
-
-// HasSecureSSLMode reports whether dsn requests TLS to the database. It accepts
-// both the URI form (postgres://...?sslmode=require) and the keyword form
-// (host=... sslmode=verify-full) that libpq accepts.
-func HasSecureSSLMode(dsn string) bool {
-	if parsed, err := url.Parse(dsn); err == nil && parsed.Scheme != "" {
-		switch strings.ToLower(parsed.Query().Get("sslmode")) {
-		case "require", "verify-ca", "verify-full":
-			return true
-		}
-		return false
-	}
-	// Keyword form: scan for an sslmode= token.
-	for _, kv := range strings.Fields(dsn) {
-		if strings.HasPrefix(kv, "sslmode=") {
-			mode := strings.ToLower(strings.TrimPrefix(kv, "sslmode="))
-			return mode == "require" || mode == "verify-ca" || mode == "verify-full"
-		}
-	}
-	return false
-}
 
 func envStr(key, def string) string {
 	if v := os.Getenv(key); v != "" {

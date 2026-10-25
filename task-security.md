@@ -58,7 +58,7 @@
 
 23. [x] `internal/store/db.go`：`Open` 连接池改由 `dbPoolFromEnv`（默认 25/10/30m，可经环境变量覆盖）。
 24. [x] `internal/config/config.go`：新增 `MigratorDatabaseURL`（`AGENTHUB_MIGRATOR_DATABASE_URL`）；
-    `HasSecureSSLMode` 同时支持 URI 与关键字 DSN；`Validate` 中生产强制 sslmode。
+    注：`Validate` 曾于生产强制 `DATABASE_URL` 的 `sslmode`，该要求已移除（见后续配置变更）；连接是否启用 TLS 现由部署方自行决定。
 25. [x] `cmd/agenthub-server/main.go`：若设 `MigratorDatabaseURL`，迁移在其专连上跑，运行期仍用 app 角色。
 26. [x] `scripts/provision-db-roles.sql`：`app` / `migrator` / `readonly` 最小权限三角色与默认权限。
 

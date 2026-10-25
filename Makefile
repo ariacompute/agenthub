@@ -41,7 +41,7 @@ GOPROXY ?= https://goproxy.cn,direct
 ALPINE_MIRROR ?=
 
 # Local compose database (host port 5434 avoids postgres 5432 / bankmind 5433).
-DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable
+DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub
 export DATABASE_URL
 
 .PHONY: run build test test-integration test-cover vet fmt version up down ports \

@@ -25,7 +25,7 @@ import (
 
 // testDatabaseURL is a placeholder: the end-to-end suite never opens a
 // connection, the hub runs on its in-memory stores.
-const testDatabaseURL = "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable"
+const testDatabaseURL = "postgres://agenthub:agenthub@localhost:5434/agenthub"
 
 // ---------------------------------------------------------------------------
 // harness

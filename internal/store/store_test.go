@@ -33,8 +33,8 @@ func TestRedactDSN(t *testing.T) {
 	}{
 		{
 			name: "password in userinfo",
-			in:   "postgres://agenthub:secret@localhost:5434/agenthub?sslmode=disable",
-			want: "postgres://agenthub:REDACTED@localhost:5434/agenthub?sslmode=disable",
+			in:   "postgres://agenthub:secret@localhost:5434/agenthub",
+			want: "postgres://agenthub:REDACTED@localhost:5434/agenthub",
 		},
 		{
 			name: "user without password",
@@ -43,8 +43,8 @@ func TestRedactDSN(t *testing.T) {
 		},
 		{
 			name: "password as a query parameter",
-			in:   "postgres://localhost:5434/agenthub?password=secret&sslmode=disable",
-			want: "postgres://localhost:5434/agenthub?password=REDACTED&sslmode=disable",
+			in:   "postgres://localhost:5434/agenthub?password=secret",
+			want: "postgres://localhost:5434/agenthub?password=REDACTED",
 		},
 	}
 	for _, c := range cases {

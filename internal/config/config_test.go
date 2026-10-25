@@ -90,7 +90,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
-	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -127,7 +127,7 @@ func TestLoadDefaults(t *testing.T) {
 // The demo resources are the only "mock data" agenthub can insert, so they must
 // be opt-in and impossible to enable in production.
 func TestSeedDemoIsOptIn(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub")
 
 	for _, tc := range []struct {
 		raw  string
@@ -172,7 +172,7 @@ func TestSeedDemoIsOptIn(t *testing.T) {
 // .env carries the address, and a typo must fail at boot rather than leaving an
 // instance nobody can log in to.
 func TestBootstrapAdminIsValidated(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub")
 
 	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD", "correct horse battery")
@@ -252,7 +252,7 @@ func TestValidateRejectsBadInput(t *testing.T) {
 			CLITimeout:      time.Second,
 			MaxOutputBytes:  1024,
 			EventBuffer:     64,
-			DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable",
+			DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub",
 			PushRecordLimit: 100,
 		}
 		c.mut(cfg)
@@ -274,7 +274,7 @@ func TestRegistryDefaultsStayValid(t *testing.T) {
 		CLITimeout:      time.Second,
 		MaxOutputBytes:  1024,
 		EventBuffer:     64,
-		DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable",
+		DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub",
 		PushRecordLimit: 100,
 		SessionTTL:      time.Hour,
 	}
@@ -301,7 +301,7 @@ func TestRegistryDefaultsStayValid(t *testing.T) {
 // The defaults are the offline posture: nothing reaches an upstream registry
 // unless an operator says so.
 func TestLoadDefaultsStayOffline(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable")
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub")
 	os.Unsetenv("AGENTHUB_REGISTRY_SYNC_ENABLED")
 	os.Unsetenv("AGENTHUB_REGISTRY_SYNC_FIXTURE")
 	os.Unsetenv("AGENTHUB_MODEL_ROUTER_MODE")
@@ -389,29 +389,5 @@ func TestLoadDotEnvDoesNotOverride(t *testing.T) {
 	}
 	if got := os.Getenv("AGENTHUB_TEST_KEY"); got != "already-set" {
 		t.Fatalf("existing env was overwritten: %q", got)
-	}
-}
-
-func TestHasSecureSSLMode(t *testing.T) {
-	ok := []string{
-		"postgres://u:p@db:5432/agenthub?sslmode=require",
-		"postgres://u:p@db:5432/agenthub?sslmode=verify-full",
-		"host=db port=5432 dbname=agenthub user=u sslmode=verify-ca",
-	}
-	for _, dsn := range ok {
-		if !HasSecureSSLMode(dsn) {
-			t.Errorf("expected secure: %q", dsn)
-		}
-	}
-	bad := []string{
-		"postgres://u:p@db:5432/agenthub?sslmode=disable",
-		"postgres://u:p@db:5432/agenthub?sslmode=prefer",
-		"host=db port=5432 dbname=agenthub user=u",
-		"postgres://u:p@db:5432/agenthub",
-	}
-	for _, dsn := range bad {
-		if HasSecureSSLMode(dsn) {
-			t.Errorf("expected insecure: %q", dsn)
-		}
 	}
 }

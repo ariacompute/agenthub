@@ -38,7 +38,7 @@ func testConfig() *config.Config {
 }
 
 // testDatabaseURL is a placeholder: unit tests never connect.
-const testDatabaseURL = "postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable"
+const testDatabaseURL = "postgres://agenthub:agenthub@localhost:5434/agenthub"
 
 func testOptions() adapter.Options {
 	return adapter.Options{CLITimeout: time.Second, CLIAllowlist: []string{"echo", "ls"}, MaxOutputBytes: 1024}
