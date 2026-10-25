@@ -9,12 +9,16 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agenthub}
       POSTGRES_USER: ${POSTGRES_USER:-agenthub}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agenthub}
+    # Listen on 5434 inside the compose network (and publish the same port to the
+    # host) so the app connects with `postgres:5434`. POSTGRES_PORT moves the
+    # published host port and the container port follows it.
+    command: ["postgres", "-p", "${POSTGRES_PORT:-5434}"]
     ports:
-      - "${POSTGRES_PORT:-5434}:5432"
+      - "${POSTGRES_PORT:-5434}:${POSTGRES_PORT:-5434}"
     volumes:
       - agenthub-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agenthub} -d ${POSTGRES_DB:-agenthub}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agenthub} -d ${POSTGRES_DB:-agenthub} -p ${POSTGRES_PORT:-5434}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -57,7 +61,7 @@ services:
       # override the connection. The default keeps the bundled postgres usable for
       # local/dev. When you override it, the password must match POSTGRES_PASSWORD
       # below.
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5432/${POSTGRES_DB:-agenthub}}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5434/${POSTGRES_DB:-agenthub}}
       # Identities live in Postgres. The bootstrap administrator is upserted at
       # every boot; without it the first registered account becomes the owner.
       AGENTHUB_BOOTSTRAP_ADMIN_EMAIL: ${AGENTHUB_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
