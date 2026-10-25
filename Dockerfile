@@ -124,7 +124,8 @@ ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org
 
 # The proxy is passed on the command line, not with ENV: an ENV here would
 # survive into the running container and proxy the server's own requests.
-RUN sed -i "s|https://dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
+RUN ALPINE_MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}" && \
+    sed -i "s|https://dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
     ( http_proxy="${BUILD_PROXY}" https_proxy="${BUILD_PROXY}" \
         timeout 180 apk add --no-cache ca-certificates tzdata wget postgresql17-client || \
       timeout 180 apk add --no-cache ca-certificates tzdata wget postgresql17-client || \

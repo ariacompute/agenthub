@@ -41,7 +41,7 @@ services:
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
         # Mirror root for the runtime stage's apk add. Empty => the Alpine CDN.
         #   export ALPINE_MIRROR=https://mirrors.aliyun.com   # if the CDN stalls
-        ALPINE_MIRROR: ${ALPINE_MIRROR:-}
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
         # Reported as "version@commit" in the console and /healthz. Stamp with
         #   VERSION=$(git describe --tags --abbrev=0 --always) \
         #   COMMIT=$(git rev-parse --short=7 HEAD) docker compose build
