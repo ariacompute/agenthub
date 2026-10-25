@@ -92,6 +92,14 @@ services:
       AGENTHUB_BACKUP_MODE: ${AGENTHUB_BACKUP_MODE:-off}
       AGENTHUB_BACKUP_KEEP_LAST: ${AGENTHUB_BACKUP_KEEP_LAST:-7}
       AGENTHUB_BACKUP_MAX_AGE_DAYS: ${AGENTHUB_BACKUP_MAX_AGE_DAYS:-30}
+    # Pass the operator's .env (or .env.sec copied to .env) into the container.
+    # A root-level .env is only used by Compose for variable *substitution*; it is
+    # NOT injected as container env unless we do it here. Any variable not listed
+    # in the environment: block above (e.g. AGENTHUB_ENCRYPTION_KEY,
+    # AGENTHUB_PUSH_SECRET, pool/registry settings) would otherwise never reach
+    # the app.
+    env_file:
+      - .env
     ports:
       - "${AGENTHUB_HTTP_PORT:-3500}:3500"
     # Migrations run at boot, so the database must be reachable first.
