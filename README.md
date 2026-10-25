@@ -36,6 +36,7 @@ registries, sources, playground, administration and a built-in documentation pag
 ## Run
 
 ```bash
+cp .env.example .env                        # copy the env template, then edit values as needed
 make db-up                                  # start PostgreSQL (host port 5434) and wait until it is ready
 make run                                    # defaults to :3500 (Open → Migrate → Seed)
 curl localhost:3500/healthz
@@ -117,9 +118,10 @@ nothing but Docker and Compose.
 ### Make
 
 ```bash
-make up     # docker compose up -d, then prints the port map
-make ports  # re-print the port map of a running stack
-make down   # stop; data survives in the agenthub-pgdata volume
+cp .env.example .env  # copy the env template, then edit values as needed
+make up               # docker compose up -d, then prints the port map
+make ports            # re-print the port map of a running stack
+make down             # stop; data survives in the agenthub-pgdata volume
 ```
 
 Compose has no post-up hook, so `make up` prints the map once the stack is healthy, and

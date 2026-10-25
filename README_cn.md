@@ -32,6 +32,7 @@
 ## 运行
 
 ```bash
+cp .env.example .env                        # 复制环境变量模板，按需修改取值
 make db-up                                  # 起 PostgreSQL（宿主 5434）并等待 ready
 make run                                    # 默认 :3500（Open → Migrate → Seed）
 curl localhost:3500/healthz
@@ -104,9 +105,10 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 ### Make
 
 ```bash
-make up     # docker compose up -d，完成后打印端口清单
-make ports  # 对已运行的栈重打端口清单
-make down   # 停止；数据保留在 agenthub-pgdata 卷
+cp .env.example .env  # 复制环境变量模板，按需修改取值
+make up               # docker compose up -d，完成后打印端口清单
+make ports            # 对已运行的栈重打端口清单
+make down             # 停止；数据保留在 agenthub-pgdata 卷
 ```
 
 compose 没有 after-up 钩子，所以 `make up` 在栈健康后立刻打印端口清单，`make ports` 之后可随时重打：
