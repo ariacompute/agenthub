@@ -32,7 +32,8 @@
 ## 运行
 
 ```bash
-cp .env.example .env                        # 复制环境变量模板，按需修改取值
+cp .env.example .env                        # 本地开发：复制环境变量模板，按需修改取值
+# cp .env.sec.example .env                  # 加固生产：复制安全模板，再把每个 <...> 占位符换成真实密钥
 make db-up                                  # 起 PostgreSQL（宿主 5434）并等待 ready
 make run                                    # 默认 :3500（Open → Migrate → Seed）
 curl localhost:3500/healthz
@@ -41,6 +42,9 @@ curl localhost:3500/.well-known/agent.json
 
 `DATABASE_URL` **必填**：缺失时 `config.Validate` 拒绝启动（不存在无库降级路径）。
 本地地址：`postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable`（见 `.env.example`）。
+
+若是加固的生产部署而非本地开发，从加固模板起步更省事：`cp .env.sec.example .env`（见
+[安全加固](#安全加固)）。它已预先套用下面全部生产防护项，并仅带占位密钥，需你先替换才能启动。
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
@@ -105,7 +109,8 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 ### Make
 
 ```bash
-cp .env.example .env  # 复制环境变量模板，按需修改取值
+cp .env.example .env  # 本地开发：复制环境变量模板，按需修改取值
+# cp .env.sec.example .env  # 加固生产：复制安全模板，再把每个 <...> 占位符换成真实密钥
 make up               # docker compose up -d，完成后打印端口清单
 make ports            # 对已运行的栈重打端口清单
 make down             # 停止；数据保留在 agenthub-pgdata 卷
@@ -177,7 +182,7 @@ Release tag 与该 tag 的 commit 会作为 `VERSION` / `COMMIT` 构建参数写
 docker pull ariacompute/agenthub-agenthub:<tag>  # 例如 v0.3.0
 ```
 
-**生产部署必须**：
+**生产部署必须**：一份覆盖下面全部变量（外加 SSRF 护航的同步与签名的 A2A push 设置）的加固模板已随仓库提供，名为 `.env.sec.example`。用 `cp .env.sec.example .env` 复制，再把每个 `<...>` 占位符换成带外生成的强随机密钥（如 `openssl rand -base64 48`）。该模板在占位符替换前**故意无效**，因此加固实例不可能带着提交进仓的密钥启动。
 
 ```bash
 AGENTHUB_ENV=prod

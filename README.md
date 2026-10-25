@@ -36,7 +36,8 @@ registries, sources, playground, administration and a built-in documentation pag
 ## Run
 
 ```bash
-cp .env.example .env                        # copy the env template, then edit values as needed
+cp .env.example .env                        # local development: copy the env template, then edit values as needed
+# cp .env.sec.example .env                  # hardened production: copy the security template, then replace every <...> placeholder with a real secret
 make db-up                                  # start PostgreSQL (host port 5434) and wait until it is ready
 make run                                    # defaults to :3500 (Open → Migrate → Seed)
 curl localhost:3500/healthz
@@ -46,6 +47,11 @@ curl localhost:3500/.well-known/agent.json
 `DATABASE_URL` is **mandatory**: `config.Validate` refuses to start without it (there is no
 database-less fallback). Local value:
 `postgres://agenthub:agenthub@localhost:5434/agenthub?sslmode=disable` (see `.env.example`).
+
+For a hardened production deployment rather than local development, start from the
+security-hardened template instead: `cp .env.sec.example .env` (see
+[Security hardening](#security-hardening)). It pre-applies every production safeguard below and
+ships with placeholder secrets you must replace before the instance can boot.
 
 Console: `make web-dev` (development) or `make web-build && make run` (the bundle is hosted at `/`
 by the Go process).
@@ -118,7 +124,8 @@ nothing but Docker and Compose.
 ### Make
 
 ```bash
-cp .env.example .env  # copy the env template, then edit values as needed
+cp .env.example .env  # local development: copy the env template, then edit values as needed
+# cp .env.sec.example .env  # hardened production: copy the security template, then replace every <...> placeholder with a real secret
 make up               # docker compose up -d, then prints the port map
 make ports            # re-print the port map of a running stack
 make down             # stop; data survives in the agenthub-pgdata volume
@@ -193,7 +200,11 @@ always agree. The workflow needs two repository secrets: `DOCKERHUB_USERNAME` an
 docker pull ariacompute/agenthub-agenthub:<tag>  # e.g. v0.3.0
 ```
 
-**Required for production:**
+**Required for production:** A ready-made hardened template covering every variable below — plus the
+SSRF-guarded registry sync and signed A2A push settings — ships as `.env.sec.example`. Copy it with
+`cp .env.sec.example .env`, then replace each `<...>` placeholder with a secret generated out of band
+(`openssl rand -base64 48`). The template is intentionally invalid until those placeholders are set,
+so a hardened instance cannot boot with committed secrets.
 
 ```bash
 AGENTHUB_ENV=prod
