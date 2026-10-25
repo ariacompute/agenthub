@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -178,14 +179,17 @@ WHERE lower(email) = lower($1)`, email).Error
 
 // LockedUntil returns the account's lock expiry, or nil when it is not locked.
 func (s *userStore) LockedUntil(ctx context.Context, email string) (*time.Time, error) {
-	var until *time.Time
+	var until sql.NullTime
 	err := s.db.WithContext(ctx).Model(&model.User{}).
 		Where("lower(email) = lower(?)", email).
 		Select("locked_until").Scan(&until).Error
 	if err != nil {
 		return nil, err
 	}
-	return until, nil
+	if !until.Valid {
+		return nil, nil
+	}
+	return &until.Time, nil
 }
 
 // SetStatus is the enable/disable switch of the admin API.
