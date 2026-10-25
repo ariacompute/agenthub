@@ -40,8 +40,12 @@ GOPROXY ?= https://goproxy.cn,direct
 # that host is unreachable, e.g. ALPINE_MIRROR=https://mirrors.aliyun.com
 ALPINE_MIRROR ?=
 
-# Local compose database (host port 5434 avoids postgres 5432 / bankmind 5433).
-DATABASE_URL ?= postgres://agenthub:agenthub@localhost:5434/agenthub
+# Local compose database. Postgres listens on 5434 (the bundled container's
+# internal port, also published to the host as 5434) to avoid postgres 5432 /
+# bankmind 5433. Keep POSTGRES_PORT in sync with docker-compose.yml's postgres
+# command/ports and the DATABASE_URL host:port below.
+POSTGRES_PORT ?= 5434
+DATABASE_URL ?= postgres://agenthub:agenthub@localhost:$(POSTGRES_PORT)/agenthub
 export DATABASE_URL
 
 .PHONY: run build test test-integration test-cover vet fmt version up down ports \
@@ -132,7 +136,7 @@ db-up:
 	docker compose up -d postgres
 	@echo "waiting for postgres to accept connections on $(DATABASE_URL)"
 	@for i in $$(seq 1 30); do \
-		docker compose exec -T postgres pg_isready -q -U agenthub && exit 0; \
+		docker compose exec -T postgres pg_isready -q -U agenthub -p $(POSTGRES_PORT) && exit 0; \
 		sleep 1; \
 	done; \
 	echo "postgres did not become ready in time"; exit 1
@@ -141,7 +145,7 @@ db-down:
 	docker compose down
 
 db-psql:
-	docker compose exec postgres psql -U agenthub -d agenthub
+	docker compose exec postgres psql -U agenthub -d agenthub -p $(POSTGRES_PORT)
 
 web-install:
 	cd $(WEB) && bun install
