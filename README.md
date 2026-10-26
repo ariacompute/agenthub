@@ -232,11 +232,6 @@ restart. Configuration is passed through the compose `.env` file or environment 
 
 ## Security hardening
 
-A defence-in-depth pass, adapted from the ariacompute/serve hardening and shaped to agenthub's
-architecture (no nginx, DB-backed sessions, A2A push callbacks and upstream synchronisation as
-server-side outbound requests). Full rationale and acceptance criteria are in
-`requirements-security.md`; the implementation record is `task-security.md`. Highlights:
-
 **Transport / edge.** agenthub is a single Go binary, so the security response headers live in a
 middleware (`internal/middleware`): `X-Content-Type-Options`, `Referrer-Policy`, `COOP`/`CORP`, and a
 grace-period `Content-Security-Policy-Report-Only`. HSTS is emitted only when `AGENTHUB_ENV=prod` or

@@ -205,10 +205,6 @@ AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支�
 
 ## 安全加固
 
-一次纵深防御改造，参考 ariacompute/serve 的五大域并按 agenthub 架构适配（无 nginx、会话为 DB 随机
-令牌、A2A push 回调与上游同步是服务端出站请求）。完整方案见 `requirements-security.md`，实施记录见
-`task-security.md`。要点：
-
 **传输 / 边缘**：agenthub 是单 Go 二进制，安全响应头改由中间件发出（`internal/middleware`）：
 `X-Content-Type-Options`、`Referrer-Policy`、`COOP`/`CORP`，以及灰度期的
 `Content-Security-Policy-Report-Only`。HSTS 仅在 `AGENTHUB_ENV=prod` 或请求已走 TLS（`r.TLS` 或
