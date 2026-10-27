@@ -148,6 +148,16 @@ type Config struct {
 	// OAuth providers. A provider without credentials is simply absent from the
 	// login page, so an instance without any of them stays self contained.
 	OAuth auth.OAuthConfig
+	// ChannelsEnabled gates the /api/channels* endpoints. Off by default so an
+	// instance that has not configured signing secrets does not expose a public
+	// webhook surface.
+	ChannelsEnabled bool
+	// SpeechMode selects the voice backend: "mock" (offline deterministic) or
+	// "real" (a provider configured on the resource). The first release only
+	// ships the mock.
+	SpeechMode string
+	// AudioMaxBytes caps the per-request audio upload for POST /api/threads/{id}/audio.
+	AudioMaxBytes int
 }
 
 // BackupEnabled reports whether checkpointing is configured at all. Everything
@@ -218,6 +228,9 @@ func Load() (*Config, error) {
 		// registry sets this to false explicitly.
 		RegistrySyncFixture: envBool("AGENTHUB_REGISTRY_SYNC_FIXTURE", true),
 		ModelRouterMode:     envStr("AGENTHUB_MODEL_ROUTER_MODE", registry.ProviderModeMock),
+		ChannelsEnabled:     envBool("AGENTHUB_CHANNELS_ENABLED", false),
+		SpeechMode:          envStr("AGENTHUB_SPEECH_MODE", registry.ProviderModeMock),
+		AudioMaxBytes:       envInt("AGENTHUB_AUDIO_MAX_BYTES", 16<<20),
 		OAuth: auth.OAuthConfig{
 			Enabled: envBool("AGENTHUB_OAUTH_ENABLED", true),
 			Google: auth.ProviderConfig{
@@ -328,6 +341,25 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("AGENTHUB_MODEL_ROUTER_MODE must be %q or %q, got %q",
 			registry.ProviderModeMock, registry.ProviderModeOpenAICompatible, c.ModelRouterMode)
+	}
+	// Voice backend: mock is the only shipping mode, but the value is validated so
+	// a future real provider can be enabled without a code change.
+	if strings.TrimSpace(c.SpeechMode) == "" {
+		c.SpeechMode = registry.ProviderModeMock
+	}
+	switch c.SpeechMode {
+	case registry.ProviderModeMock, registry.ProviderModeOpenAICompatible:
+	default:
+		return fmt.Errorf("AGENTHUB_SPEECH_MODE must be %q or %q, got %q",
+			registry.ProviderModeMock, registry.ProviderModeOpenAICompatible, c.SpeechMode)
+	}
+	// An unset cap means the caller built the struct directly instead of going
+	// through Load; fall back to the default rather than rejecting the instance.
+	if c.AudioMaxBytes == 0 {
+		c.AudioMaxBytes = 16 << 20
+	}
+	if c.AudioMaxBytes < 1<<20 {
+		return fmt.Errorf("AGENTHUB_AUDIO_MAX_BYTES must be at least 1 MiB")
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
 	"agenthub/internal/backup"
+	"agenthub/internal/channels"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
@@ -50,6 +51,9 @@ type Deps struct {
 	// instance has no database, in which case the /api/threads endpoints report
 	// the feature as unavailable rather than panicking.
 	Threads threads.Store
+	// Channels persists the external messaging surfaces (Slack / Teams / Telegram
+	// / SMS) bound to threads. It is nil when channels are disabled.
+	Channels channels.Store
 }
 
 // Register builds the router.
@@ -123,6 +127,28 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/threads/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetThread))
 	mux.HandleFunc("POST /api/threads/{id}/messages", d.requirePermission(authz.PermTasksWrite, d.handlePostThreadMessage))
 	mux.HandleFunc("GET /api/threads/{id}/events", d.requirePermission(authz.PermTasksRead, d.handleThreadEventStream))
+
+	// Channels: external messaging surfaces (Slack / Teams / Telegram / SMS) bound
+	// to a thread.
+	mux.HandleFunc("GET /api/channels", d.requirePermission(authz.PermTasksRead, d.handleListChannels))
+	mux.HandleFunc("POST /api/channels", d.requirePermission(authz.PermTasksWrite, d.handleCreateChannel))
+	mux.HandleFunc("GET /api/channels/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetChannel))
+	mux.HandleFunc("PUT /api/channels/{id}", d.requirePermission(authz.PermTasksWrite, d.handleUpdateChannel))
+	mux.HandleFunc("DELETE /api/channels/{id}", d.requirePermission(authz.PermTasksWrite, d.handleDeleteChannel))
+	mux.HandleFunc("GET /api/channels/{id}/deliveries", d.requirePermission(authz.PermTasksRead, d.handleListDeliveries))
+	// Public inbound webhook. No session: the platform signs with the channel's
+	// secret, verified against the env var named in signing_key_env.
+	mux.HandleFunc("POST /api/channels/{id}/webhook", d.handleChannelWebhook)
+
+	// Connectors: external applications invoking a kind=mcp resource, with a
+	// per-resource policy that may require a human approval (HITL).
+	mux.HandleFunc("GET /api/connectors", d.requirePermission(authz.PermResourcesRead, d.handleListConnectors))
+	mux.HandleFunc("PUT /api/connectors/{id}/policy", d.requirePermission(authz.PermResourcesWrite, d.handlePutConnectorPolicy))
+	mux.HandleFunc("GET /api/connectors/{id}/actions", d.requirePermission(authz.PermResourcesRead, d.handleListConnectorActions))
+	mux.HandleFunc("POST /api/connectors/{id}/actions", d.requirePermission(authz.PermResourcesWrite, d.handleConnectorAction))
+
+	// Voice: a recorded clip is transcribed server side and forwarded into the thread.
+	mux.HandleFunc("POST /api/threads/{id}/audio", d.requirePermission(authz.PermTasksWrite, d.handleThreadAudio))
 
 	// Administration: users, groups, roles, permissions and resource grants.
 	mux.HandleFunc("GET /api/users", d.requirePermission(authz.PermUsersManage, d.handleListUsers))

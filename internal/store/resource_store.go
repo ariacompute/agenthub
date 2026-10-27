@@ -59,6 +59,7 @@ var resourceUpdateColumns = []string{
 	"kind", "name", "description", "endpoint", "version", "repository",
 	"tags", "capabilities", "auth_schemes", "env", "metadata", "kind_config",
 	"transport", "health", "namespace", "status", "display_name", "source_id",
+	"persona",
 	"updated_at",
 }
 
@@ -200,6 +201,10 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 	if err != nil {
 		return nil, err
 	}
+	persona, err := model.NewJSONField(e.Persona)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	createdAt := e.CreatedAt
 	if createdAt.IsZero() {
@@ -233,6 +238,7 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 		Env:          env,
 		Metadata:     meta,
 		KindConfig:   kindCfg,
+		Persona:      persona,
 		Transport:    string(e.Transport),
 		Health:       string(health),
 		Namespace:    e.EffectiveNamespace(),
@@ -278,6 +284,9 @@ func entryFromResource(row *model.Resource) (*registry.Entry, error) {
 		return nil, err
 	}
 	if err := row.KindConfig.Decode(&e.KindConfig); err != nil {
+		return nil, err
+	}
+	if err := row.Persona.Decode(&e.Persona); err != nil {
 		return nil, err
 	}
 	return e, nil

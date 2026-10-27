@@ -77,6 +77,27 @@ const (
 	CodeAPIKeyExpired      Code = "api_key_expired"
 	CodeAPIKeyRevoked      Code = "api_key_revoked"
 	CodeAPIKeyNameRequired Code = "api_key_name_required"
+
+	// Channels: inbound webhooks and outbound delivery. Each code names the
+	// guardrail that stopped the hop so the console can localise it precisely.
+	CodeChannelDisabled         Code = "channel_disabled"
+	CodeChannelNotFound         Code = "channel_not_found"
+	CodeChannelSignatureMissing Code = "channel_signature_missing"
+	CodeChannelSignatureInvalid Code = "channel_signature_invalid"
+	CodeChannelTimestampExpired Code = "channel_timestamp_expired"
+	CodeChannelPayloadInvalid   Code = "channel_payload_invalid"
+	CodeDeliveryFailed          Code = "delivery_failed"
+
+	// Connectors: external applications invoking a kind=mcp resource.
+	CodeConnectorNotFound  Code = "connector_not_found"
+	CodeConnectorDenied    Code = "connector_action_denied"
+	CodeConnectorPolicyOff Code = "connector_policy_off"
+
+	// Speech: voice messages transcribed and synthesised server side.
+	CodeAudioTooLarge         Code = "audio_too_large"
+	CodeAudioUnsupported      Code = "audio_unsupported"
+	CodeAudioTranscribeFailed Code = "audio_transcribe_failed"
+	CodeSpeechDisabled        Code = "speech_disabled"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -120,6 +141,10 @@ func WriteErr(w http.ResponseWriter, err error) {
 	// An expired or revoked session is not "unauthorised" in the HTTP sense:
 	// the console treats 401 as "log in again", which is exactly what it wants.
 	case CodeUnauthorized, CodeUnauthenticated, CodeSessionExpired, CodeInvalidCredentials:
+		WriteError(w, http.StatusUnauthorized, e.Code)
+	// A bad or missing webhook signature is an authentication failure: the console
+	// treats 401 as "the channel secret is wrong", not "retry blindly".
+	case CodeChannelSignatureMissing, CodeChannelSignatureInvalid, CodeChannelTimestampExpired:
 		WriteError(w, http.StatusUnauthorized, e.Code)
 	case CodeAccountLocked:
 		WriteError(w, http.StatusTooManyRequests, e.Code)

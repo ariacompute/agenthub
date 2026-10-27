@@ -28,6 +28,18 @@ func TestListenersCoverRoutes(t *testing.T) {
 	// once, where a live one would block the probe until something happens.
 	finished := runOnce(t, h, entry.ID)
 
+	// A connector (kind=mcp) with the "allowed" policy so the connector action
+	// probe exercises the full send path instead of a 404.
+	mcp := &registry.Entry{
+		Kind:       registry.KindMCP,
+		Name:       "c1",
+		Endpoint:   "http://example.test/core",
+		KindConfig: &registry.KindConfig{ConnectorPolicy: registry.ConnectorPolicyAllowed},
+	}
+	if _, err := d.Reg.Upsert(mcp); err != nil {
+		t.Fatalf("seed connector: %v", err)
+	}
+
 	// One concrete request per listed endpoint: enough to prove the route is
 	// still wired up (404 means it is gone).
 	probes := map[string]struct {
@@ -52,7 +64,14 @@ func TestListenersCoverRoutes(t *testing.T) {
 		// API keys answer 401 without a session: there is no key service to wire
 		// into the test harness, so the auth gate itself is what is exercised.
 		"GET /api/api-keys": {http.MethodGet, "/api/api-keys", ""},
-		"GET /healthz":      {http.MethodGet, "/healthz", ""},
+		"GET /api/channels": {http.MethodGet, "/api/channels", ""},
+		// Public webhook with no channel store wired: it answers 503, not 404.
+		"POST /api/channels/{id}/webhook": {http.MethodPost, "/api/channels/ch1/webhook", `{"text":"hi","event_id":"e1"}`},
+		"GET /api/connectors":             {http.MethodGet, "/api/connectors", ""},
+		// Allowed connector: the probe runs the full send path.
+		"POST /api/connectors/{id}/actions": {http.MethodPost, "/api/connectors/" + mcp.ID + "/actions", `{"action":"invoke","args":{}}`},
+		"POST /api/threads/{id}/audio":      {http.MethodPost, "/api/threads/" + finished + "/audio", ""},
+		"GET /healthz":                      {http.MethodGet, "/healthz", ""},
 	}
 
 	listeners := Listeners()

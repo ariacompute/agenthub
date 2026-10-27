@@ -174,8 +174,9 @@ func main() {
 	// Collaboration threads (agentbuddy) share the same database as the rest of
 	// the hub; nil when the instance runs without one, like every other store.
 	threadsStore := store.NewThreadsStore(db)
+	channelsStore := store.NewChannelsStore(db)
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore}
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Wrap(handlers.Register(deps), cfg),

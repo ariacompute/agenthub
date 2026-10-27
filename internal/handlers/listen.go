@@ -34,6 +34,11 @@ func Listeners() []Listener {
 		{"GET /api/grants", "admin: per-resource read/write grants"},
 		{"GET /api/backups", "admin: database checkpoints, schedule and restores"},
 		{"GET /api/api-keys", "admin: list, create, rotate and revoke API keys"},
+		{"GET /api/channels", "channels: external messaging surfaces bound to threads"},
+		{"POST /api/channels/{id}/webhook", "public inbound webhook for a channel (signed)"},
+		{"GET /api/connectors", "connectors: external applications invoking an mcp resource"},
+		{"POST /api/connectors/{id}/actions", "invoke a connector action (policy gated)"},
+		{"POST /api/threads/{id}/audio", "voice message upload, transcribed server side"},
 		{"GET /healthz", "health probe, also the container healthcheck"},
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -179,8 +180,20 @@ type Entry struct {
 	// the Agent Card, the MCP server definition, the skill manual or the CLI
 	// command.
 	KindConfig *KindConfig `json:"kind_config,omitempty"`
-	CreatedAt  time.Time   `json:"createdAt"`
-	UpdatedAt  time.Time   `json:"updatedAt"`
+	// Persona is the optional human-facing presentation of the resource. It
+	// carries nothing that changes behaviour, only how a console renders it.
+	Persona   *Persona  `json:"persona,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Persona is the human-facing presentation of a resource (display label, tagline
+// and avatar). It is descriptive only: nothing here changes routing or auth.
+type Persona struct {
+	DisplayName string `json:"displayName,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Tagline     string `json:"tagline,omitempty"`
+	AvatarURL   string `json:"avatarUrl,omitempty"`
 }
 
 // EffectiveNamespace returns the namespace of an entry, falling back to the
@@ -210,6 +223,37 @@ func (e *Entry) EffectiveDisplayName() string {
 		return strings.TrimSpace(e.DisplayName)
 	}
 	return e.Name
+}
+
+// normalizePersona trims fields, caps their length and drops an avatar URL that
+// is not http(s). A malformed or dangerous URL is dropped rather than rejected so
+// an older client can still save the rest of the record; an all-empty persona is
+// reduced to nil so the column stays null and the wire shape stays compact.
+func normalizePersona(p *Persona) *Persona {
+	if p == nil {
+		return nil
+	}
+	const maxLen = 256
+	trim := func(s string) string {
+		s = strings.TrimSpace(s)
+		if len(s) > maxLen {
+			s = s[:maxLen]
+		}
+		return s
+	}
+	p.DisplayName = trim(p.DisplayName)
+	p.Title = trim(p.Title)
+	p.Tagline = trim(p.Tagline)
+	p.AvatarURL = strings.TrimSpace(p.AvatarURL)
+	if p.AvatarURL != "" {
+		if u, err := url.Parse(p.AvatarURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			p.AvatarURL = ""
+		}
+	}
+	if p.DisplayName == "" && p.Title == "" && p.Tagline == "" && p.AvatarURL == "" {
+		return nil
+	}
+	return p
 }
 
 // Registry owns the resource catalogue.
@@ -327,6 +371,7 @@ func (r *Registry) Upsert(in *Entry) (*Entry, error) {
 	e.Kind = kind
 	e.Name = strings.TrimSpace(e.Name)
 	e.Namespace = ns
+	e.Persona = normalizePersona(e.Persona)
 	if e.Health == "" {
 		e.Health = HealthUnknown
 	}

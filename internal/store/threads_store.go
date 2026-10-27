@@ -33,6 +33,7 @@ type threadMessageRow struct {
 	Body       string    `gorm:"type:text;not null"`
 	TaskID     string    `gorm:"size:64;index"`
 	ResourceID string    `gorm:"size:64;index"`
+	Origin     string    `gorm:"size:16;not null;default:''"`
 	CreatedAt  time.Time `gorm:"index"`
 }
 
@@ -121,6 +122,7 @@ func (s *threadsStore) AddMessage(ctx context.Context, m *threads.Message) (*thr
 		Body:       m.Body,
 		TaskID:     m.TaskID,
 		ResourceID: m.ResourceID,
+		Origin:     m.Origin,
 		CreatedAt:  time.Now().UTC(),
 	}
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
@@ -171,6 +173,7 @@ func (s *threadsStore) UpsertAgentMessage(ctx context.Context, threadID, taskID,
 		Body:       body,
 		TaskID:     taskID,
 		ResourceID: resourceID,
+		Origin:     "agent",
 		CreatedAt:  time.Now().UTC(),
 	}
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
@@ -202,6 +205,7 @@ func (s *threadsStore) toMessage(r *threadMessageRow) *threads.Message {
 		Body:       r.Body,
 		TaskID:     r.TaskID,
 		ResourceID: r.ResourceID,
+		Origin:     r.Origin,
 		CreatedAt:  r.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

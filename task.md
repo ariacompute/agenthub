@@ -282,6 +282,46 @@ per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批
 ### 4. 验证
 110. [x] `go build ./...`、`go vet`、全量 `go test ./...` 绿；`store_test.go` 迁移顺序测试补 `012_threads.sql`
 
+## M2.2 — agentbuddy 通道 / 连接器 / 语音 / 形象（已完成）
+
+为 agentbuddy 桌面客户端补齐四类服务端能力：外部通道入站（Slack/Teams/Telegram/SMS）、
+外部应用连接器审批网关、语音转写与合成、资源形象（`Persona`）。全部复用既有权限
+（`tasks:read`/`tasks:write`/`resources:read`/`resources:write`），不新增角色或用户组。
+
+### 1. 迁移（幂等，全量重放）
+111. [x] `migrations/013_persona.sql`：`ALTER TABLE resources ADD COLUMN IF NOT EXISTS persona JSONB;`
+112. [x] `migrations/014_channels.sql`：`channels` + `channel_messages`（`external_ref` 唯一键幂等去重），全部 `IF NOT EXISTS` 单行 `;` 结尾
+113. [x] `migrations/015_thread_origin.sql`：`ALTER TABLE thread_messages ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT '';`（通道与语音共用）
+114. [x] `store_test.go` 迁移顺序测试追加 `013/014/015`
+
+### 2. Persona（编号 183–374）
+115. [x] `internal/registry/registry.go`：`Entry.Persona *Persona` + `Persona{DisplayName,Title,Tagline,AvatarURL}`；
+    `normalizePersona`（trim + 长度上限 + `AvatarURL` 仅收 http/https，非法丢弃不报错），`Upsert` 值拷贝自动透传
+116. [x] `internal/model/model.go`：`Resource.Persona JSONField`（jsonb）
+117. [x] `internal/store/resource_store.go`：3 处（`resourceUpdateColumns`、`resourceFromEntry`、`entryFromResource`）映射 persona
+
+### 3. Channels
+118. [x] `internal/channels/types.go`：领域类型 + `Store` 端口（`List/Get/Create/Update/Delete/RecordDelivery/ListDeliveries`），`SigningKeyEnv` 仅存环境变量名
+119. [x] `internal/channels/verify.go`：`Verify(kind, body, r, signingKeyEnv)` 按 kind 选 Slack(`X-Slack-Signature` v0 HMAC)、HMAC(`v0:ts:body`)、Telegram(`X-Telegram-Bot-Api-Secret-Token`)；5 分钟重放窗；常量时间比较；错误码 `CodeChannel*`
+120. [x] `internal/store/channels_store.go`：`NewChannelsStore(db)` 实现 `channels.Store`；`RecordDelivery` 用 `OnConflict{DoNothing}` 返回 `(false,nil)` 去重
+121. [x] `internal/handlers/channels.go`：`GET/POST /api/channels`、`GET/PUT/DELETE /api/channels/{id}`、`GET /api/channels/{id}/deliveries`（`tasks:read`/`tasks:write`）；`POST /api/channels/{id}/webhook` **public**，走签名校验 + `external_ref` 去重 + `mentionsOf` → `Hub.Send` 委派进 thread；`channelsReady` 在禁用/无 store 时返 503 `CodeChannelDisabled`
+122. [x] `internal/handlers/listen.go` + `listen_test.go`：`Listeners()` 与 `probes` 同步新端点（含 public webhook）
+
+### 4. Connectors 审批网关
+123. [x] `internal/hub/orchestrator.go`：`Hub.ParkConnector(ctx, resourceID, action)` 建任务并置 `input-required` + `SetPending(task.ID, "approved")`
+124. [x] `internal/handlers/connectors.go`：`GET /api/connectors`（`resources:read`）、`PUT /api/connectors/{id}/policy`、`POST /api/connectors/{id}/actions`、`GET /api/connectors/{id}/actions`（`resources:write`/`read`）；off→403 `CodeConnectorPolicyOff`、ask-first→`ParkConnector` 202、allowed→`Hub.Send` 200
+
+### 5. Speech / 语音
+125. [x] `internal/adapter/speech.go`：确定性 mock STT/TTS（无网络/子进程），`Transcribe`(crc32 派生文本)/`Synthesize`(8kHz 单声道 16-bit WAV)；真实对接标 `TODO(real)`
+126. [x] `internal/config/config.go`：新增 `ChannelsEnabled`/`SpeechMode`/`AudioMaxBytes`（`Load` 默认 `16<<20`，`Validate` 对 0 兜底为默认）；`AGENTHUB_CHANNELS_ENABLED`/`AGENTHUB_SPEECH_MODE`/`AGENTHUB_AUDIO_MAX_BYTES`
+127. [x] `internal/handlers/speech.go`：`POST /api/threads/{id}/audio`（`tasks:write`）；自建 `http.MaxBytesReader` + `multipart.Reader`(`8<<20`)；STT→`Threads.AddMessage`(`origin='voice'`)→委派→TTS 音频作首个 `PartTypeFile` artifact（`a2a.FileContent.Bytes` 内联 base64）
+128. [x] `internal/store/threads_store.go`：`thread_messages.origin` 列读写（添加消息时透传 `m.Origin`）
+
+### 6. 装配与验证
+129. [x] `internal/handlers/handlers.go`：`Deps` 增 `Channels channels.Store`；注册全部新路由
+130. [x] `cmd/agenthub-server/main.go`：`channelsStore := store.NewChannelsStore(db)` 注入 `deps.Channels`
+131. [x] `go build ./...`、`go vet`、`go test -race ./...` 全绿；`gofmt` 无差异
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

@@ -95,8 +95,10 @@ type Resource struct {
 	// command. One jsonb column rather than a column per kind, because the
 	// shapes evolve independently and a new kind must not need a migration.
 	KindConfig JSONField `gorm:"type:jsonb"`
-	Transport  string    `gorm:"size:32"`
-	Health     string    `gorm:"size:32;index;not null;default:unknown"`
+	// Persona is the optional human-facing presentation, stored as jsonb.
+	Persona   JSONField `gorm:"type:jsonb"`
+	Transport string    `gorm:"size:32"`
+	Health    string    `gorm:"size:32;index;not null;default:unknown"`
 	// Namespace is the catalogue the record belongs to.
 	Namespace string `gorm:"size:64;index;not null;default:default"`
 	// Status is the curation state; 'approved' keeps pre-governance rows
@@ -273,3 +275,41 @@ type SchemaMigration struct {
 
 // TableName returns the schema_migrations table name.
 func (SchemaMigration) TableName() string { return "schema_migrations" }
+
+// Channel is one external messaging surface (Slack / Teams / Telegram / SMS) the
+// console binds to a thread. The signing secret never lives in the row: only the
+// name of the environment variable that holds it at call time.
+type Channel struct {
+	ID            string    `gorm:"primaryKey;size:64"`
+	Kind          string    `gorm:"size:32;index;not null"`
+	Name          string    `gorm:"size:256;not null"`
+	Enabled       bool      `gorm:"not null;default:false"`
+	Config        JSONField `gorm:"type:jsonb"`
+	SigningKeyEnv string    `gorm:"size:128;not null"`
+	ThreadID      string    `gorm:"size:64;index;not null;default:''"`
+	OwnerID       string    `gorm:"size:64;index;not null;default:''"`
+	CreatedAt     time.Time `gorm:"index"`
+	UpdatedAt     time.Time
+}
+
+// TableName returns the channels table name.
+func (Channel) TableName() string { return "channels" }
+
+// ChannelMessage is one inbound (or outbound) message routed through a channel.
+// ExternalRef is the platform's idempotency key: a unique constraint dedupes
+// redeliveries.
+type ChannelMessage struct {
+	ID          uint      `gorm:"primaryKey;autoIncrement"`
+	ChannelID   string    `gorm:"size:64;index;not null"`
+	ExternalRef string    `gorm:"size:256;not null;default:''"`
+	ThreadID    string    `gorm:"size:64;index;not null;default:''"`
+	TaskID      string    `gorm:"size:64;not null;default:''"`
+	Direction   string    `gorm:"size:16;not null"`
+	Payload     JSONField `gorm:"type:jsonb"`
+	Status      string    `gorm:"size:32;not null;default:received"`
+	Error       string    `gorm:"type:text;not null"`
+	CreatedAt   time.Time `gorm:"index"`
+}
+
+// TableName returns the channel_messages table name.
+func (ChannelMessage) TableName() string { return "channel_messages" }

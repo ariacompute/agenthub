@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"strings"
 	"testing"
 
 	"agenthub/internal/httputil"
@@ -143,5 +144,50 @@ func TestExportAgentCardAndMCP(t *testing.T) {
 	servers := MCPServerDescriptions(reg)
 	if len(servers) != 2 {
 		t.Fatalf("servers = %+v", servers)
+	}
+}
+
+func TestNormalizePersona(t *testing.T) {
+	// A nil or all-empty persona stays nil so the wire shape stays compact.
+	if normalizePersona(nil) != nil {
+		t.Fatal("nil persona must stay nil")
+	}
+	if normalizePersona(&Persona{}) != nil {
+		t.Fatal("empty persona must become nil")
+	}
+
+	// Whitespace is trimmed and a valid http(s) avatar is kept.
+	p := normalizePersona(&Persona{DisplayName: "  Bob  ", Title: "Dr", AvatarURL: "https://cdn.example.com/bob.png"})
+	if p == nil || p.DisplayName != "Bob" || p.Title != "Dr" || p.AvatarURL != "https://cdn.example.com/bob.png" {
+		t.Fatalf("trim/keep = %+v", p)
+	}
+
+	// A non-http avatar (or garbage) makes the whole persona invalid, so callers
+	// must fix the value rather than accidentally ship an xss-risky URL.
+	if p := normalizePersona(&Persona{AvatarURL: "javascript:alert(1)"}); p != nil {
+		t.Fatalf("bad avatar should invalidate the persona, got %+v", p)
+	}
+
+	// Overlong fields are capped at 256 runes.
+	long := strings.Repeat("x", 300)
+	p = normalizePersona(&Persona{DisplayName: long})
+	if p == nil || len(p.DisplayName) != 256 {
+		t.Fatalf("display name length = %d, want 256", len(p.DisplayName))
+	}
+}
+
+func TestNormalizeConnectorPolicy(t *testing.T) {
+	cases := map[string]string{
+		"allowed":   ConnectorPolicyAllowed,
+		"ask_first": ConnectorPolicyAskFirst,
+		"off":       ConnectorPolicyOff,
+		"":          ConnectorPolicyOff,
+		"bogus":     ConnectorPolicyOff,
+		"ALLOWED":   ConnectorPolicyAllowed,
+	}
+	for in, want := range cases {
+		if got := NormalizeConnectorPolicy(in); got != want {
+			t.Fatalf("NormalizeConnectorPolicy(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

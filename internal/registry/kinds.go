@@ -29,6 +29,31 @@ const (
 // ProviderModes lists every accepted provider mode.
 var ProviderModes = []string{ProviderModeMock, ProviderModeOpenAICompatible}
 
+// ConnectorPolicy values gate external applications invoking a kind=mcp resource
+// as a connector. Off is the safe default; AskFirst routes through the existing
+// input-required HITL flow.
+const (
+	ConnectorPolicyAllowed  = "allowed"
+	ConnectorPolicyAskFirst = "ask_first"
+	ConnectorPolicyOff      = "off"
+)
+
+// ConnectorPolicies lists every connector policy value.
+var ConnectorPolicies = []string{ConnectorPolicyAllowed, ConnectorPolicyAskFirst, ConnectorPolicyOff}
+
+// NormalizeConnectorPolicy returns a valid policy, falling back to Off for an
+// empty or unknown value so an operator can never leave a connector in a partial
+// state.
+func NormalizeConnectorPolicy(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	for _, c := range ConnectorPolicies {
+		if c == s {
+			return c
+		}
+	}
+	return ConnectorPolicyOff
+}
+
 // Agent capabilities an Agent Card may advertise.
 const (
 	AgentCapStreaming              = "streaming"
@@ -52,6 +77,11 @@ type KindConfig struct {
 	Skill  *SkillConfig  `json:"skill,omitempty"`
 	CLI    *CLIConfig    `json:"cli,omitempty"`
 	Custom *CustomConfig `json:"custom,omitempty"`
+	// ConnectorPolicy gates external applications invoking this resource as a
+	// connector: Allowed runs immediately, AskFirst parks for a human approval
+	// (HITL), Off refuses. It defaults to Off so a freshly registered resource
+	// is never callable from outside until an operator decides otherwise.
+	ConnectorPolicy string `json:"connector_policy,omitempty"`
 }
 
 // ModelTarget is one hop of the fallback chain.

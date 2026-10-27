@@ -303,6 +303,41 @@ func (h *Hub) Resume(ctx context.Context, params a2a.TaskResumeParams) (*a2a.Tas
 	return h.complete(ctx, params.ID, res, nil)
 }
 
+// ParkConnector creates a task for an external connector action that needs a human
+// approval (the "ask first" policy). The task parks in input-required with a pending
+// prompt of "approved"; the console surfaces it as an HITL card and resuming with an
+// approval runs the action once. The connector adapter returns a result rather than
+// asking again, so resuming never re-parks — there is no secondary-park loop.
+func (h *Hub) ParkConnector(ctx context.Context, resourceID, action string) (*a2a.Task, error) {
+	if !h.enterTask() {
+		return nil, ErrRestoring
+	}
+	defer h.leaveTask()
+	entry, ok := h.reg.Get(resourceID)
+	if !ok {
+		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
+	}
+	msg := a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("connector:"+action))
+	task := h.store.Create(entry.ID, msg)
+	// A freshly created task is `submitted`; the lifecycle only allows
+	// submitted -> working -> input-required, so advance through working first.
+	task, err := h.store.SetState(task.ID, a2a.TaskStateWorking, nil)
+	if err != nil {
+		return nil, transitionError(err)
+	}
+	question := a2a.NewMessage(a2a.RoleAgent, a2a.NewTextPart("Approval required to run connector action "+action))
+	updated, err := h.store.SetState(task.ID, a2a.TaskStateInputRequired, &question)
+	if err != nil {
+		return nil, transitionError(err)
+	}
+	if err := h.store.SetPending(task.ID, "approved"); err != nil {
+		return nil, transitionError(err)
+	}
+	h.publishStatus(updated, nil, true)
+	h.notifyPush(updated)
+	return h.store.Get(task.ID), nil
+}
+
 // SetPush registers the push notification callback for a task.
 func (h *Hub) SetPush(params a2a.TaskPushNotificationConfigParams) (*a2a.PushNotificationConfig, error) {
 	if !h.cfg.PushEnabled {

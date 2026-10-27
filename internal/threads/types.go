@@ -39,7 +39,11 @@ type Message struct {
 	Body       string
 	TaskID     string
 	ResourceID string
-	CreatedAt  string
+	// Origin marks where the message entered the conversation: "web" (default),
+	// "voice" or a channel kind. It is descriptive only and never changes
+	// routing.
+	Origin    string
+	CreatedAt string
 }
 
 // Store persists threads and their messages.
