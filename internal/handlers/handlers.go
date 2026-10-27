@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"agenthub/internal/a2a"
+	"agenthub/internal/adapter"
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
 	"agenthub/internal/backup"
@@ -54,6 +55,10 @@ type Deps struct {
 	// Channels persists the external messaging surfaces (Slack / Teams / Telegram
 	// / SMS) bound to threads. It is nil when channels are disabled.
 	Channels channels.Store
+	// Speech transcribes audio to text (STT) and synthesises text to audio (TTS)
+	// for the voice endpoint. It is nil only in unit tests; main injects
+	// adapter.DefaultSpeech so the handler never depends on a package global.
+	Speech adapter.Speech
 }
 
 // Register builds the router.
@@ -139,6 +144,7 @@ func Register(d Deps) http.Handler {
 	// Public inbound webhook. No session: the platform signs with the channel's
 	// secret, verified against the env var named in signing_key_env.
 	mux.HandleFunc("POST /api/channels/{id}/webhook", d.handleChannelWebhook)
+	mux.HandleFunc("POST /api/channels/{id}/deliver", d.requirePermission(authz.PermTasksWrite, d.handleDeliverChannel))
 
 	// Connectors: external applications invoking a kind=mcp resource, with a
 	// per-resource policy that may require a human approval (HITL).

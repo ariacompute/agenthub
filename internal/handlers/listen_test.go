@@ -67,6 +67,7 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /api/channels": {http.MethodGet, "/api/channels", ""},
 		// Public webhook with no channel store wired: it answers 503, not 404.
 		"POST /api/channels/{id}/webhook": {http.MethodPost, "/api/channels/ch1/webhook", `{"text":"hi","event_id":"e1"}`},
+		"POST /api/channels/{id}/deliver": {http.MethodPost, "/api/channels/ch1/deliver", `{"message":"hi"}`},
 		"GET /api/connectors":             {http.MethodGet, "/api/connectors", ""},
 		// Allowed connector: the probe runs the full send path.
 		"POST /api/connectors/{id}/actions": {http.MethodPost, "/api/connectors/" + mcp.ID + "/actions", `{"action":"invoke","args":{}}`},

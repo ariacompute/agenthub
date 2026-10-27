@@ -322,6 +322,10 @@ per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批
 130. [x] `cmd/agenthub-server/main.go`：`channelsStore := store.NewChannelsStore(db)` 注入 `deps.Channels`
 131. [x] `go build ./...`、`go vet`、`go test -race ./...` 全绿；`gofmt` 无差异
 
+132. [x] `internal/channels/deliver.go`：`Deliver(ctx, ch, body)` 出站投递——经 `netutil.ValidateURL`(仅 https) + `netutil.SafeClient`(SSRF 安全、不跟随重定向、限长) 把消息 POST 到 `config.target_url`，回显 Provider 原始响应（状态码 + ≤512B 截断体），不重试、不缓冲；失败映射 `CodeDeliveryFailed`。
+133. [x] `internal/handlers/channels.go`：新增 `POST /api/channels/{id}/deliver`（`tasks:write`，通道须 `Enabled`），调用 `channels.Deliver` 并把出站结果记为 `direction=outbound` 的 `ChannelMessage`；`handlers.go` 注册该路由，`listen.go`/`listen_test.go` 同步条目与 probe。
+134. [x] `internal/handlers/handlers.go` + `speech.go` + `cmd/agenthub-server/main.go`：将语音引擎以 `Deps.Speech adapter.Speech` 注入（修正此前「直接引用 `adapter.DefaultSpeech` 包级变量」的设计偏差）；`main` 注入 `adapter.DefaultSpeech`，handler 改用 `d.Speech`，单测仍可经零值 `Speech{}`（确定性 mock）运行。
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

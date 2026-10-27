@@ -178,6 +178,8 @@ entry asks for one.
 - **skill**: trigger → playbook → steps → report; artifact `skill.manual`.
 - **cli**: allowlist → timeout → truncation → JSON receipt; artifact `cli.receipt`
   (including `truncated`).
+- **speech**: a sixth adapter, deterministic offline STT/TTS for the voice endpoint
+  (`POST /api/threads/{id}/audio`); like the others it is a mock, marked `TODO(real)`.
 
 ### Safety & Reliability
 
@@ -591,6 +593,34 @@ configuration.
 validation) plus the upstream install and start commands for each platform.
 
 ---
+
+## 12. Persona, Channels, Connectors & Speech (M2)
+
+On top of M1's registry and A2A orchestration, agenthub now ships the collaboration
+surface that agentbuddy consumes: a resource **Persona**, external **Channels**, a
+policy-gated **Connectors** gateway, and **Speech** (offline STT/TTS). All new endpoints
+reuse the existing `resources:read` / `tasks:read` / `tasks:write` permissions — no new
+roles or groups.
+
+- **Persona**: `Entry.Persona` (`AvatarURL` / `Bio` / `Capabilities`) is normalised by
+  `normalizePersona` (Bio ≤256 chars, `AvatarURL` restricted to http(s), coalesced to nil
+  when empty) and stored in `resources.persona` (migration `013_persona.sql`).
+- **Channels**: Slack / Teams / Telegram / SMS surfaces bound to a thread. Inbound runs
+  through a signed, public webhook (`POST /api/channels/{id}/webhook`, secret held only as
+  an env-var name) that forwards into the thread; outbound runs through an SSRF-safe
+  `Deliver` (`POST /api/channels/{id}/deliver`, `netutil.ValidateURL` + `SafeClient`, echoes
+  the provider's raw response ≤512B, never retries) to `config.target_url`. Stored in
+  `channels` + `channel_messages` (migration `014_channels.sql`).
+- **Connectors**: a policy gateway over `kind=mcp` resources — `GET /api/connectors` lists,
+  `PUT /api/connectors/{id}/policy` sets `off` / `ask_first` / `allowed`; `ask_first` parks
+  an `input-required` task via `Hub.ParkConnector` for human approval. `GET/POST
+  /api/connectors/{id}/actions` invoke an action.
+- **Speech**: `POST /api/threads/{id}/audio` uploads a clip; the server transcribes it (STT
+  mock), delegates it into the thread as an `origin=voice` message, and attaches the agent's
+  reply as a TTS audio artifact. Gated by `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES`;
+  migration `015_thread_origin.sql` adds the `origin` column to `thread_messages`.
+- **Docs**: the `/docs` console now documents every new endpoint in its Collaboration group,
+  in 13 languages (see `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js`).
 
 ## Architecture Overview
 

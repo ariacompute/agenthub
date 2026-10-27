@@ -955,6 +955,15 @@ export const httpEndpoints = [
     request: 'raw provider payload (verified by signature)',
     response: 'ChannelMessage | 200 (deduplicated)',
   },
+  {
+    group: 'collaboration',
+    method: 'POST',
+    path: '/api/channels/{id}/deliver',
+    permission: 'tasks:write',
+    descKey: 'epChannelDeliver',
+    request: '{ "message": "string" }',
+    response: 'DeliverResult { status, raw }',
+  },
 
   // ---- connectors (policy-gated external invocation of kind=mcp) ----
   {

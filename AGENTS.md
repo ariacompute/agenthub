@@ -389,7 +389,7 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
 - 每次启动都会尝试写入 5 个 `demo-*` 种子资源（每类一个），`ON CONFLICT (id) DO NOTHING` 保证幂等；
   用户覆盖过的同名条目**不会被种子改写**，保证 README 冒烟可复现。
 - 前端未执行 `make web-build` 时 `/` 返回 404（机器可读 `not_found`），不是服务故障。
-- 不实现：RAG、语音、浏览器自动化、渠道接入、多语言 SDK、LLM-as-judge 评分（属 `memo` /
+- 不实现：RAG、浏览器自动化、多语言 SDK、LLM-as-judge 评分（属 `memo` /
   `bankmind` / `playground` 或后续项）。
 
 ## agentbuddy 接入（桌面客户端）
@@ -412,3 +412,11 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
 - 权限点复用既有 `PermResourcesRead` / `PermTasksRead` / `PermTasksWrite`，不新增角色或组。
 - 桌面壳前缀白名单（`internal/proxy/mod.rs` 的 `is_remote_path`）已含 `/api/workspace` 与
   `/api/threads`，新增服务端端点无需改桌面端代码。
+- 协作通道与语音（agenthub 增补，agentbuddy 工作台消费）：
+  - `GET/POST /api/channels`、`GET/PUT/DELETE /api/channels/{id}`、`GET /api/channels/{id}/deliveries`、
+    `POST /api/channels/{id}/webhook`（公开、签名校验）、`POST /api/channels/{id}/deliver`（出站，SSRF 安全投递到 `config.target_url`）。
+  - `GET /api/connectors`、`PUT /api/connectors/{id}/policy`、`GET/POST /api/connectors/{id}/actions`：
+    对 `kind=mcp` 资源暴露外部调用，`ask_first` 策略经 `Hub.ParkConnector` 挂起 `input-required` 任务等待人工批准。
+  - `POST /api/threads/{id}/audio`：服务端转写（STT mock）后作为 `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact；受 `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制。
+  - `Persona`：`Entry.Persona`（`AvatarURL`/`Bio`/`Capabilities`）经 `normalizePersona` 归一化，落 `resources.persona` JSONB。
+  - 上述端点均在桌面壳前缀白名单（`/api`）覆盖之内，新增服务端端点无需改桌面端代码。

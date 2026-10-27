@@ -241,6 +241,55 @@ func (d Deps) handleChannelWebhook(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, msg)
 }
 
+// handleDeliverChannel sends a message out through a channel's configured target
+// URL — the inverse of the inbound webhook. It returns the provider's raw
+// response verbatim (status + <=512B body slice) and never retries or buffers.
+func (d Deps) handleDeliverChannel(w http.ResponseWriter, r *http.Request) {
+	if !d.channelsReady(w) {
+		return
+	}
+	channelID := r.PathValue("id")
+	c, err := d.Channels.Get(r.Context(), channelID)
+	if err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	if c == nil {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeChannelNotFound)
+		return
+	}
+	if !c.Enabled {
+		httputil.WriteError(w, http.StatusForbidden, httputil.CodeChannelDisabled)
+		return
+	}
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := httputil.Decode(w, r, &req, 1<<20); err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	if req.Message == "" {
+		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeChannelPayloadInvalid)
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"text": req.Message})
+	result, err := channels.Deliver(r.Context(), c, string(body))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadGateway, httputil.CodeDeliveryFailed)
+		return
+	}
+	_, _ = d.Channels.RecordDelivery(r.Context(), &channels.ChannelMessage{
+		ChannelID:   channelID,
+		ExternalRef: "out-" + auth.NewID("dlv"),
+		ThreadID:    c.ThreadID,
+		Direction:   "outbound",
+		Payload:     map[string]any{"status": result.Status, "raw": result.Raw},
+		Status:      channels.StatusDelivered,
+	})
+	httputil.WriteJSON(w, http.StatusOK, result)
+}
+
 // validEnvVarName rejects anything that is not a plausible, safe environment
 // variable name. We only ever store the name, never the value.
 func validEnvVarName(s string) bool {

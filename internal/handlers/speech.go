@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"agenthub/internal/a2a"
-	"agenthub/internal/adapter"
 	"agenthub/internal/auth"
 	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
@@ -67,7 +66,7 @@ func (d Deps) handleThreadAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	transcript, err := adapter.DefaultSpeech.Transcribe(r.Context(), audio)
+	transcript, err := d.Speech.Transcribe(r.Context(), audio)
 	if err != nil {
 		httputil.WriteError(w, http.StatusUnprocessableEntity, httputil.CodeAudioTranscribeFailed)
 		return
@@ -103,7 +102,7 @@ func (d Deps) handleThreadAudio(w http.ResponseWriter, r *http.Request) {
 		out["taskId"] = task.ID
 		// Attach the agent's reply as a TTS audio artifact.
 		if reply := lastAgentText(task); reply != "" {
-			if audioOut, err := adapter.DefaultSpeech.Synthesize(r.Context(), reply); err == nil {
+			if audioOut, err := d.Speech.Synthesize(r.Context(), reply); err == nil {
 				name := "reply.wav"
 				mime := "audio/wav"
 				encoded := base64.StdEncoding.EncodeToString(audioOut)

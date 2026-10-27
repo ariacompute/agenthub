@@ -246,6 +246,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `DELETE` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条通道 | — | `204, no body` |
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — 查看任务 | 列出全部投递 | — | `ChannelMessage[]` |
 | `POST` | `/api/channels/{id}/webhook` | — | 入站 webhook：校验签名，按外部引用去重，再将消息转发到绑定线程。 | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
+| `POST` | `/api/channels/{id}/deliver` | `tasks:write` — 取消与恢复任务 | 出站投递：经 SSRF 安全客户端把消息发往通道的 config.target_url，并回显 Provider 原始响应（状态码 + 截断后的响应体）。 | `{ "message": "string" }` | `DeliverResult { status, raw }` |
 | `GET` | `/api/connectors` | `resources:read` — 查看资源 | 列出全部连接器 | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
 | `PUT` | `/api/connectors/{id}/policy` | `resources:write` — 变更资源 | 设置约束外部调用的策略：off、ask_first 或 allowed。 | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
 | `GET` | `/api/connectors/{id}/actions` | `resources:read` — 查看资源 | 列出全部动作 | — | `{ id, policy, actions: [{ name, description }] }` |

@@ -50,9 +50,20 @@
 
 - **pgvector / 向量检索**（属 `memo` 与 `bankmind` 的职责；本仓只需要关系型 PostgreSQL）。
 - RAG / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
-- 语音、浏览器自动化、渠道接入、多语言 SDK、Agent 网络跨实例联邦。
+- 浏览器自动化、多语言 SDK、Agent 网络跨实例联邦。
 - LLM-as-judge 评分与评测闭环（eval 仅留钩子，**不产出分数**）。
 - 真实 MCP stdio 子进程、真实 CLI `exec`、真实模型端点（统一留 `TODO(real)`）。
+
+### 1.3 范围内（M2，已实现）
+
+在 M1 的资源注册与 A2A 编排之上，新增 **Persona** 与**协作通道**能力，统一由 agentbuddy 桌面客户端消费：
+
+- **Persona（资源画像）**：`Entry` 增加 `persona` 字段（`AvatarURL` + `Bio` + `Capabilities`），由 `normalizePersona` 归一化（截断 `Bio` ≤256 字符、仅允许 http(s) 的 `AvatarURL`、整体为空时归 nil）。落 `resources` 表的 `persona` JSONB 列（迁移 `013_persona.sql`）。
+- **Channels（外部消息通道）**：把 Slack / Teams / Telegram / SMS 四类外部消息面绑定到线程。入站经签名校验的公开 webhook（`POST /api/channels/{id}/webhook`，密钥仅存 env var 名）转发进线程；出站经 SSRF 安全的 `Deliver`（`POST /api/channels/{id}/deliver`，复用 `netutil.ValidateURL` + `SafeClient`）投递到 `config.target_url`，回显 Provider 原始响应（≤512B）。落 `channels` 与 `channel_messages` 两表（`014_channels.sql`）。
+- **Connectors（策略网关）**：对 `kind=mcp` 资源暴露外部调用，`GET /api/connectors` 列出、`PUT /api/connectors/{id}/policy` 设置 `off / ask_first / allowed` 策略；`ask_first` 经 `Hub.ParkConnector` 挂起一个 `input-required` 任务等待人工批准。`GET/POST /api/connectors/{id}/actions` 触发动作。
+- **Speech（语音）**：`POST /api/threads/{id}/audio` 上传语音片段，服务端离线转写（STT mock）后作为 `origin=voice` 的消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact 附回。受 `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制（迁移 `015_thread_origin.sql` 为 `thread_messages` 增加 `origin` 列）。
+
+上述端点复用既有 `resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组；详见 `releasenotes.md` §12 与 `/docs` 控制台的 Collaboration 分组。
 
 ## 2. 协议契约
 

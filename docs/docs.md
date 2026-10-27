@@ -246,6 +246,7 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `DELETE` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the channels | — | `204, no body` |
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — Read tasks | List all deliveries | — | `ChannelMessage[]` |
 | `POST` | `/api/channels/{id}/webhook` | — | Inbound webhook: verify the signature, dedupe by external ref, then forward the message into the bound thread. | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
+| `POST` | `/api/channels/{id}/deliver` | `tasks:write` — Cancel and resume tasks | Outbound delivery: post the message to the channel target_url (config.target_url) via an SSRF-safe client and echo the provider raw response (status plus truncated body). | `{ "message": "string" }` | `DeliverResult { status, raw }` |
 | `GET` | `/api/connectors` | `resources:read` — Read resources | List all connectors | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
 | `PUT` | `/api/connectors/{id}/policy` | `resources:write` — Change resources | Set the policy that gates external invocation: off, ask_first, or allowed. | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
 | `GET` | `/api/connectors/{id}/actions` | `resources:read` — Read resources | List all actions | — | `{ id, policy, actions: [{ name, description }] }` |

@@ -143,6 +143,8 @@ Agent 调用。
 - **mcp**：`tools/list` + `tools/call` 协议转换，产物 `mcp.tools` / `mcp.call`。
 - **skill**：触发 → 手册 → 步骤 → 报告，产物 `skill.manual`。
 - **cli**：白名单 → 超时 → 截断 → JSON 回执，产物 `cli.receipt`（含 `truncated`）。
+- **speech**：第六个连接器，语音端点（`POST /api/threads/{id}/audio`）的离线确定性 STT/TTS，
+  与另五类一样是 mock，标 `TODO(real)`。
 
 ### 安全与可靠性
 
@@ -474,6 +476,30 @@ cp .env.example .env          # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true�
 启动命令。
 
 ---
+
+## 十二、Persona、Channels、Connectors 与 Speech（M2）
+
+在 M1 的资源注册与 A2A 编排之上，agenthub 新增 agentbuddy 消费的协作面：资源 **Persona**、
+外部 **Channels**、策略网关 **Connectors** 与 **Speech**（离线 STT/TTS）。全部新端点复用既有
+`resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组。
+
+- **Persona**：`Entry.Persona`（`AvatarURL` / `Bio` / `Capabilities`）由 `normalizePersona`
+  归一化（`Bio` ≤256 字符、`AvatarURL` 仅限 http(s)、整体为空归 nil），落 `resources.persona`
+  （迁移 `013_persona.sql`）。
+- **Channels**：绑定到线程的 Slack / Teams / Telegram / SMS 通道。入站走签名校验的公开
+  webhook（`POST /api/channels/{id}/webhook`，密钥仅存环境变量名）转发进线程；出站走 SSRF 安全的
+  `Deliver`（`POST /api/channels/{id}/deliver`，`netutil.ValidateURL` + `SafeClient`，回显
+  Provider 原始响应 ≤512B，不重试）投递到 `config.target_url`。落 `channels` + `channel_messages`
+  （迁移 `014_channels.sql`）。
+- **Connectors**：`kind=mcp` 资源的策略网关——`GET /api/connectors` 列出、`PUT /api/connectors/{id}/policy`
+  设 `off` / `ask_first` / `allowed`；`ask_first` 经 `Hub.ParkConnector` 挂起一个 `input-required`
+  任务等待人工批准。`GET/POST /api/connectors/{id}/actions` 触发动作。
+- **Speech**：`POST /api/threads/{id}/audio` 上传语音片段，服务端离线转写（STT mock）后作为
+  `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact。受
+  `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制；迁移 `015_thread_origin.sql` 为
+  `thread_messages` 增加 `origin` 列。
+- **文档**：`/docs` 控制台已在 Collaboration 分组用 13 语完整记录全部新端点
+  （见 `web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`）。
 
 ## 架构总览
 
