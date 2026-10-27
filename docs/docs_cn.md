@@ -239,6 +239,18 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `GET` | `/api/threads/{id}` | `tasks:read` — 查看任务 | 读取线程及其消息历史。 | — | `{ thread, messages: [Message] }` |
 | `POST` | `/api/threads/{id}/messages` | `tasks:write` — 取消与恢复任务 | 追加一条消息；每个 @mention 经 A2A 委派给对应 agent（Hub.Send），以任务 id 关联。 | `{ body, mentions?: [resourceId] }` | `{ message, delegated: [taskId], failed: [resourceId] } — 201` |
 | `GET` | `/api/threads/{id}/events` | `tasks:read` — 查看任务 | SSE：先回访历史，再跟随被委派任务并落库 agent 回复。 | — | `text/event-stream of { thread.message, thread.agent }` |
+| `GET` | `/api/channels` | `tasks:read` — 查看任务 | 列出全部通道 | — | `Channel[]` |
+| `POST` | `/api/channels` | `tasks:write` — 取消与恢复任务 | 在通道中新建一条 | `{ kind, name, enabled, config, signingKeyEnv, threadId }` | `Channel — 201` |
+| `GET` | `/api/channels/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条通道 | — | `Channel` |
+| `PUT` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 更新通道的名称、启用状态、配置、签名密钥或绑定线程。 | `{ name?, enabled, config?, signingKeyEnv?, threadId? }` | `Channel` |
+| `DELETE` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条通道 | — | `204, no body` |
+| `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — 查看任务 | 列出全部投递 | — | `ChannelMessage[]` |
+| `POST` | `/api/channels/{id}/webhook` | — | 入站 webhook：校验签名，按外部引用去重，再将消息转发到绑定线程。 | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
+| `GET` | `/api/connectors` | `resources:read` — 查看资源 | 列出全部连接器 | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
+| `PUT` | `/api/connectors/{id}/policy` | `resources:write` — 变更资源 | 设置约束外部调用的策略：off、ask_first 或 allowed。 | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
+| `GET` | `/api/connectors/{id}/actions` | `resources:read` — 查看资源 | 列出全部动作 | — | `{ id, policy, actions: [{ name, description }] }` |
+| `POST` | `/api/connectors/{id}/actions` | `resources:write` — 变更资源 | 运行连接器动作；off 拒绝，allowed 立即执行，ask_first 挂起一个待人工批准的 input-required 任务。 | `{ action, args? }` | `Task \| 202 (ask_first parks an input-required task)` |
+| `POST` | `/api/threads/{id}/audio` | `tasks:write` — 取消与恢复任务 | 上传语音片段；转写为文字后作为语音消息委派，并将 agent 回复附为 TTS 音频。 | `multipart/form-data; first file part is the audio clip` | `{ transcript, taskId? }` |
 
 展开一行即可看到它的请求与响应。
 

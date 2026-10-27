@@ -239,6 +239,18 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `GET` | `/api/threads/{id}` | `tasks:read` — Read tasks | Read a thread and its message history. | — | `{ thread, messages: [Message] }` |
 | `POST` | `/api/threads/{id}/messages` | `tasks:write` — Cancel and resume tasks | Append a message; each @mention delegates to that agent over A2A (Hub.Send), keyed by task id. | `{ body, mentions?: [resourceId] }` | `{ message, delegated: [taskId], failed: [resourceId] } — 201` |
 | `GET` | `/api/threads/{id}/events` | `tasks:read` — Read tasks | SSE: replay history, then follow delegated tasks and persist agent replies. | — | `text/event-stream of { thread.message, thread.agent }` |
+| `GET` | `/api/channels` | `tasks:read` — Read tasks | List all channels | — | `Channel[]` |
+| `POST` | `/api/channels` | `tasks:write` — Cancel and resume tasks | Create a new entry among the channels | `{ kind, name, enabled, config, signingKeyEnv, threadId }` | `Channel — 201` |
+| `GET` | `/api/channels/{id}` | `tasks:read` — Read tasks | Read one of the channels by id | — | `Channel` |
+| `PUT` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Update a channel's name, enabled flag, config, signing key, or bound thread. | `{ name?, enabled, config?, signingKeyEnv?, threadId? }` | `Channel` |
+| `DELETE` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the channels | — | `204, no body` |
+| `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — Read tasks | List all deliveries | — | `ChannelMessage[]` |
+| `POST` | `/api/channels/{id}/webhook` | — | Inbound webhook: verify the signature, dedupe by external ref, then forward the message into the bound thread. | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
+| `GET` | `/api/connectors` | `resources:read` — Read resources | List all connectors | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
+| `PUT` | `/api/connectors/{id}/policy` | `resources:write` — Change resources | Set the policy that gates external invocation: off, ask_first, or allowed. | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
+| `GET` | `/api/connectors/{id}/actions` | `resources:read` — Read resources | List all actions | — | `{ id, policy, actions: [{ name, description }] }` |
+| `POST` | `/api/connectors/{id}/actions` | `resources:write` — Change resources | Run a connector action; off refuses, allowed runs at once, ask_first parks an input-required task for approval. | `{ action, args? }` | `Task \| 202 (ask_first parks an input-required task)` |
+| `POST` | `/api/threads/{id}/audio` | `tasks:write` — Cancel and resume tasks | Upload a voice clip; transcribe it, delegate as a voice message, and attach the agent reply as TTS audio. | `multipart/form-data; first file part is the audio clip` | `{ transcript, taskId? }` |
 
 Open a row to see its request and response.
 
