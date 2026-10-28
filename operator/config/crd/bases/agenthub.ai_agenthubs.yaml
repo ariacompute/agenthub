@@ -1,0 +1,390 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: agenthubs.agenthub.ai
+spec:
+  group: agenthub.ai
+  names:
+    kind: AgentHub
+    listKind: AgentHubList
+    plural: agenthubs
+    shortNames:
+    - ahub
+    singular: agenthub
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.env
+      name: Env
+      type: string
+    - jsonPath: .status.readyReplicas
+      name: Ready
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AgentHub is the Schema for the agenthubs API. A single AgentHub CR fully
+          describes one agenthub-server deployment: its image, replica count, every
+          AGENTHUB_* knob and the external PostgreSQL connection (or a reference to a
+          Secret that holds it). The controller reconciles the CR into a
+          Deployment/Service/ConfigMap/Secret/ServiceAccount/Role set.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentHubSpec is the desired state of an agenthub deployment.
+            properties:
+              audioMaxBytes:
+                format: int32
+                type: integer
+              backup:
+                description: |-
+                  BackupSpec sets the initial database checkpoint policy. Checkpointing is
+                  only switched on when Persistence is enabled (which mounts the backup dir).
+                properties:
+                  cron:
+                    type: string
+                  dailyTime:
+                    type: string
+                  interval:
+                    type: string
+                  keepLast:
+                    type: integer
+                  maxAgeDays:
+                    type: integer
+                  mode:
+                    type: string
+                  timezone:
+                    type: string
+                type: object
+              bootstrapAdmin:
+                description: BootstrapAdminSpec seeds the first administrator account.
+                properties:
+                  email:
+                    type: string
+                  existingSecret:
+                    type: string
+                  name:
+                    type: string
+                  password:
+                    type: string
+                  secretKey:
+                    type: string
+                type: object
+              channelsEnabled:
+                type: boolean
+              cliAllowlist:
+                items:
+                  type: string
+                type: array
+              cliTimeout:
+                type: string
+              cookieSecure:
+                type: boolean
+              database:
+                description: |-
+                  DatabaseSpec is the external PostgreSQL connection. Either URL (plaintext,
+                  example only) or ExistingSecret + SecretKey (production) must be provided.
+                properties:
+                  existingSecret:
+                    type: string
+                  secretKey:
+                    type: string
+                  url:
+                    type: string
+                type: object
+              encryptionKey:
+                description: |-
+                  SecretOrValue carries a sensitive value either inline (Value) or by
+                  referencing a key in an existing Secret (ExistingSecret/Key). Inline values
+                  are copied into the operator-managed Secret; referenced ones are injected
+                  straight from the external Secret via secretKeyRef.
+                properties:
+                  existingSecret:
+                    type: string
+                  key:
+                    type: string
+                  value:
+                    type: string
+                type: object
+              env:
+                type: string
+              eventBuffer:
+                format: int32
+                type: integer
+              httpPort:
+                format: int32
+                type: integer
+              image:
+                description: ImageSpec describes the agenthub-server container image.
+                properties:
+                  pullPolicy:
+                    description: PullPolicy describes a policy for if/when to pull
+                      a container image
+                    type: string
+                  repository:
+                    type: string
+                  tag:
+                    type: string
+                type: object
+              maxOutputBytes:
+                format: int32
+                type: integer
+              maxParallel:
+                format: int32
+                type: integer
+              modelRouterMode:
+                type: string
+              oauth:
+                description: OAuthSpec is the OAuth provider configuration.
+                properties:
+                  enabled:
+                    type: boolean
+                  github:
+                    description: OAuthProviderSpec holds one OAuth identity provider's
+                      credentials.
+                    properties:
+                      clientID:
+                        type: string
+                      clientSecret:
+                        type: string
+                      scopes:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  google:
+                    description: OAuthProviderSpec holds one OAuth identity provider's
+                      credentials.
+                    properties:
+                      clientID:
+                        type: string
+                      clientSecret:
+                        type: string
+                      scopes:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  oidc:
+                    description: OAuthProviderSpec holds one OAuth identity provider's
+                      credentials.
+                    properties:
+                      clientID:
+                        type: string
+                      clientSecret:
+                        type: string
+                      scopes:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                type: object
+              persistence:
+                description: |-
+                  PersistenceSpec mounts a PVC for database checkpoints at
+                  /var/lib/agenthub/backups and turns on the backup feature.
+                properties:
+                  enabled:
+                    type: boolean
+                  size:
+                    type: string
+                  storageClass:
+                    type: string
+                type: object
+              publicBaseURL:
+                type: string
+              pushEnabled:
+                type: boolean
+              pushRecordLimit:
+                format: int32
+                type: integer
+              pushSecret:
+                description: |-
+                  SecretOrValue carries a sensitive value either inline (Value) or by
+                  referencing a key in an existing Secret (ExistingSecret/Key). Inline values
+                  are copied into the operator-managed Secret; referenced ones are injected
+                  straight from the external Secret via secretKeyRef.
+                properties:
+                  existingSecret:
+                    type: string
+                  key:
+                    type: string
+                  value:
+                    type: string
+                type: object
+              registrySync:
+                description: RegistrySyncSpec configures the upstream registry background
+                  puller.
+                properties:
+                  enabled:
+                    type: boolean
+                  fixture:
+                    type: boolean
+                  interval:
+                    type: string
+                type: object
+              replicas:
+                format: int32
+                type: integer
+              resources:
+                description: ResourceRequirements describes the compute resource requirements.
+                properties:
+                  claims:
+                    description: |-
+                      Claims lists the names of resources, defined in spec.resourceClaims,
+                      that are used by this container.
+
+                      This field depends on the
+                      DynamicResourceAllocation feature gate.
+
+                      This field is immutable. It can only be set for containers.
+                    items:
+                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                      properties:
+                        name:
+                          description: |-
+                            Name must match the name of one entry in pod.spec.resourceClaims of
+                            the Pod where this field is used. It makes that resource available
+                            inside a container.
+                          type: string
+                        request:
+                          description: |-
+                            Request is the name chosen for a request in the referenced claim.
+                            If empty, everything from the claim is made available, otherwise
+                            only the result of this request.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Limits describes the maximum amount of compute resources allowed.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Requests describes the minimum amount of compute resources required.
+                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                type: object
+              seedDemo:
+                type: boolean
+              sessionTTL:
+                type: string
+              speechMode:
+                type: string
+              staticDir:
+                type: string
+            type: object
+          status:
+            description: AgentHubStatus is the observed state, patched by the controller.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+              readyReplicas:
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

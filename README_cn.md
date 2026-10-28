@@ -203,6 +203,23 @@ AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支�
 因此在控制台改过的密码能跨重启保留。配置通过 compose 的 `.env` 或环境变量传入，
 `AGENTHUB_HTTP_PORT` 可改宿主端口。
 
+### Kubernetes operator（k8s 控制器部署）
+
+要在 Kubernetes 上以声明式、GitOps 友好的方式部署，可用 `operator/` 下的 controller-runtime
+控制器。用 Helm 装好控制器与 `AgentHub` CRD，再 apply 一份声明式 `AgentHub` 自定义资源，控制器即把它
+调和成运行中的 agenthub-server Deployment。PostgreSQL 仍由外部提供，连接串经 CR 注入。
+
+- `operator/README.md` —— 安装步骤、完整的 `AgentHub` CRD 字段清单、外部数据库要求、生产前置条件
+  （`BOOTSTRAP_ADMIN_EMAIL` + `ENCRYPTION_KEY` ≥ 32 字节）与「先单副本建库再扩容」提示。
+- `operator/deploy/agenthub-operator/` —— Helm chart（控制器 Deployment + 随包 CRD + 命名空间级 RBAC）。
+- `operator/examples/agenthub-sample.yaml` —— 一份可直接 apply 的 `AgentHub` CR。
+
+```bash
+helm install agenthub-operator ./operator/deploy/agenthub-operator \
+  --namespace agenthub-operator --create-namespace
+kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
+```
+
 ## 安全加固
 
 **传输 / 边缘**：agenthub 是单 Go 二进制，安全响应头改由中间件发出（`internal/middleware`）：
@@ -526,4 +543,3 @@ MIT.
 - [`AGENTS.md`](AGENTS.md)：Agent 工程上下文入口与目录索引
 - [`requirements.md`](requirements.md)：需求规格（功能边界 / 异常 / 验收，人审后编码）
 - [`task.md`](task.md)：实施清单
-- [`docs/docs_cn.md`](docs/docs_cn.md)：控制台自带文档，由 `make docs-md` 生成

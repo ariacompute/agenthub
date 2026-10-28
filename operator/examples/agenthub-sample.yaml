@@ -1,0 +1,68 @@
+# Example AgentHub custom resource.
+#
+# Install the operator first (helm install ... ./operator/deploy/agenthub-operator),
+# then apply THIS file. The operator reconciles it into a running agenthub
+# deployment. The AgentHub must live in the SAME namespace the operator watches
+# (the operator's release namespace).
+#
+# IMPORTANT: the inline secret values below are for illustration only. In any
+# real deployment replace them with existingSecret references to Secrets you
+# create out-of-band (see README "External PostgreSQL" and "Production").
+apiVersion: agenthub.ai/v1alpha1
+kind: AgentHub
+metadata:
+  name: agenthub
+  namespace: agenthub-operator
+spec:
+  image:
+    repository: agenthub
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1            # keep 1 until the schema is migrated; see README "Multi-replica"
+  env: dev
+  httpPort: 3500
+  staticDir: /app/backend/static
+
+  # --- External PostgreSQL (mandatory) ---
+  database:
+    url: "postgres://agenthub:changeme@postgres:5432/agenthub?sslmode=disable"
+    # Production alternative — never put the DSN in the CR:
+    # existingSecret: agenthub-db
+    # secretKey: DATABASE_URL
+
+  # --- Bootstrap administrator ---
+  bootstrapAdmin:
+    email: admin@example.com
+    name: Administrator
+    password: change-me-in-prod
+    # existingSecret: agenthub-bootstrap
+    # secretKey: BOOTSTRAP_ADMIN_PASSWORD
+
+  # --- At-rest encryption key (>=32 bytes; prod requires it) ---
+  encryptionKey:
+    value: "this-is-a-32-byte-or-longer-secret-key-example"
+    # existingSecret: agenthub-keys
+    # key: ENCRYPTION_KEY
+
+  # --- OAuth providers (empty IDs simply hide the button) ---
+  oauth:
+    enabled: true
+    google:
+      clientID: ""
+      clientSecret: ""
+    github:
+      clientID: ""
+      clientSecret: ""
+    oidc:
+      issuer: ""
+      clientID: ""
+      clientSecret: ""
+
+  seedDemo: false
+  pushEnabled: true
+
+  # --- Optional database checkpoints (mounts a backup PVC) ---
+  persistence:
+    enabled: false
+    size: 10Gi
+    # storageClass: standard

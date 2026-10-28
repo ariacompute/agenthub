@@ -1,0 +1,48 @@
+# Default values for the agenthub-operator chart.
+#
+# This chart installs ONLY the operator controller (and the AgentHub CRD).
+# It does not deploy agenthub itself — create an AgentHub custom resource
+# (see operator/examples/agenthub-sample.yaml) and the operator reconciles
+# it into a Deployment/Service/ConfigMap/Secret/ServiceAccount/Role set.
+
+operator:
+  # Number of operator replicas. Leader election keeps a single active
+  # controller even when scaled above one.
+  replicaCount: 1
+
+  image:
+    repository: agenthub-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Resource requests/limits for the controller manager.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Extra environment passed to the manager (e.g. log level).
+  extraEnv: []
+  #  - name: AGENTHUB_LOG_LEVEL
+  #    value: "debug"
+
+# ---------------------------------------------------------------------------
+# AgentHub defaults
+# ---------------------------------------------------------------------------
+# These values are NOT applied automatically — every AgentHub CR carries its
+# own full spec. They are documented here only to show the knobs the CR
+# accepts. See operator/examples/agenthub-sample.yaml and the README for the
+# complete list of AGENTHUB_* fields you can set on the CR.
+#
+# Required for a working instance:
+#   * spec.database.url  (or spec.database.existingSecret) — external PostgreSQL
+#   * spec.bootstrapAdmin.email                       — required when env=prod
+#   * spec.encryptionKey (>=32 bytes, or existingSecret) — required when env=prod
+agentHubDefaults:
+  image:
+    repository: agenthub
+    tag: latest
+  replicas: 1

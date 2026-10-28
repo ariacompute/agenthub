@@ -1,0 +1,18 @@
+apiVersion: v2
+name: agenthub-operator
+description: |
+  Kubernetes operator (controller-runtime) that reconciles the AgentHub
+  custom resource into a running agenthub-server deployment. Install this
+  chart, then apply an AgentHub custom resource to launch agenthub.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/agenthub/agenthub
+sources:
+  - https://github.com/agenthub/agenthub/tree/main/operator
+keywords:
+  - agenthub
+  - operator
+  - a2a
+  - agent

@@ -1,0 +1,36 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "agenthub-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agenthub-operator.labels" . | nindent 4 }}
+rules:
+  # The AgentHub CR itself and its status subresource.
+  - apiGroups: ["agenthub.ai"]
+    resources: ["agenthubs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["agenthub.ai"]
+    resources: ["agenthubs/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["agenthub.ai"]
+    resources: ["agenthubs/status"]
+    verbs: ["get", "patch", "update"]
+  # Children the controller creates for each AgentHub.
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "serviceaccounts", "services", "persistentvolumeclaims"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # The controller provisions a minimal Role/RoleBinding for each app.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # Leader election and event recording.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
