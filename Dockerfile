@@ -46,7 +46,7 @@
 # ---------------------------------------------------------------------------
 
 # ---------- console ----------
-FROM oven/bun:1-alpine AS web-build
+FROM oven/bun:1.4.4-alpine AS web-build
 
 # Re-declared per stage: each FROM starts a fresh scope.
 ARG BUILD_PROXY=
@@ -69,7 +69,7 @@ COPY web/ ./
 RUN bun run build && test -f /backend/static/index.html
 
 # ---------- server ----------
-FROM golang:1.27-alpine AS build
+FROM golang:1.27.3-alpine AS build
 
 ARG BUILD_PROXY=
 ARG GOPROXY=https://goproxy.cn,direct

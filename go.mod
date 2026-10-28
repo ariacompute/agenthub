@@ -1,6 +1,6 @@
 module agenthub
 
-go 1.27
+go 1.27.3
 
 require (
 	github.com/jackc/pgx/v5 v5.5.5

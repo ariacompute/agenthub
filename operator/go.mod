@@ -1,6 +1,6 @@
 module github.com/agenthub/operator
 
-go 1.27.0
+go 1.27.3
 
 require (
 	k8s.io/api v0.37.1

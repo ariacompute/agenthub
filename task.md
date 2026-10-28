@@ -326,6 +326,29 @@ per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批
 133. [x] `internal/handlers/channels.go`：新增 `POST /api/channels/{id}/deliver`（`tasks:write`，通道须 `Enabled`），调用 `channels.Deliver` 并把出站结果记为 `direction=outbound` 的 `ChannelMessage`；`handlers.go` 注册该路由，`listen.go`/`listen_test.go` 同步条目与 probe。
 134. [x] `internal/handlers/handlers.go` + `speech.go` + `cmd/agenthub-server/main.go`：将语音引擎以 `Deps.Speech adapter.Speech` 注入（修正此前「直接引用 `adapter.DefaultSpeech` 包级变量」的设计偏差）；`main` 注入 `adapter.DefaultSpeech`，handler 改用 `d.Speech`，单测仍可经零值 `Speech{}`（确定性 mock）运行。
 
+## M4 — eMudhra / emSign 证书私钥泄露响应（2026-10）
+
+背景：eMudhra(emSign) 8 张中间 CA 私钥极弱（P-384 私钥标量 <256），可被反推伪造任意域名证书；
+Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书（如部署用 Let's Encrypt）不受影响，无需重签。
+
+### 1. Go 后端 / operator
+- `go.mod`：`go 1.27` → `go 1.27.3`（强制构建工具链携带 `crypto/x509` 对 8 张 emSign 中间证书的硬编码封禁）。
+- `operator/go.mod`：`go 1.27.0` → `go 1.27.3`。
+- `Dockerfile`：构建镜像 `golang:1.27-alpine` → `golang:1.27.3-alpine`；运行时 `alpine:3.21` 已自带 `ca-certificates`（出向 TLS 依赖，更新后移除 emSign 链）。
+- `operator/Dockerfile`：构建镜像 `golang:1.27-alpine` → `golang:1.27.3-alpine`（运行时 distroless 自带 CA 包，由 Google 维护）。
+
+### 2. 前端 / 开发镜像（Bun）
+- `Dockerfile`：`FROM oven/bun:1-alpine AS web-build` → `oven/bun:1.4.4-alpine`（Bun 1.4.4 修复其 TLS 信任库）。
+- `docker-compose.yml`：dev `web` 服务 `image: oven/bun:1-alpine` → `oven/bun:1.4.4-alpine`。
+- `web/package.json`：新增 `engines.bun >=1.4.4`，约束本地开发运行时。
+
+### 3. 桌面端（Rust / Tauri，reqwest + rustls）
+- `desktop/src-tauri/Cargo.toml`：显式固定 `webpki-roots = "1.0.10"`（Rust 信任库在 1.0.10 移除 emSign 根；桌面环回代理 SSE/HTTP 出向校验依赖它）。本仓此前无 `Cargo.lock`，首次构建须解析到 ≥1.0.10。
+
+### 4. 检测与验证
+- 新增 `scripts/check-emudhra.sh`：离线按 emSign 根（信任锚）指纹扫描 CA bundle，规避前向/拦截代理造成的在线探测假阳性。
+- 构建后核验：`docker run --rm <agenthub-image> scripts/check-emudhra.sh /etc/ssl/certs/ca-certificates.crt`。
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

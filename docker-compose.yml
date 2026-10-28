@@ -124,7 +124,7 @@ services:
 
   # Console dev server with hot reload. Optional: `docker compose --profile dev up`.
   web:
-    image: oven/bun:1-alpine
+    image: oven/bun:1.4.4-alpine
     container_name: agenthub-web
     working_dir: /app
     command: sh -c "bun install && bun run dev"

@@ -8,9 +8,9 @@
 mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类异构资产统一注册、发现、路由与编排，
 对外以标准 A2A 端点被任何遵循协议的 Agent 调用。
 
-- 后端：**Go 1.27 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
+- 后端：**Go 1.27.3 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
   （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
-- 前端：Vue 3 + Vite（**bun** 包管理/测试），八屏控制台（registry / registries / sources / trace /
+- 前端：Vue 3 + Vite（**bun 1.4.4+** 包管理/测试），八屏控制台（registry / registries / sources / trace /
   topology / login / admin / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
 - 桌面端：`desktop/`，**Rust + Tauri v2** 外壳（Windows / macOS arm64 / Linux）。**不含后端、
   不含数据库**，用环回反向代理把同一份控制台对着用户指定的服务端打开；外壳自有文案同样 13 语。

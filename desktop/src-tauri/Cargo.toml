@@ -27,6 +27,9 @@ axum = { version = "0.8", features = ["macros"] }
 # rustls rather than the platform TLS stack: one implementation to reason about
 # on all three platforms, and no system OpenSSL to ship.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "json", "stream"] }
+# webpki-roots 1.0.10+ removes the compromised eMudhra/emSign roots from the
+# TLS trust store used by reqwest's rustls-tls (eMudhra CA key compromise, 2026-10).
+webpki-roots = "1.0.10"
 rust-embed = { version = "8", features = ["mime-guess"] }
 sys-locale = "0.3"
 url = "2"
