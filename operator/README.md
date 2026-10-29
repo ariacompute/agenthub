@@ -43,10 +43,10 @@ make docker-build IMG=agenthub-operator:latest
 # push it to your registry, or load it into kind/k3d.
 
 # 2. Install the operator + CRD into a dedicated namespace.
-helm install agenthub-operator ./deploy/agenthub-operator --namespace agenthub-operator --create-namespace
+helm install agenthub-operator operator/deploy/agenthub-operator --namespace agenthub-operator --create-namespace
 
 # 3. Create an AgentHub CR (the operator only watches its own namespace).
-kubectl apply -f examples/agenthub-sample.yaml -n agenthub-operator
+kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 
 # 4. Watch it come up.
 kubectl -n agenthub-operator get agenthub
@@ -167,7 +167,7 @@ plus Deployment + Service in the operator namespace. The full resource
 definitions live in that file:
 
 ```bash
-kubectl apply -f examples/postgres.yaml
+kubectl apply -f operator/examples/postgres.yaml
 kubectl -n agenthub-operator wait --for=condition=Ready pod -l app=postgres --timeout=120s
 ```
 
@@ -184,8 +184,7 @@ to whatever you set in the manifest.
 ### 4. Install the operator and create the `AgentHub`
 
 ```bash
-helm install agenthub-operator ./operator/deploy/agenthub-operator \
-  --namespace agenthub-operator --create-namespace
+helm install agenthub-operator operator/deploy/agenthub-operator --namespace agenthub-operator --create-namespace
 
 kubectl -n agenthub-operator apply -f operator/examples/agenthub-sample.yaml
 ```
