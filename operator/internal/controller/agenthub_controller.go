@@ -219,8 +219,9 @@ func (r *AgentHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// upsert creates or updates an owned object, preserving the resourceVersion
-// on updates so the controller reference stays intact.
+// upsert creates or updates an owned object. Updates use a patch (not a full
+// Update) so a concurrent status write from the managed controller doesn't trip
+// the "object has been modified" optimistic-concurrency conflict.
 func (r *AgentHubReconciler) upsert(ctx context.Context, owner *agenthubv1alpha1.AgentHub, desired client.Object) error {
 	if err := controllerutil.SetControllerReference(owner, desired, r.Scheme); err != nil {
 		return err
@@ -233,8 +234,8 @@ func (r *AgentHubReconciler) upsert(ctx context.Context, owner *agenthubv1alpha1
 	if err != nil {
 		return err
 	}
-	desired.SetResourceVersion(existing.GetResourceVersion())
-	return r.Update(ctx, desired)
+	patch := client.MergeFrom(existing)
+	return r.Patch(ctx, desired, patch)
 }
 
 func validate(cr *agenthubv1alpha1.AgentHub) (string, string) {
@@ -580,9 +581,10 @@ func buildDeployment(cr *agenthubv1alpha1.AgentHub, labels, selector map[string]
 	}
 
 	container := corev1.Container{
-		Name:  "agenthub",
-		Image: fmt.Sprintf("%s:%s", image.Repository, image.Tag),
-		Args:  []string{},
+		Name:            "agenthub",
+		Image:           fmt.Sprintf("%s:%s", image.Repository, image.Tag),
+		ImagePullPolicy: image.PullPolicy,
+		Args:            []string{},
 		Ports: []corev1.ContainerPort{
 			{Name: containerPortName, ContainerPort: httpPort, Protocol: corev1.ProtocolTCP},
 		},
