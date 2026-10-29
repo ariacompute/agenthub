@@ -162,56 +162,12 @@ the chart `values.yaml` (or the `AgentHub` spec) accordingly.
 
 ### 3. Start PostgreSQL inside the cluster
 
-Apply a simple Postgres Deployment + Service in the operator namespace:
-
-```yaml
-# postgres.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: agenthub-operator
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: postgres
-  namespace: agenthub-operator
-spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: postgres }
-  template:
-    metadata:
-      labels: { app: postgres }
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:16-alpine
-          env:
-            - { name: POSTGRES_USER, value: agenthub }
-            - { name: POSTGRES_PASSWORD, value: agenthub }
-            - { name: POSTGRES_DB, value: agenthub }
-          ports:
-            - { containerPort: 5432 }
-          readinessProbe:
-            exec:
-              command: [ pg_isready, -U, agenthub ]
-            initialDelaySeconds: 5
-            periodSeconds: 5
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-  namespace: agenthub-operator
-spec:
-  selector: { app: postgres }
-  ports:
-    - { port: 5432, targetPort: 5432 }
-```
+Apply the Postgres manifest shipped at `examples/postgres.yaml` — a Namespace
+plus Deployment + Service in the operator namespace. The full resource
+definitions live in that file:
 
 ```bash
-kubectl apply -f postgres.yaml
+kubectl apply -f examples/postgres.yaml
 kubectl -n agenthub-operator wait --for=condition=Ready pod -l app=postgres --timeout=120s
 ```
 
