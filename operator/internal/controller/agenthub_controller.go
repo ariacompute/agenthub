@@ -475,7 +475,7 @@ func buildRole(cr *agenthubv1alpha1.AgentHub, labels, _ map[string]string) rbacv
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{""},
+				APIGroups: []string{"events.k8s.io"},
 				Resources: []string{"events"},
 				Verbs:     []string{"create", "patch"},
 			},
