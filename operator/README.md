@@ -187,27 +187,15 @@ to whatever you set in the manifest.
 helm install agenthub-operator ./operator/deploy/agenthub-operator \
   --namespace agenthub-operator --create-namespace
 
-kubectl -n agenthub-operator apply -f - <<'EOF'
-apiVersion: agenthub.ai/v1alpha1
-kind: AgentHub
-metadata:
-  name: agenthub
-  namespace: agenthub-operator
-spec:
-  image:
-    repository: agenthub
-    tag: dev
-    pullPolicy: IfNotPresent
-  replicas: 1                 # keep 1 until the schema is migrated
-  env: dev
-  httpPort: 3500
-  database:
-    url: postgres://agenthub:agenthub@postgres.agenthub-operator.svc.cluster.local:5432/agenthub
-  bootstrapAdmin:
-    email: admin@example.com
-    password: change-me-please
-EOF
+kubectl -n agenthub-operator apply -f operator/examples/agenthub-sample.yaml
 ```
+
+The sample file `operator/examples/agenthub-sample.yaml` ships with the
+`database.url` pointing at an in-cluster Postgres
+(`postgres://agenthub:changeme@postgres:5432/agenthub?sslmode=disable`).
+Edit it to match the DSN from
+[step 3](#3-start-postgresql-inside-the-cluster) if your Postgres differs
+(e.g. `postgres://agenthub:agenthub@postgres.agenthub-operator.svc.cluster.local:5432/agenthub`).
 
 If you would rather not put the DSN inline, pre-create a Secret and reference
 it instead of `spec.database.url`:
