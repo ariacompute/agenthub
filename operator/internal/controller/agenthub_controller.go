@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -225,6 +226,13 @@ func (r *AgentHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *AgentHubReconciler) upsert(ctx context.Context, owner *agenthubv1alpha1.AgentHub, desired client.Object) error {
 	if err := controllerutil.SetControllerReference(owner, desired, r.Scheme); err != nil {
 		return err
+	}
+	// Typed objects carry no TypeMeta, so stamp the GVK explicitly. Without it
+	// the client cannot infer the resource from the scheme and fails to build
+	// the API URL ("the name of the object ... was undeterminable: name must be
+	// provided"). Stamping it from the scheme sidesteps GVK inference entirely.
+	if gvk, err := apiutil.GVKForObject(desired, r.Scheme); err == nil {
+		desired.GetObjectKind().SetGroupVersionKind(gvk)
 	}
 	existing := desired.DeepCopyObject().(client.Object)
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), existing)
