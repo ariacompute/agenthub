@@ -26,6 +26,10 @@ spec:
       containers:
         - name: postgres
           image: postgres:16-alpine
+          # Listen on 5432 so the whole in-cluster chain (app -> Service -> pod)
+          # is 5432. The official image prepends "postgres" to args beginning with
+          # "-", so "-c port=5432" runs as "postgres -c port=5432".
+          args: [ "-c", "port=5432" ]
           env:
             - { name: POSTGRES_USER, value: agenthub }
             - { name: POSTGRES_PASSWORD, value: agenthub }
@@ -34,7 +38,7 @@ spec:
             - { containerPort: 5432 }
           readinessProbe:
             exec:
-              command: [ pg_isready, -U, agenthub ]
+              command: [ pg_isready, -U, agenthub, -p, "5432" ]
             initialDelaySeconds: 5
             periodSeconds: 5
 ---
