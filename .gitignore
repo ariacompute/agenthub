@@ -1,6 +1,7 @@
 # Go
 /agenthub-server
 /bin/
+operator/bin/
 *.test
 *.out
 

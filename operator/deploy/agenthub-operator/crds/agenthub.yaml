@@ -170,6 +170,8 @@ spec:
                         type: string
                       clientSecret:
                         type: string
+                      issuer:
+                        type: string
                       scopes:
                         items:
                           type: string
@@ -183,6 +185,8 @@ spec:
                         type: string
                       clientSecret:
                         type: string
+                      issuer:
+                        type: string
                       scopes:
                         items:
                           type: string
@@ -195,6 +199,8 @@ spec:
                       clientID:
                         type: string
                       clientSecret:
+                        type: string
+                      issuer:
                         type: string
                       scopes:
                         items:
