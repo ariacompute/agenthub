@@ -147,15 +147,22 @@ the local Docker daemon and import them:
 
 ```bash
 # from the agenthub repo root
-docker build -f Dockerfile -t agenthub:dev .
+docker build -f Dockerfile -t agenthub:latest .
 # from operator/
-make -C operator docker-build IMG=agenthub-operator:dev
+make -C operator docker-build IMG=agenthub-operator:latest
 
 # kind: import from the local daemon
-kind load docker-image agenthub:dev agenthub-operator:dev --name agenthub
+kind load docker-image agenthub:latest agenthub-operator:latest --name agenthub
 # k3d: import from the local daemon
-k3d image import agenthub:dev agenthub-operator:dev -n agenthub
+k3d image import agenthub:latest agenthub-operator:latest -n agenthub
 ```
+
+> The image tags here must match what `helm install` expects. The chart default
+> is `agenthub-operator:latest` (see `values.yaml`), and the sample CR
+> (`examples/agenthub-sample.yaml`) uses `agenthub:latest`. If you build a
+> different tag, override it with `--set operator.image.tag=<tag>` at install
+> time and set `spec.image.tag` on the `AgentHub` CR accordingly — otherwise the
+> operator/agenthub pods stay in `ImagePullBackOff`.
 
 If you push the images to a registry instead, set `image.repository`/`tag` in
 the chart `values.yaml` (or the `AgentHub` spec) accordingly.
