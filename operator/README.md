@@ -230,7 +230,7 @@ CR's `spec.replicas`) — see [Multi-replica migration race](#multi-replica-migr
 ### Cleanup
 
 ```bash
-kind delete cluster --name agenthub   # or: k3d cluster delete agenthub
+kind delete cluster --name agenthub  # or: k3d cluster delete agenthub
 ```
 
 ## Status & observability
@@ -263,5 +263,5 @@ with its own `go.mod`; the parent agenthub module and its zero-extra-dependency
 ## Regenerate manifests
 
 ```bash
-cd operator && make manifests   # requires ./bin/controller-gen (downloaded by go install)
+cd operator && make manifests  # requires ./bin/controller-gen (downloaded by go install)
 ```
