@@ -622,32 +622,25 @@ roles or groups.
 - **Docs**: the `/docs` console now documents every new endpoint in its Collaboration group,
   in 13 languages (see `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js`).
 
-## Architecture Overview
+## 13. Kubernetes Operator
 
-```
-desktop --http://127.0.0.1:<port> (loopback proxy)--> embedded console + /api, /a2a, /healthz, /.well-known
-caller --POST /a2a (single JSON-RPC 2.0 entry)--> handlers -> hub -> adapter -> resource
-caller --GET /.well-known/agent.json-----------> Agent Card (one skill per resource)
-console --GET /api/tasks/{id}/events?since=seq--> SSE replay + live stream
-agentbuddy --GET /api/threads/{id}/events------> SSE: replay thread + follow delegated tasks (Hub.Send over A2A)
-hub ----store (GORM, four port interfaces)------> PostgreSQL 16 (embedded idempotent migrations)
-console --GET /api/*---------------------------> Registry / Registries / Sources / Task trace / Topology
-upstream registry --HTTPS----------------------> registry source -> dedup on (name, version) -> Upsert
-```
+For Kubernetes-native deployment, `agenthub-operator` reconciles the `AgentHub`
+CRD (`agenthub.ai/v1alpha1`) and provisions the full workload for each instance:
+a ConfigMap (`<instance>-config`), a Secret (`<instance>-secrets`), a
+ServiceAccount, a least-privilege Role + RoleBinding for the app, a Deployment,
+a Service, and an optional PersistentVolumeClaim (when persistence is enabled).
+Children carry an owner reference so they are garbage-collected with the CR, and
+the controller watches every owned kind.
 
-- **Frozen contract**: A2A frame shapes are defined only in `internal/a2a` and no layer
-  may rewrite them; SSE carries no `[DONE]` sentinel.
-- **Language-agnostic backend**: HTTP and JSON-RPC responses carry only fields, enums and
-  codes; localization is 100% the frontend copy layer's job.
-- **Transport-agnostic**: an MCP entry's `transport` (stdio / streamable-http /
-  sse-legacy) is a recorded field, and adapters must not branch on it.
-- **Consumers only see approved records**: `registry.Discoverable` is the single
-  filter the listing, the MCP export, the Agent Card and A2A addressing share, so a draft
-  cannot leak through one path that another path guards.
-- **Offline by default**: every adapter except an explicitly configured model
-  router stays deterministic, and upstream synchronisation is both off and pinned to the
-  fixture client until an operator turns both of those off.
-- **No scoring**: eval only keeps a hook — no LLM judge, and no scores are produced.
-- **One console, two shells**: the desktop app is the same bundle served from a
-  loopback origin, so the console never grows a desktop-only code path — and the Go
-  server never learns that a desktop client exists.
+- **Values vs. external secrets**: inline CR fields (database URL, bootstrap
+  admin password/email, encryption key, push secret, OAuth client secrets) are
+  written into the managed `<instance>-secrets`. A field may instead set
+  `ExistingSecret` — the operator then renders a `SecretKeyRef` to that
+  externally-provided Secret rather than managing its value, so the deployment
+  references a Secret you own.
+- **Helm install**: `helm install agenthub-operator operator/deploy/agenthub-operator
+  -n agenthub-operator --create-namespace` lays down the Deployment, the
+  operator's own Role/RoleBinding/ServiceAccount, and the CRD.
+- **Reconcile strategy**: `upsert` creates owned objects and patches them with a
+  merge patch (not a full `Update`) so a concurrent status write from the app
+  cannot trip the optimistic-concurrency conflict.

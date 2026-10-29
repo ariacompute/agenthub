@@ -501,29 +501,21 @@ cp .env.example .env          # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true�
 - **文档**：`/docs` 控制台已在 Collaboration 分组用 13 语完整记录全部新端点
   （见 `web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`）。
 
-## 架构总览
+## 十三、Kubernetes Operator（运维控制器）
 
-```
-桌面外壳 ──http://127.0.0.1:<port>（环回代理）──> 内嵌控制台 + /api、/a2a、/healthz、/.well-known
-调用方 ──POST /a2a（JSON-RPC 2.0 单入口）──> handlers → hub → adapter → 资源执行
-调用方 ──GET /.well-known/agent.json──────> Agent Card（一资源渲染为一个 skill）
-控制台 ──GET /api/tasks/{id}/events?since=seq──> SSE 回放 + 实时流
-hub ────store（GORM，四个端口接口）────────> PostgreSQL 16（内嵌幂等迁移）
-控制台 ──GET /api/*─────────────────────> 注册中心 / 命名空间 / 上游源 / 任务追踪 / 拓扑视图
-agentbuddy ──GET /api/threads/{id}/events──> SSE：回访线程 + 跟随被委派任务（Hub.Send 经 A2A）
-上游注册中心 ──HTTPS────────────────────> registry source → 按 (name, version) 去重 → Upsert
-```
+面向 Kubernetes 原生部署，`agenthub-operator` 对 `AgentHub` CRD
+（`agenthub.ai/v1alpha1`）做调和（reconcile），为每个实例拉起完整工作负载：
+ConfigMap（`<实例>-config`）、Secret（`<实例>-secrets`）、ServiceAccount、
+应用侧最小权限的 Role + RoleBinding、Deployment、Service，以及（开启持久化时）
+PersistentVolumeClaim。子资源都带 owner 引用，随 CR 删除而回收，控制器 watch
+全部被管类型。
 
-- **冻结契约**：A2A 帧形状只能在 `internal/a2a` 定义，任何层不得改写；SSE 无 `[DONE]`
-  哨兵。
-- **后端语言无关**：HTTP 与 JSON-RPC 响应只含字段、枚举与 code，多语言 100% 由前端
-  copy 层承担。
-- **传输无关**：MCP 的 `transport`（stdio / streamable-http / sse-legacy）是记录字段，
-  适配器不得按它分支。
-- **消费方只见 approved**：`registry.Discoverable` 是列表、MCP 导出、Agent Card
-  与 A2A 寻址共用的唯一过滤出口，草稿不会从某条没加守卫的路径漏出去。
-- **默认离线**：除显式配置成 router 的 model 外，所有适配器保持确定性；上游同步
-  既默认关闭、又默认钉在 fixture 客户端上——运维要显式关掉这两道闸才会真正出网。
-- **不做评分**：eval 仅留钩子，不接 LLM judge、不产出任何分数。
-- **一份控制台、两种外壳**：桌面端是同一份构建产物，只是由环回源提供，因此控制台不会
-  长出任何桌面专用分支，Go 服务端也无从感知桌面客户端的存在。
+- **托管值 vs. 外部 Secret**：CR 内联字段（数据库 URL、引导管理员密码/邮箱、
+  加密密钥、推送密钥、OAuth 客户端密钥）写入托管 Secret `<实例>-secrets`；
+  某字段也可改设 `ExistingSecret`——此时 operator 不再托管其值，而是渲染一个
+  指向你自备 Secret 的 `SecretKeyRef`，部署因此引用的是你自己掌控的 Secret。
+- **Helm 安装**：`helm install agenthub-operator operator/deploy/agenthub-operator
+  -n agenthub-operator --create-namespace` 一键铺好 Deployment、operator 自身的
+  Role/RoleBinding/ServiceAccount 以及 CRD。
+- **调和策略**：`upsert` 创建被管对象并以 merge patch（而非整体 `Update`）更新，
+  避免应用侧的并发状态写触发乐观锁冲突。
