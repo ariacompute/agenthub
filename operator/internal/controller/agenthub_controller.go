@@ -663,7 +663,13 @@ func buildDeployment(cr *agenthubv1alpha1.AgentHub, labels, selector map[string]
 				Spec: corev1.PodSpec{
 					ServiceAccountName: serviceAccountName(cr),
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot:   boolPtr(true),
+						RunAsNonRoot: boolPtr(true),
+						// Numeric UID/GID matching the agenthub image (the agenthub
+						// user is created as 10001). A named user cannot be verified
+						// as non-root by Kubernetes, so without this the pod stays in
+						// CreateContainerConfigError ("image has non-numeric user").
+						RunAsUser:      int64Ptr(10001),
+						RunAsGroup:     int64Ptr(10001),
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 					Containers: []corev1.Container{container},
@@ -675,6 +681,8 @@ func buildDeployment(cr *agenthubv1alpha1.AgentHub, labels, selector map[string]
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func int64Ptr(i int64) *int64 { return &i }
 
 func intStrPtr(i int) *intstr.IntOrString {
 	v := intstr.FromInt32(int32(i))

@@ -149,7 +149,10 @@ ENV AGENTHUB_HTTP_PORT=3500 \
     AGENTHUB_STATIC_DIR=/app/backend/static \
     AGENTHUB_BACKUP_DIR=
 
-USER agenthub
+# Numeric UID/GID (not the named "agenthub") so Kubernetes' RunAsNonRoot can
+# verify the user is non-root. A named user cannot be verified, which makes a
+# pod fail with "container has runAsNonRoot and image has non-numeric user".
+USER 10001
 EXPOSE 3500
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
