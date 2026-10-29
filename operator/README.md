@@ -43,8 +43,7 @@ make docker-build IMG=agenthub-operator:latest
 # push it to your registry, or load it into kind/k3d.
 
 # 2. Install the operator + CRD into a dedicated namespace.
-helm install agenthub-operator ./deploy/agenthub-operator \
-  --namespace agenthub-operator --create-namespace
+helm install agenthub-operator ./deploy/agenthub-operator --namespace agenthub-operator --create-namespace
 
 # 3. Create an AgentHub CR (the operator only watches its own namespace).
 kubectl apply -f examples/agenthub-sample.yaml -n agenthub-operator
@@ -124,6 +123,165 @@ to its release namespace, and `WATCH_NAMESPACE` is set to that namespace.
 Create your `AgentHub` CR **in the same namespace** as the operator. To watch
 multiple namespaces, edit the chart to a `ClusterRole`/`ClusterRoleBinding`
 and drop `WATCH_NAMESPACE`.
+
+## Local cluster walkthrough (kind / k3d)
+
+This section runs the whole stack on a local cluster — including PostgreSQL
+**inside** the cluster. The operator does not manage a database, but "external"
+only means "not reconciled by the operator"; a Postgres workload in the same
+namespace works fine and is reachable via in-cluster DNS.
+
+### 1. Create the cluster
+
+```bash
+# kind
+kind create cluster --name agenthub
+# or k3d
+k3d cluster create agenthub --wait
+```
+
+### 2. Build and load the images
+
+The operator and agenthub images must be present in the cluster. Build them on
+the local Docker daemon and import them:
+
+```bash
+# from the agenthub repo root
+docker build -f Dockerfile -t agenthub:dev .
+# from operator/
+make -C operator docker-build IMG=agenthub-operator:dev
+
+# kind: import from the local daemon
+kind load docker-image agenthub:dev agenthub-operator:dev --name agenthub
+# k3d: import from the local daemon
+k3d image import agenthub:dev agenthub-operator:dev -n agenthub
+```
+
+If you push the images to a registry instead, set `image.repository`/`tag` in
+the chart `values.yaml` (or the `AgentHub` spec) accordingly.
+
+### 3. Start PostgreSQL inside the cluster
+
+Apply a simple Postgres Deployment + Service in the operator namespace:
+
+```yaml
+# postgres.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agenthub-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: agenthub-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: agenthub }
+            - { name: POSTGRES_PASSWORD, value: agenthub }
+            - { name: POSTGRES_DB, value: agenthub }
+          ports:
+            - { containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: [ pg_isready, -U, agenthub ]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: agenthub-operator
+spec:
+  selector: { app: postgres }
+  ports:
+    - { port: 5432, targetPort: 5432 }
+```
+
+```bash
+kubectl apply -f postgres.yaml
+kubectl -n agenthub-operator wait --for=condition=Ready pod -l app=postgres --timeout=120s
+```
+
+The in-cluster DSN is then
+`postgres://agenthub:agenthub@postgres.agenthub-operator.svc.cluster.local:5432/agenthub`
+(service DNS `<name>.<namespace>.svc.cluster.local`). Match the host/user/db/password
+to whatever you set in the manifest.
+
+> For a more production-like Postgres use the Bitnami chart —
+> `helm install pg oci://registry-1.docker.io/bitnamicharts/postgresql -n agenthub-operator`
+> — and read its generated password from the released Secret instead of
+> hard-coding it.
+
+### 4. Install the operator and create the `AgentHub`
+
+```bash
+helm install agenthub-operator ./operator/deploy/agenthub-operator \
+  --namespace agenthub-operator --create-namespace
+
+kubectl -n agenthub-operator apply -f - <<'EOF'
+apiVersion: agenthub.ai/v1alpha1
+kind: AgentHub
+metadata:
+  name: agenthub
+  namespace: agenthub-operator
+spec:
+  image:
+    repository: agenthub
+    tag: dev
+    pullPolicy: IfNotPresent
+  replicas: 1                 # keep 1 until the schema is migrated
+  env: dev
+  httpPort: 3500
+  database:
+    url: postgres://agenthub:agenthub@postgres.agenthub-operator.svc.cluster.local:5432/agenthub
+  bootstrapAdmin:
+    email: admin@example.com
+    password: change-me-please
+EOF
+```
+
+If you would rather not put the DSN inline, pre-create a Secret and reference
+it instead of `spec.database.url`:
+
+```bash
+kubectl -n agenthub-operator create secret generic agenthub-db \
+  --from-literal=DATABASE_URL='postgres://agenthub:agenthub@postgres.agenthub-operator.svc.cluster.local:5432/agenthub'
+# then set spec.database.existingSecret: agenthub-db (optionally
+# spec.database.secretKey: DATABASE_URL) and omit spec.database.url.
+```
+
+### 5. Verify
+
+```bash
+kubectl -n agenthub-operator get agenthub
+kubectl -n agenthub-operator get pods,svc,deploy
+kubectl -n agenthub-operator port-forward svc/agenthub 8080:3500 &
+curl -s localhost:8080/healthz
+```
+
+`status.conditions[Available]=True` with `readyReplicas: 1` means the operator
+reconciled successfully. Once the database is migrated you may scale up with
+`kubectl -n agenthub-operator scale agenthub agenthub --replicas=3` (or edit the
+CR's `spec.replicas`) — see [Multi-replica migration race](#multi-replica-migration-race).
+
+### Cleanup
+
+```bash
+kind delete cluster --name agenthub   # or: k3d cluster delete agenthub
+```
 
 ## Status & observability
 

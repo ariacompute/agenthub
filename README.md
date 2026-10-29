@@ -245,8 +245,7 @@ agenthub-server Deployment. PostgreSQL stays external; the connection string is 
 - `operator/examples/agenthub-sample.yaml` — a ready-to-apply `AgentHub` CR.
 
 ```bash
-helm install agenthub-operator ./operator/deploy/agenthub-operator \
-  --namespace agenthub-operator --create-namespace
+helm install agenthub-operator ./operator/deploy/agenthub-operator --namespace agenthub-operator --create-namespace
 kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 ```
 

@@ -215,8 +215,7 @@ AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支�
 - `operator/examples/agenthub-sample.yaml` —— 一份可直接 apply 的 `AgentHub` CR。
 
 ```bash
-helm install agenthub-operator ./operator/deploy/agenthub-operator \
-  --namespace agenthub-operator --create-namespace
+helm install agenthub-operator ./operator/deploy/agenthub-operator --namespace agenthub-operator --create-namespace
 kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 ```
 
