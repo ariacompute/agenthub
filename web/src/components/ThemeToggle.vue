@@ -1,5 +1,8 @@
 <script setup>
 // Monochrome only: the toggle flips the grey scale, never the hue.
+// The icon represents the theme the button *switches to* (not the current
+// one): in light theme the button shows the dark control, in dark it shows
+// the light control.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useCopy } from '../lib/use-copy.js'
 import { Moon, Sun } from 'lucide-vue-next'
@@ -46,10 +49,10 @@ onBeforeUnmount(() => {
   <button
     class="chip"
     type="button"
-    :aria-label="t('themeLabel')"
-    :title="t('themeLabel')"
-    @click="apply(theme === 'dark' ? 'light' : 'dark')"
+    :aria-label="t(theme === 'light' ? 'themeToDark' : 'themeToLight')"
+    :title="t(theme === 'light' ? 'themeToDark' : 'themeToLight')"
+    @click="apply(theme === 'light' ? 'dark' : 'light')"
   >
-    <component :is="theme === 'dark' ? Moon : Sun" :size="14" />
+    <component :is="theme === 'light' ? Moon : Sun" :size="14" />
   </button>
 </template>
