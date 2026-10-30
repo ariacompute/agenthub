@@ -249,39 +249,6 @@ mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`
 **备份**：配置 `AGENTHUB_ENCRYPTION_KEY` 时检查点归档以 AES-256-GCM 静态加密为 `<file>.tar.gz.enc` 并写
 `<file>.enc.sha256` 清单，明文绝不落盘。定期用 `scripts/backup-restore-drill.sh` 验证可恢复性。
 
-## 桌面端
-
-`desktop/` 是 **Tauri v2** 外壳，覆盖 Windows、macOS（arm64）与 Linux。它**不带后端、
-不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着你指定的 agenthub 服务端打开。浏览器里能做的
-一切——注册中心、目录治理、任务追踪、拓扑、管理、SSE 实时流、归档下载——在窗口里同样可用。
-发布的 macOS 产物为 arm64；Intel Mac 请用 `make desktop-build` 从源码构建。
-
-外壳只认**路径前缀**：`/api`、`/a2a`、`/healthz`、`/.well-known` 转发给服务端，其余一律回退到
-控制台的 `index.html`。因此新增控制面端点或控制台屏幕**不需要改桌面端代码**，只需要重新构建控制台
-产物——`make desktop-dev` 与 `make desktop-build` 都会先做这件事。
-
-```bash
-make desktop-install  # cd desktop && bun install
-make desktop-dev      # 先构建控制台，再 tauri dev
-make desktop-build    # 先构建控制台，再 tauri build
-make desktop-test     # cd desktop/src-tauri && cargo test
-```
-
-**连接。** 首次启动进入连接页：填写服务端地址（如 `https://hub.example.com`）、
-「忽略自签证书」只对你自己网络内的服务端勾选、选一个 13 语之一，然后点**连接**——
-外壳会先探 `/healthz` 再落盘。之后托盘常驻四项：**打开控制台 / 连接设置… / 关于 / 退出**；
-关闭窗口只是收进托盘，不会退出。配置存于外壳自有的 `config.json`（当前用户配置目录下）。
-
-**未签名产物。** 发布的二进制未做代码签名，首次启动会被系统拦下：
-
-| 平台 | 绕行方式 |
-| --- | --- |
-| macOS | *系统设置 → 隐私与安全性 → 仍要打开*；或解压后执行 `xattr -d com.apple.quarantine /Applications/agenthub.app` |
-| Windows | SmartScreen 选 *更多信息 → 仍要运行* |
-| Linux | 无需绕行：安装 `.deb`，或解开 `.tar.gz` 直接运行（二进制保留可执行位） |
-
-每个产物旁边都附带 `SHA256SUMS.txt`。
-
 ## 测试
 
 单元与集成套件：

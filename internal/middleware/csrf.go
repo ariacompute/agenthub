@@ -11,7 +11,7 @@ var errBadOrigin = errors.New("bad origin")
 
 // CSRF defends the session-cookie control plane against cross-site request
 // forgery. State-changing requests must either carry no Origin (non-browser
-// clients, scripts, the loopback desktop proxy) or an Origin whose host matches
+// clients, scripts, the loopback desktop client) or an Origin whose host matches
 // the request Host. A mismatched Origin — the hallmark of a browser cross-site
 // request — is rejected. Bearer-authenticated API keys are unaffected: they come
 // without cookies and, with no CORS allow list configured, cross-site bearer
@@ -22,8 +22,9 @@ func CSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// The desktop proxy and local dev arrive on loopback; treat them as
-		// trusted same-origin so the console inside Tauri keeps working.
+		// The loopback desktop client and local dev arrive on loopback; treat
+		// them as trusted same-origin so the console inside the desktop shell
+		// keeps working.
 		if isLoopback(clientIP(r)) {
 			next.ServeHTTP(w, r)
 			return

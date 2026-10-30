@@ -125,7 +125,7 @@ func Register(d Deps) http.Handler {
 
 	// agentbuddy: the unified workspace and multi-agent collaboration threads.
 	// Read routes hang off resources/tasks permissions so an operator does not
-	// grant anything new to let a desktop client in.
+	// grant anything new to let the desktop client in.
 	mux.HandleFunc("GET /api/workspace", d.requirePermission(authz.PermResourcesRead, d.handleWorkspace))
 	mux.HandleFunc("GET /api/threads", d.requirePermission(authz.PermTasksRead, d.handleListThreads))
 	mux.HandleFunc("POST /api/threads", d.requirePermission(authz.PermTasksWrite, d.handleCreateThread))

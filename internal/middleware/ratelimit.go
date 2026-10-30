@@ -74,8 +74,8 @@ func clientIP(r *http.Request) string {
 }
 
 // isLoopback reports whether ip is a loopback address (covers 127.0.0.1, ::1 and
-// a bare "localhost"), which is how the desktop proxy and local dev reach the
-// server.
+// a bare "localhost"), which is how the loopback desktop client (agentbuddy) and
+// local dev reach the server.
 func isLoopback(ip string) bool {
 	host := ip
 	if h, _, err := net.SplitHostPort(ip); err == nil {

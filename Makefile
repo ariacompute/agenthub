@@ -53,8 +53,7 @@ POSTGRES_PORT ?= 5434
         docker-build compose-build \
         db-up db-down db-psql \
         web-install web-dev web-build web-test web-test-watch clean \
-        docs-md \
-        desktop-install desktop-dev desktop-build desktop-test
+        docs-md
 
 # web-build is a dependency on purpose: the service serves the console from
 # backend/static, so starting it without rebuilding hands out whatever bundle
@@ -177,27 +176,6 @@ web-test-watch:
 # handlers.go, update docs-content.js, run this, and both views stay in step.
 docs-md:
 	bun scripts/gen-docs-md.mjs
-
-# Desktop shell (Tauri v2, Rust). It has no backend of its own: it opens the
-# console against a server the user points it at. `desktop-build` therefore
-# builds the console first — the shell embeds `backend/static` at compile time.
-DESKTOP := desktop
-
-desktop-install:
-	cd $(DESKTOP) && bun install
-
-# The console is embedded at compile time, so it has to exist before either
-# `tauri dev` or `tauri build` runs. Building it here rather than through
-# beforeDevCommand / beforeBuildCommand keeps the shell out of it: one command
-# that behaves the same on Linux, macOS and Windows.
-desktop-dev: desktop-install web-build
-	cd $(DESKTOP) && bun run dev
-
-desktop-build: desktop-install web-build
-	cd $(DESKTOP) && bun run build
-
-desktop-test: desktop-install
-	cd $(DESKTOP)/src-tauri && cargo test
 
 clean:
 	rm -rf bin $(STATIC) $(WEB)/dist coverage.out

@@ -265,7 +265,7 @@ TLS.
 - Per-IP rate limiting: auth endpoints are capped at **10 req/min/IP**, everything under `/api` and
   `/a2a` at **200 req/min/IP** (`429` + `Retry-After`).
 - CSRF: state-changing requests must carry a same-origin `Origin` (loopback and non-browser clients
-  such as the Tauri desktop proxy and scripts are exempt), else `403`. The console uses same-origin
+  such as the desktop client and scripts are exempt), else `403`. The console uses same-origin
   fetch with the session cookie, so it is unaffected.
 - Audit logs record only IP and user id — never passwords, tokens or PII.
 
@@ -290,45 +290,6 @@ connection at startup. Provision the roles with `scripts/provision-db-roles.sql`
 **Backups.** When `AGENTHUB_ENCRYPTION_KEY` is set, checkpoint archives are encrypted at rest
 (AES-256-GCM) into `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest — plaintext never touches
 disk. Verify recoverability periodically with `scripts/backup-restore-drill.sh`.
-
-## Desktop
-
-`desktop/` is a **Tauri v2** shell for Windows, macOS (arm64) and Linux. It carries no
-backend and no database of its own: it embeds the same console the server serves, and opens it
-against an agenthub server you point it at. Everything you can do in a browser — registry,
-registry governance, task trace, topology, administration, SSE streams, downloads — works the same
-way inside the window. The published macOS binary is arm64; on an Intel Mac build from source with
-`make desktop-build`.
-
-The shell only ever looks at a **path prefix**: `/api`, `/a2a`, `/healthz` and `/.well-known` go to
-the server, everything else falls back to the console's `index.html`. A new control plane endpoint
-or a new console screen therefore needs no change here — only a rebuilt console bundle, which
-`make desktop-dev` and `make desktop-build` both produce.
-
-```bash
-make desktop-install  # cd desktop && bun install
-make desktop-dev      # builds the console, then runs `tauri dev`
-make desktop-build    # builds the console, then runs `tauri build`
-make desktop-test     # cd desktop/src-tauri && cargo test
-```
-
-**Connecting.** The first start shows the connection page: enter the server address
-(`https://hub.example.com`), tick *ignore self-signed certificates* only for a server on your own
-network, choose one of the 13 languages, and press **Connect** — the shell probes `/healthz` before
-it saves anything. After that the tray carries *Open console*, *Connection settings…*, *About* and
-*Quit*; closing the window parks the app in the tray instead of ending it. The setting lives in the
-shell's own `config.json` under the per-user config directory.
-
-**Unsigned builds.** The published binaries are not code-signed, so the first launch is stopped by
-the platform:
-
-| Platform | What to do |
-| --- | --- |
-| macOS | *System Settings → Privacy & Security → Open Anyway*, or `xattr -d com.apple.quarantine /Applications/agenthub.app` after copying it out of the archive |
-| Windows | SmartScreen: *More info → Run anyway* |
-| Linux | Nothing to bypass: install the `.deb`, or unpack the `.tar.gz` — the binary keeps its executable bit |
-
-Every asset ships with a `SHA256SUMS.txt` next to it.
 
 ## Tests
 

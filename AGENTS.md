@@ -12,10 +12,6 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
   （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
 - 前端：Vue 3 + Vite（**bun 1.4.4+** 包管理/测试），八屏控制台（registry / registries / sources / trace /
   topology / login / admin / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
-- 桌面端：`desktop/`，**Rust + Tauri v2** 外壳（Windows / macOS arm64 / Linux）。**不含后端、
-  不含数据库**，用环回反向代理把同一份控制台对着用户指定的服务端打开；外壳自有文案同样 13 语。
-  外壳只认**前缀**（`/api`、`/a2a`、`/healthz`、`/.well-known`），其余路径一律 SPA 回退到
-  `index.html`，因此控制台新增屏幕与控制面新增端点**不需要改桌面端代码**。
 - 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通；真实对接以 `TODO(real)` 标注边界。
 - 设计参照 `mastra-ai/mastra` 的**协议与交互形态**（MCP Registry 条目模型、workflow 三原语、
   HITL→`input-required`、Studio 试跑、observability 分层），但**不引入其任何代码或 npm 依赖**。
@@ -152,15 +148,6 @@ persistence ← internal/store（GORM 实现）
   **不手工编辑**
 - `scripts/`：`gen-docs-md.mjs`（文档 markdown 生成）、`compose-ports.sh`、`test-api.sh`
 - `backend/static/`：Vue 构建产物（Go 进程托管，gitignore）
-- `desktop/`：**桌面外壳（Tauri v2，Rust，独立 crate，不在任何 workspace 内）**。
-  `src-tauri/src/proxy/`（`mod.rs` 环回监听与路由分发、`forward.rs` reqwest 流式转发 +
-  cookie jar + `Set-Cookie`/`Location` 改写、`static_files.rs` rust-embed 控制台与 SPA 回退、
-  `shell.rs` `/__shell/*` 自有端点）、`config.rs`（连接配置读写与 URL 校验）、
-  `tray.rs`（托盘菜单）、`i18n/`（13 语文案 + 系统语言检测）、`assets/shell.html`（连接页/关于页，
-  文案由 Rust 注入）、`scripts/stamp.mjs`（发布时写版本号）。
-  **Logo 单一来源**：界面徽标与 `BrandMark.vue` 同一 hub 图形（30px 徽章 + 18px 字形，sheen/描边
-  跟随明暗主题），应用图标由 `web/public/favicon.svg` 的同一几何栅格化为 `assets/app-icon.png`
-  （`bun run icons` 重新派生 `src-tauri/icons/`）——两处都不允许再画第二份 mark。
 
 ## 开发规范
 
@@ -189,18 +176,6 @@ persistence ← internal/store（GORM 实现）
   `web/tests/style.spec.js` 自动校验（hex 三通道相等 + 色相词黑名单）。
 - **i18n 单向来源**：`languages.js`（13 语，与 ariacompute.cn 一致）+ 按语言分块的 copy 表，
   浅合并英文兜底；组件内禁止硬编码自然语言。
-- **桌面端四条硬约束**：
-  1. **控制台与 Go 服务端零改动**：外壳只靠环回代理工作，不得为桌面端在 `web/` 或
-     `internal/handlers` 加专用分支或路由。
-  2. **转发前缀不得漏**：`/api`、`/a2a`、`/healthz`、`/.well-known` 四类前缀全部转发给服务端，
-     其余走 SPA 回退（与 Go 的 `staticOrIndex` 同语义）。漏一个前缀的表现为「桌面端某屏空白」。
-  3. **SSE 必须真流式**：转发一律走 `reqwest` 字节流 → axum `Body::from_stream`，禁止缓冲，
-     禁止设置整体超时（任务事件流可挂数分钟）；`accept-encoding: identity` 防止被压缩。
-  4. **外壳文案也 13 语**：`desktop/src-tauri/src/i18n/copy.rs` 与控制台 copy 表受同一道约束
-     （13 语齐备、每语无空串、非英语不得与英文原文相同），由 `cargo test` 守护；
-     语言代码与 `web/src/lib/languages.js` 必须一致。
-- **桌面端安全**：连接配置只存外壳自有 `config.json`（仅当前用户可读），URL 必须校验
-  `http`/`https` scheme；「忽略自签证书」默认关闭；日志不得打印完整 URL（可能含凭据）与 Cookie 头。
 - **破坏性操作需显式确认**：恢复（restore）是 agenthub 唯一会摧毁数据的操作——接口要求
   `{"confirm":"<checkpoint id>"}` 二次确认，执行前自动打回滚点、静默等待在途任务、失败时保持原状；
   真实恢复的集成用例与 `scripts/test-api.sh` 段落都以 `AGENTHUB_TEST_BACKUP_RESTORE=true` 门控。
@@ -238,9 +213,6 @@ persistence ← internal/store（GORM 实现）
      `internal/store` 而不是都归到 `tests/`（后者只有 0 语句，覆盖率不体现）；
   3. 离线优先是硬约束：任何会触网的用例必须走 `httptest` 或 fixture；同步类用例一律
      `Fixture: true`，否则一次 DNS 超时就是 5 秒的测试。
-- **桌面端测试**：`cd desktop/src-tauri && cargo test`（配置校验、i18n 完整性、代理转发清单、
-  `Set-Cookie` 改写，以及**起真实环回代理 + 假服务端**的端到端用例：转发、cookie、SSE 不缓冲、
-  SPA 回退、连接保存；控制台未构建时静态用例自动 skip，不伪造结果）。
 
 ## 常用命令
 
@@ -261,21 +233,14 @@ make test-integration # 只跑 Integration 用例
 go test ./... -cover  # 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
-make desktop-install / make desktop-dev / make desktop-build / make desktop-test
-                             # 桌面外壳（Tauri v2）：dev/build 都会先构建控制台
-                             # （rust-embed 在编译期嵌入 backend/static），test = cargo test
 ./scripts/test-api.sh        # 对运行中实例的完整 HTTP 接口自测（PASS/FAIL 逐条，失败非 0 退出）
                              # 备份段落：AGENTHUB_BACKUP_DIR 未配置则 SKIP；
                              # 真实恢复需 AGENTHUB_TEST_BACKUP_RESTORE=true（否则会清空会话）
 ```
 
-## 发布（镜像 + 桌面端）
+## 发布（镜像）
 
-- 发布 Release 触发 `.github/workflows/release.yml`：**两个并列且互不依赖的 job** ——
-  `build-and-publish` 推镜像，`desktop` 出三平台桌面产物；concurrency 组名 `release` 同时守两者。
-- 改这个 workflow 的三条纪律：`build-and-publish` 的 steps / secrets / build-args / outputs
-  **逐字不动**；`desktop` 自带 stamp 步骤（无 tag 直接 `::error::` 退出），不跨 job 共享 outputs；
-  `desktop` 单独声明 `permissions: contents: write`（上传 Release 资产），镜像 job 仍是 `read`。
+- 发布 Release 触发 `.github/workflows/release.yml`：单一 job `build-and-publish` 构建并推送容器镜像。
 - 镜像：构建并推送 **`ariacompute/agenthub-agenthub`**
   到 DockerHub，tag 取 Release tag（`ariacompute/agenthub-agenthub:<tag>`）并额外打 `:latest`。
 - tag 同时作为 `VERSION` build-arg、`7 位 commit` 作为 `COMMIT`、`DISTANCE=0`、`DIRTY=false`
@@ -285,23 +250,6 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
   自报 `dev` 哨兵、说不清来源的 `:latest`。
 - 必填 secrets：`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`；`:latest` **只由 CI 推**，禁止本地手工推。
 - 平台仅 `linux/amd64`（与 docker 仓 release.yml 一致）；如需多架构再引 `setup-qemu` + `setup-buildx`。
-- **桌面端**：三格矩阵（linux-x86_64 / macos-aarch64 / windows-x86_64），每格先
-  `bun run build` 出控制台 → `tauri-action`（`releaseId` 指向触发本次运行的 Release，
-  `uploadUpdaterJson: false`）出原生安装包（MSI / DMG / deb）并自行附着；随后脚本把
-  应用目录打成**便携包**（zip / tar.gz），为安装包与便携包生成 `SHA256SUMS.txt`，最后由
-  `softprops/action-gh-release` 附着便携包与校验和 —— **不新建 Release、不改 body**。
-- **每个平台每种形态只留一个产物**：Linux `--bundles deb`（不出 AppImage，便携包已覆盖「解开即跑」）；
-  macOS 的 `bundle/macos/<name>.app.tar.gz` 被 tauri-action **硬编码**附着（其入参只能改名、不能排除，
-  `uploadUpdaterJson: false` 也拦不住），故上传后由脚本按 asset id 删除，只删 `.app.tar.gz` 与其 `.sig`，
-  保留 `.dmg`。
-- **macOS 只出 arm64**：原 Intel 一格跑在 `macos-13` 标签上，该 runner 已被 GitHub 退役——作业
-  受理后永远等不到 runner，而 `fail-fast: false` 让整个 Release 一直 in_progress（其余格子产物已上传），
-  既不成功也不失败。不要恢复该标签；要恢复 Intel 产物只能在 `macos-latest` 上交叉编译
-  `x86_64-apple-darwin`。Intel Mac 由 `make desktop-build` 从源码构建。
-- **版本号 === Release tag**：`desktop/scripts/stamp.mjs` 在编译前把 tag（去掉 `v`）写进
-  `Cargo.toml` 与 `tauri.conf.json`；`AGENTHUB_COMMIT` 环境变量进入 `option_env!`，供「关于」显示。
-- **产物未签名**（未配置证书 secrets）：文件名与发布说明必须明示，README 给出 macOS Gatekeeper
-  与 Windows SmartScreen 的绕行步骤。
 
 ## 演示数据（demo resources）
 
@@ -410,8 +358,8 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
     （实现参考 `handlers/api.go` 的 `streamTaskEvents`）。
   - 迁移见 `migrations/012_threads.sql`（幂等：`CREATE TABLE IF NOT EXISTS` + `ON DELETE CASCADE`）。
 - 权限点复用既有 `PermResourcesRead` / `PermTasksRead` / `PermTasksWrite`，不新增角色或组。
-- 桌面壳前缀白名单（`internal/proxy/mod.rs` 的 `is_remote_path`）已含 `/api/workspace` 与
-  `/api/threads`，新增服务端端点无需改桌面端代码。
+- 桌面壳（agentbuddy，独立仓库）前缀白名单已含 `/api/workspace` 与 `/api/threads`，新增服务端端点
+  无需改桌面端代码。
 - 协作通道与语音（agenthub 增补，agentbuddy 工作台消费）：
   - `GET/POST /api/channels`、`GET/PUT/DELETE /api/channels/{id}`、`GET /api/channels/{id}/deliveries`、
     `POST /api/channels/{id}/webhook`（公开、签名校验）、`POST /api/channels/{id}/deliver`（出站，SSRF 安全投递到 `config.target_url`）。
@@ -419,4 +367,4 @@ make desktop-install / make desktop-dev / make desktop-build / make desktop-test
     对 `kind=mcp` 资源暴露外部调用，`ask_first` 策略经 `Hub.ParkConnector` 挂起 `input-required` 任务等待人工批准。
   - `POST /api/threads/{id}/audio`：服务端转写（STT mock）后作为 `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact；受 `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制。
   - `Persona`：`Entry.Persona`（`AvatarURL`/`Bio`/`Capabilities`）经 `normalizePersona` 归一化，落 `resources.persona` JSONB。
-  - 上述端点均在桌面壳前缀白名单（`/api`）覆盖之内，新增服务端端点无需改桌面端代码。
+  - 上述端点均在桌面壳（agentbuddy）前缀白名单（`/api`）覆盖之内，新增服务端端点无需改桌面端代码。
