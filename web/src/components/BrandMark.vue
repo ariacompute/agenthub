@@ -1,8 +1,9 @@
 <script setup>
-// The mark is a hub: one centre with four peers wired to it, which is what the
-// platform does with model, agent, mcp, skill and cli resources. It inherits
-// currentColor, so the badge never carries a colour of its own — dark and light
-// themes both get their own contrast from the same glyph.
+// The mark is the Aria Compute favicon: a rounded-square badge carrying a
+// stylised "A" — a diagonal stroke, a ring and a vertical stem. It takes its
+// two inks from --brand-badge-bg / --brand-badge-fg (defined per theme in
+// style.css), so the badge inverts between light and dark app themes and always
+// pops off the surrounding surface.
 defineProps({
   size: { type: [Number, String], default: 18 },
 })
@@ -13,20 +14,16 @@ defineProps({
     class="brand-glyph"
     :width="size"
     :height="size"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.7"
-    stroke-linecap="round"
-    aria-hidden="true"
-    focusable="false"
+    viewBox="1 1 62 62"
+    role="img"
+    aria-label="Aria Compute"
   >
-    <path d="M12 5.6v2.6M12 15.8v2.6M5.6 12h2.6M15.8 12h2.6" />
-    <circle cx="12" cy="12" r="3.1" fill="currentColor" stroke="none" />
-    <circle cx="12" cy="4" r="1.6" fill="currentColor" stroke="none" />
-    <circle cx="20" cy="12" r="1.6" fill="currentColor" stroke="none" />
-    <circle cx="12" cy="20" r="1.6" fill="currentColor" stroke="none" />
-    <circle cx="4" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <rect x="1" y="1" width="62" height="62" rx="18" class="brand-badge-bg" />
+    <g class="brand-badge-fg" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 53 23 11" stroke-width="8" />
+      <circle cx="41" cy="37" r="11" stroke-width="6" />
+      <path d="M51 54V27" stroke-width="6" />
+    </g>
   </svg>
 </template>
 
@@ -34,5 +31,11 @@ defineProps({
 .brand-glyph {
   display: block;
   flex: none;
+}
+.brand-badge-bg {
+  fill: var(--brand-badge-bg);
+}
+.brand-badge-fg {
+  stroke: var(--brand-badge-fg);
 }
 </style>

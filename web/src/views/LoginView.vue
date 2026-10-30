@@ -68,7 +68,7 @@ async function submit() {
     <header class="login-head">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
-          <BrandMark :size="18" />
+          <BrandMark :size="30" />
         </div>
         <div>
           <div class="brand-name">agenthub</div>

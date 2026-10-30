@@ -43,6 +43,13 @@
   --grade-skill: #666666;
   --grade-cli: #454545;
 
+  /* Brand glyph mirrors the Aria Compute favicon badge. In the dark app theme
+     the badge reads off-white-on-ink (favicon-dark.svg) so it pops off the dark
+     UI; in the light theme it inverts to ink-on-off-white (favicon.svg). Values
+     stay on the greyscale axis to honour the monochrome guard. */
+  --brand-badge-bg: #f5f5f5;
+  --brand-badge-fg: #0d0d0d;
+
   --radius: 14px;
   --radius-sm: 10px;
   --sidebar-w: 236px;
@@ -161,11 +168,9 @@ textarea:focus {
   display: grid;
   place-items: center;
   border-radius: 9px;
-  background: var(--sheen);
-  border: 1px solid var(--stroke-3);
-  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.12);
-  /* The glyph paints in currentColor, so the badge itself stays colourless. */
-  color: var(--text-1);
+  overflow: hidden;
+  /* The badge is a filled rounded square that paints its own inks via
+     --brand-badge-*, so it fills this box edge to edge — no inner frame. */
 }
 
 .brand-name {
@@ -1156,6 +1161,10 @@ textarea:focus {
   --grade-mcp: #4a4a4a;
   --grade-skill: #666666;
   --grade-cli: #8a8a8a;
+
+  /* Brand glyph inverts for the light app theme: ink-on-off-white (favicon.svg). */
+  --brand-badge-bg: #0d0d0d;
+  --brand-badge-fg: #f5f5f5;
 }
 
 [data-theme='light'] body {
