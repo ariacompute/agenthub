@@ -28,7 +28,7 @@ func (s *userStore) Create(ctx context.Context, u *auth.User) error {
 	now := time.Now().UTC()
 	row := &model.User{
 		ID:           u.ID,
-		Email:        u.Email,
+		Email:        strPtr(u.Email),
 		Name:         u.Name,
 		PasswordHash: u.PasswordHash,
 		Status:       orDefault(u.Status, auth.StatusActive),
@@ -98,7 +98,7 @@ func (s *userStore) Update(ctx context.Context, u *auth.User) error {
 		return fmt.Errorf("store: update user: user or id is empty")
 	}
 	fields := map[string]any{
-		"email":      u.Email,
+		"email":      strPtr(u.Email),
 		"name":       u.Name,
 		"status":     orDefault(u.Status, auth.StatusActive),
 		"is_owner":   u.IsOwner,
@@ -206,7 +206,7 @@ func (s *userStore) SetStatus(ctx context.Context, id, status string) error {
 func userFromModel(row *model.User) *auth.User {
 	return &auth.User{
 		ID:           row.ID,
-		Email:        row.Email,
+		Email:        strVal(row.Email),
 		Name:         row.Name,
 		PasswordHash: row.PasswordHash,
 		Status:       row.Status,
@@ -370,6 +370,24 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// strPtr returns a *string for s, or nil when s is empty so a nullable column
+// stores NULL instead of an empty string (which would collide on a UNIQUE
+// index). Used for users that may have no email (e.g. WeChat logins).
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// strVal dereferences a *string, returning "" for NULL.
+func strVal(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func isUniqueViolation(err error) bool {

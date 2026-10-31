@@ -19,6 +19,7 @@ import { apiKeysCopy } from './copy/apikeys-copy.js'
 import { docsCopy } from './copy/docs-copy.js'
 import { enumsCopy } from './copy/enums-copy.js'
 import { errorsCopy } from './copy/errors-copy.js'
+import { providerCopy } from './copy/providers-copy.js'
 
 export const STORAGE_KEY = 'agenthub.lang'
 
@@ -36,6 +37,7 @@ const COPIES = {
   apikeys: apiKeysCopy,
   docs: docsCopy,
   errors: errorsCopy,
+  providers: providerCopy,
 }
 
 /** Shallow merge with English fallback. */

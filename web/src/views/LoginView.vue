@@ -15,6 +15,7 @@ const hub = useHubStore()
 const router = useRouter()
 const route = useRoute()
 const { t } = useCopy('auth')
+const { t: tProvider } = useCopy('providers')
 const shell = useCopy('shell')
 
 const mode = ref('login')
@@ -180,7 +181,7 @@ async function submit() {
           :href="`/api/auth/oauth/${provider}`"
         >
           <Github v-if="provider === 'github'" :size="15" />
-          <span>{{ provider }}</span>
+          <span>{{ provider === 'wechat' ? tProvider('wechat') : provider }}</span>
         </a>
       </div>
       <p v-else class="muted login-hint">{{ t('oauthUnavailable') }}</p>

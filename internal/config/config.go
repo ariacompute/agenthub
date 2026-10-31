@@ -243,6 +243,13 @@ func Load() (*Config, error) {
 				ClientSecret: envStr("AGENTHUB_OAUTH_GITHUB_CLIENT_SECRET", ""),
 				Scopes:       envList("AGENTHUB_OAUTH_GITHUB_SCOPES", nil),
 			},
+			// WeChat web QR login (snsapi_login) uses an AppID/AppSecret pair that
+			// maps onto the generic client id / secret slots; it is disabled unless
+			// both are set, just like the other providers.
+			WeChat: auth.ProviderConfig{
+				ClientID:     envStr("AGENTHUB_OAUTH_WECHAT_APP_ID", ""),
+				ClientSecret: envStr("AGENTHUB_OAUTH_WECHAT_APP_SECRET", ""),
+			},
 			OIDC: auth.ProviderConfig{
 				Issuer:       envStr("AGENTHUB_OAUTH_OIDC_ISSUER", ""),
 				ClientID:     envStr("AGENTHUB_OAUTH_OIDC_CLIENT_ID", ""),

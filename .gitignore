@@ -18,3 +18,4 @@ backend/static/
 *.local
 
 coverage.out
+.codebuddy/

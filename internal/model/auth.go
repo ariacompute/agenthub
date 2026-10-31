@@ -6,8 +6,12 @@ import "time"
 // password hash or one or more OAuth bindings (or both). Disabling a user keeps
 // every row it produced — tasks, grants, sessions — so the audit trail survives.
 type User struct {
-	ID           string    `gorm:"primaryKey;size:64"`
-	Email        string    `gorm:"size:320;uniqueIndex;not null"`
+	ID string `gorm:"primaryKey;size:64"`
+	// Email is nullable so accounts created through providers that do not hand
+	// over an address (WeChat web login) can still be stored. The UNIQUE index
+	// tolerates multiple NULLs, so each such account is keyed only by its
+	// oauth_accounts binding.
+	Email        *string   `gorm:"size:320;uniqueIndex"`
 	Name         string    `gorm:"type:text;not null"`
 	PasswordHash string    `gorm:"type:text;not null"`
 	Status       string    `gorm:"size:32;index;not null;default:active"`
