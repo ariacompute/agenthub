@@ -6,7 +6,6 @@ import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
 import { BookOpen, Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Terminal, Workflow } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
-import StateDot from './StateDot.vue'
 
 const route = useRoute()
 const store = useHubStore()
@@ -67,8 +66,6 @@ const items = computed(() => {
   return base
 })
 
-const online = computed(() => Boolean(store.health))
-
 // "version@commit", e.g. v0.2.0@1a2b3c4. The server stamps both at build time;
 // the commit is trimmed here so a longer hash can never overflow the foot.
 const build = computed(() => {
@@ -112,10 +109,6 @@ const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildN
     </nav>
 
     <div class="sidebar-foot">
-      <div class="sidebar-status">
-        <StateDot :state="online ? 'healthy' : 'unknown'" :show-label="false" />
-        <span>{{ t(online ? 'online' : 'offline') }}</span>
-      </div>
       <!-- The note sits on its own line: appending it inline would be
            ellipsized away at the default sidebar width. -->
       <span v-if="build" class="sidebar-build" :title="buildLabel">{{ build }}</span>

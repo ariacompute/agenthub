@@ -31,8 +31,6 @@ export const shellCopy = {
     unsavedBody: 'You have changes that are not saved yet. Save them before closing?',
     actionDiscard: 'Don’t save',
     escHint: 'Esc to close',
-    online: 'Online',
-    offline: 'Offline',
   },
   zh: {
     brandTagline: 'A2A 互连平台',
@@ -64,8 +62,6 @@ export const shellCopy = {
     unsavedBody: '当前内容尚未保存。关闭前是否保存？',
     actionDiscard: '不保存',
     escHint: '按 Esc 关闭',
-    online: '在线',
-    offline: '离线',
   },
   'zh-TW': {
     brandTagline: 'A2A 互連平台',
@@ -97,8 +93,6 @@ export const shellCopy = {
     unsavedBody: '目前內容尚未儲存。關閉前是否儲存？',
     actionDiscard: '不儲存',
     escHint: '按 Esc 關閉',
-    online: '線上',
-    offline: '離線',
   },
   es: {
     brandTagline: 'Plataforma de interconexión A2A',
@@ -130,8 +124,6 @@ export const shellCopy = {
     unsavedBody: 'Hay cambios que aún no se guardan. ¿Guardarlos antes de cerrar?',
     actionDiscard: 'No guardar',
     escHint: 'Esc para cerrar',
-    online: 'En línea',
-    offline: 'Desconectado',
   },
   fr: {
     brandTagline: 'Plateforme d’interconnexion A2A',
@@ -148,8 +140,8 @@ export const shellCopy = {
     themeLabel: 'Thème',
     themeToDark: 'Passer en sombre',
     themeToLight: 'Passer en clair',
-    sidebarCollapse: 'Réduire la barre latérale',
-    sidebarExpand: 'Afficher la barre latérale',
+    sidebarCollapse: 'Réduire la barra lateral',
+    sidebarExpand: 'Afficher la barra lateral',
     actionSave: 'Enregistrer',
     actionEdit: 'Modifier',
     actionCancel: 'Annuler',
@@ -163,8 +155,6 @@ export const shellCopy = {
     unsavedBody: 'Des modifications n’ont pas encore été enregistrées. Les enregistrer avant de fermer ?',
     actionDiscard: 'Ne pas enregistrer',
     escHint: 'Échap pour fermer',
-    online: 'En ligne',
-    offline: 'Hors ligne',
   },
   de: {
     brandTagline: 'A2A-Verbindungsplattform',
@@ -196,8 +186,6 @@ export const shellCopy = {
     unsavedBody: 'Es gibt noch nicht gespeicherte Änderungen. Vor dem Schließen speichern?',
     actionDiscard: 'Nicht speichern',
     escHint: 'Esc zum Schließen',
-    online: 'Bereit',
-    offline: 'Nicht bereit',
   },
   it: {
     brandTagline: 'Piattaforma di interconnessione A2A',
@@ -229,8 +217,6 @@ export const shellCopy = {
     unsavedBody: 'Ci sono modifiche non ancora salvate. Salvarle prima di chiudere?',
     actionDiscard: 'Non salvare',
     escHint: 'Esc per chiudere',
-    online: 'In linea',
-    offline: 'Non in linea',
   },
   ru: {
     brandTagline: 'Платформа взаимодействия A2A',
@@ -262,8 +248,6 @@ export const shellCopy = {
     unsavedBody: 'Есть изменения, которые ещё не сохранены. Сохранить их перед закрытием?',
     actionDiscard: 'Не сохранять',
     escHint: 'Esc — закрыть',
-    online: 'В сети',
-    offline: 'Не в сети',
   },
   ja: {
     brandTagline: 'A2A 相互接続プラットフォーム',
@@ -295,8 +279,6 @@ export const shellCopy = {
     unsavedBody: '保存されていない変更があります。閉じる前に保存しますか？',
     actionDiscard: '保存しない',
     escHint: 'Esc で閉じる',
-    online: 'オンライン',
-    offline: 'オフライン',
   },
   ko: {
     brandTagline: 'A2A 연동 플랫폼',
@@ -328,8 +310,6 @@ export const shellCopy = {
     unsavedBody: '아직 저장되지 않은 변경 사항이 있습니다. 닫기 전에 저장할까요?',
     actionDiscard: '저장하지 않음',
     escHint: 'Esc로 닫기',
-    online: '온라인',
-    offline: '오프라인',
   },
   pt: {
     brandTagline: 'Plataforma de interconexão A2A',
@@ -361,8 +341,6 @@ export const shellCopy = {
     unsavedBody: 'Há alterações que ainda não foram salvas. Salvá-las antes de fechar?',
     actionDiscard: 'Não salvar',
     escHint: 'Esc para fechar',
-    online: 'Em linha',
-    offline: 'Fora de linha',
   },
   ar: {
     brandTagline: 'منصة الربط البيني A2A',
@@ -394,8 +372,6 @@ export const shellCopy = {
     unsavedBody: 'لديك تغييرات لم تُحفظ بعد. هل تريد حفظها قبل الإغلاق؟',
     actionDiscard: 'عدم الحفظ',
     escHint: 'Esc للإغلاق',
-    online: 'متصل',
-    offline: 'غير متصل',
   },
   hi: {
     brandTagline: 'A2A इंटरकनेक्ट प्लेटफ़ॉर्म',
@@ -427,7 +403,5 @@ export const shellCopy = {
     unsavedBody: 'कुछ बदलाव अभी सहेजे नहीं गए हैं। बंद करने से पहले उन्हें सहेजें?',
     actionDiscard: 'सहेजें नहीं',
     escHint: 'Esc से बंद करें',
-    online: 'ऑनलाइन',
-    offline: 'ऑफलाइन',
   },
 }
