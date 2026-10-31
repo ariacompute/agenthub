@@ -143,6 +143,16 @@ search, CloudTrail-equivalent auditing, cross-account RAM sharing, VPC PrivateLi
 - **CRUD and discovery**: `GET/POST /api/resources`, `GET/PUT/DELETE /api/resources/{id}`,
   `POST /api/resources/{id}/health`, with `?kind=`, `?q=`, `?namespace=` and `?status=`
   filtering and counts.
+- **Measured health probe**: `POST /api/resources/{id}/probe` asks the resource's own
+  connector how it is actually doing (an agent's Agent Card is fetched, an MCP server's
+  `initialize` is pinged) and stores the answer; a probe that cannot be answered records
+  `unhealthy` rather than keeping a stale value — distinct from `…/health`, which records an
+  operator's judgement.
+- **Identity & sessions**: `GET /api/auth/config` reports the enabled OAuth providers;
+  `GET /api/auth/sessions` and `DELETE /api/auth/sessions/{id}` let a user list and revoke
+  their own sessions, while `DELETE /api/users/{id}/sessions` (`sessions:manage`) revokes
+  every session for another user. Sessions are DB-stored random tokens, so revocation takes
+  effect immediately and a revoked session cannot be replayed.
 - **Namespaces and curation**: `GET/POST /api/registries`,
   `PUT/DELETE /api/registries/{id}`, `GET /api/registries/approvals` (the curator's
   queue), `POST /api/resources/{id}/status`.
@@ -290,7 +300,11 @@ while the container itself stays stateless.
   `009_registry_sync.sql` add the governance columns, the unique dedup index, the
   namespaces and the upstream sources — every statement is `IF NOT EXISTS` /
   `ON CONFLICT DO NOTHING`, and rows written before the upgrade keep their status as
-  `approved`.
+  `approved`. Later migrations extend the same contract: `010_api_keys.sql` (API-key
+  tables), `011_login_protection.sql` (account lockout columns), `012_threads.sql`
+  (collaboration threads), `013_persona.sql` / `014_channels.sql` / `015_thread_origin.sql`
+  (Persona / Channels / voice origin), and `016_wechat_login.sql` (nullable `users.email`
+  so a WeChat account keyed only by its OAuth binding can be stored).
 - **Conditional updates prevent lost updates**: task transitions use
   `UPDATE ... WHERE id=? AND state=?` plus a `RowsAffected` check, and zero rows is split
   into "no such task" vs "concurrent conflict".
@@ -343,7 +357,7 @@ screen and a visual inspector for the A2A contract.
   bearer credentials for non-interactive access.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
-  sticky index that follows the reader. The endpoint table covers all 66 routes with
+  sticky index that follows the reader. The endpoint table covers all 90 routes with
   method, path, required permission and request/response samples taken from the handlers
   themselves. It sits after Administration in the sidebar and is deliberately **not**
   permission-gated: anyone who can sign in may read it, while Administration itself still
@@ -384,9 +398,6 @@ screen and a visual inspector for the A2A contract.
 - **Health check**: `/healthz` reports version, protocol version, resource and task
   counts, mode, auth mode and **`database` (up / down / unknown)**; it returns 503 when
   the database is unreachable.
-- **Desktop builds**: each release also publishes Windows / macOS / Linux assets — a
-  native installer, a portable archive and the checksums covering both (see §10). The
-  same release workflow owns the image job and the desktop matrix, side by side.
 
 ### Configuration & Security
 
@@ -397,11 +408,17 @@ screen and a visual inspector for the A2A contract.
   every `/api/*` route is closed without a session; `AGENTHUB_COOKIE_SECURE` pins the
   session cookie to HTTPS. **Production red line**: `AGENTHUB_ENV=prod` without
   `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` refuses to start (the shared admin token was
-  removed).
+  removed). OAuth supports Google, GitHub, generic OIDC and **WeChat** web login
+  (`snsapi_login`); a WeChat account is keyed only by its `(provider, subject)` binding,
+  so `users.email` is nullable (migration `016_wechat_login.sql`).
 - **Limits**: `AGENTHUB_MAX_PARALLEL` (8), `AGENTHUB_CLI_TIMEOUT` (15s),
   `AGENTHUB_CLI_ALLOWLIST` (git / ls / cat / echo / date / aria-memo),
   `AGENTHUB_MAX_OUTPUT_BYTES` (65536), `AGENTHUB_EVENT_BUFFER` (512),
   `AGENTHUB_PUSH_RECORD_LIMIT` (100).
+- **Security middleware** (see §13): per-IP rate limiting (auth 10/min/IP, the rest 200/
+  min/IP), CSRF origin checks on state-changing requests, and security response headers
+  (including HSTS only on TLS). Account brute-force lockout is **5 failures → 15-minute
+  lock** (`migrations/011_login_protection.sql`).
 - **Catalogue**: `AGENTHUB_MODEL_ROUTER_MODE` (`mock` | `openai_compatible`,
   default `mock` — the per-entry configuration always wins over this global default),
   `AGENTHUB_REGISTRY_SYNC_ENABLED` (default **false**),
@@ -425,6 +442,13 @@ screen and a visual inspector for the A2A contract.
   `registry:curate` (approve / reject / deprecate), `sources:manage` (upstream sources and
   their synchronisation), `apikeys:manage` (list / create / rotate / revoke API keys for
   any user — a key can act but never issue more keys). The owner holds all of them.
+- **Encryption & database hardening**: `AGENTHUB_ENCRYPTION_KEY` (≥ 32 bytes in
+  production, enforced by `config.Validate`; missing → session-key fallback with a warning)
+  isolates static encryption at rest and encrypts backup archives. `AGENTHUB_PUSH_SECRET`
+  (≥ 16 bytes when set) enables HMAC-signed A2A push callbacks. The connection pool is
+  tunable via `AGENTHUB_DB_MAX_OPEN_CONNS` (25) / `AGENTHUB_DB_MAX_IDLE_CONNS` (10) /
+  `AGENTHUB_DB_CONN_MAX_LIFETIME` (30m); run with a least-privilege role from
+  `scripts/provision-db-roles.sql`.
 - **Logging**: `slog` JSON; no message bodies, keys or vectors; DSNs are redacted by
   `store.RedactDSN` before they are logged.
 
@@ -460,10 +484,6 @@ screen and a visual inspector for the A2A contract.
   control-plane round trip).
 - **Frontend**: `bunx vitest run`, 57 tests passing (languages / copy-fallback /
   enums-copy / api / format / errors / backup-api / style guard).
-- **Desktop**: `cargo test` in `desktop/src-tauri`, 34 tests passing — URL and config
-  validation, the 13-language contract, the forwarding prefix list and cookie
-  rewriting, plus end-to-end cases that start a real proxy against a stub server and
-  assert an SSE stream arrives unbuffered.
 - **A2A & control-plane smoke**: send (once per kind), stream (no `[DONE]`, terminal frame
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
@@ -485,83 +505,17 @@ screen and a visual inspector for the A2A contract.
 
 ---
 
-## 10. Desktop Shell
-
-`desktop/` is a **Tauri v2** shell (Rust, system WebView) for Windows, macOS (arm64)
-and Linux. It carries **no backend and no database**: it embeds the same
-console the server hosts and opens it against a server the user points it at. Neither
-the console nor the Go server was written for the desktop — not a line of either
-changed.
-
-**This release carries a rebuilt console, not a rewritten shell.** The two new screens and the
-new control-plane endpoints needed no change here, which is the design working as
-intended: forwarding is decided by prefix (`/api`, `/a2a`, `/healthz`, `/.well-known`) and
-every other path falls back to `index.html`, so Vue's router owns console paths inside the
-window exactly as it does on the server. `cargo test` still passes 34/34 unchanged.
-
-### Why a Loopback Proxy
-
-The console is a web app: every request it makes is a relative URL (`/api/…` with
-`credentials: 'include'`), so it needs an origin that answers like the server's. The
-shell gives it one — `http://127.0.0.1:<random port>`, bound to loopback only — where
-a reverse proxy serves the embedded console and forwards upstream:
-
-- **Forwarded prefixes**: `/api`, `/a2a`, `/healthz`, `/.well-known`; anything else
-  falls back to `index.html`, the same rule as the server's static hosting.
-- **Session cookies**: `Set-Cookie` is rewritten before it reaches the WebView —
-  `Secure` and `Domain` are dropped (a plain-http loopback origin cannot keep them),
-  `SameSite=None` becomes `Lax`, and the path is pinned to `/`. `HttpOnly` is left as
-  the server sent it, so the cookie the page cannot read still rides along.
-- **Streaming**: responses are forwarded as a byte stream with no buffering and no
-  overall timeout, so `/api/tasks/{id}/events`, `message/stream` and the checkpoint
-  download behave exactly as they do in a browser.
-- **Redirects**: a `Location` pointing back at the server is rewritten to the loopback
-  origin, so an OAuth round trip stays inside the app.
-
-### Connection, Tray and Languages
-
-- **First start** shows the connection page, which probes `/healthz` before it saves
-  anything; the address lives in the shell's own `config.json` (0600, per user) and
-  "ignore self-signed certificates" is off by default.
-- **Tray**: open console / connection settings… / about / quit, in the chosen language;
-  closing the window parks the app in the tray instead of ending it.
-- **13 languages** — the same list as the console, Arabic mirrored — held by
-  `cargo test` to the same contract the console's copy is held to: 13 languages, no
-  empty strings, and no language silently repeating English.
-
-### Distribution
-
-Every release publishes three builds (linux-x86_64, macos-aarch64,
-windows-x86_64), each with a **native installer** (MSI / DMG / deb), a
-**portable archive** (zip / tar.gz) and a **SHA256SUMS.txt** covering both. Linux
-ships no AppImage — the `.deb` installs, the portable archive unpacks, and an
-AppImage would be a third way to run the same binary. macOS is
-**arm64 only**: the Intel cell built on the `macos-13` label, which GitHub has retired,
-so that job was accepted and then waited for a runner that never comes — and because
-the matrix runs with `fail-fast: false`, the whole release hung instead of failing.
-Intel Macs build from source with `make desktop-build`. The installer version is the
-release tag. The builds are **not code-signed**, so the first launch is stopped by the
-platform:
-
-| Platform | What to do |
-| --- | --- |
-| macOS | *System Settings → Privacy & Security → Open Anyway*, or `xattr -d com.apple.quarantine /Applications/agenthub.app` |
-| Windows | SmartScreen: *More info → Run anyway* |
-| Linux | Nothing to bypass: install the `.deb`, or unpack the `.tar.gz` — the binary keeps its executable bit |
-
----
-
-## 11. Example Catalogue
+## 10. Example Catalogue
 
 `example/` ships a catalogue that can be loaded into a running instance straight from the
 repository: 41 complete `registry.Entry` payloads plus a re-runnable loader, so a fresh
 deployment is not limited to the five `demo-*` seeds.
 
 ```bash
-cp .env.example .env          # then set AGENTHUB_EXAMPLE_ENABLED=true and
-                              # AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
-./example/load.sh             # picks the platform from uname -s
-./example/load.sh --all       # both platforms
+cp .env.example .env     # then set AGENTHUB_EXAMPLE_ENABLED=true and
+                         # AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
+./example/load.sh        # picks the platform from uname -s
+./example/load.sh --all  # both platforms
 ```
 
 Loading is opt-in: the loader refuses to run until `AGENTHUB_EXAMPLE_ENABLED=true`, and every
@@ -594,7 +548,7 @@ validation) plus the upstream install and start commands for each platform.
 
 ---
 
-## 12. Persona, Channels, Connectors & Speech (M2)
+## 11. Persona, Channels, Connectors & Speech (M2)
 
 On top of M1's registry and A2A orchestration, agenthub now ships the collaboration
 surface that agentbuddy consumes: a resource **Persona**, external **Channels**, a
@@ -622,7 +576,7 @@ roles or groups.
 - **Docs**: the `/docs` console now documents every new endpoint in its Collaboration group,
   in 13 languages (see `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js`).
 
-## 13. Kubernetes Operator
+## 12. Kubernetes Operator
 
 For Kubernetes-native deployment, `agenthub-operator` reconciles the `AgentHub`
 CRD (`agenthub.ai/v1alpha1`) and provisions the full workload for each instance:
@@ -644,3 +598,68 @@ the controller watches every owned kind.
 - **Reconcile strategy**: `upsert` creates owned objects and patches them with a
   merge patch (not a full `Update`) so a concurrent status write from the app
   cannot trip the optimistic-concurrency conflict.
+
+---
+
+## 13. Security Hardening
+
+agenthub now ships the safeguards it needs to sit on a public network: security response
+headers, per-IP rate limiting, CSRF defence, account lockout, SSRF-guarded outbound calls,
+signed A2A push callbacks, encryption at rest and least-privilege database roles. No new
+production dependency was introduced — every behaviour is the standard library plus GORM.
+The design mirrors `ariacompute/serve`'s five-domain hardening, adapted to agenthub's single
+Go-binary, DB-backed-session architecture (full spec in `requirements-security.md`,
+implementation log in `task-security.md`).
+
+### Transport & edge
+
+- **Security headers** (`internal/middleware`): `X-Content-Type-Options`, `Referrer-Policy`,
+  `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` and a grace-period
+  `Content-Security-Policy-Report-Only`. HSTS is emitted only when `AGENTHUB_ENV=prod` or the
+  request is already TLS-terminated (`r.TLS` / `X-Forwarded-Proto: https`). The binary does
+  not terminate TLS — front it with a TLS-terminating reverse proxy (Caddy / nginx) in
+  production.
+
+### Authentication & rate limiting
+
+- **Account lockout** (`migrations/011_login_protection.sql`): **five** consecutive failed
+  logins lock an account for **15 minutes**; a successful login clears the counter and the
+  lock. Unknown accounts return the same error, so they cannot be enumerated; the new
+  `account_locked` (429) code is returned while locked.
+- **Per-IP rate limiting**: auth endpoints are capped at **10 req/min/IP**; everything under
+  `/api` and `/a2a` shares **200 req/min/IP** (`429` + `Retry-After`). Static, `/healthz`
+  and discovery paths are unlimited.
+- **CSRF**: state-changing requests must carry a same-origin `Origin`; `GET/HEAD/OPTIONS`,
+  requests without an `Origin`, and non-browser clients (such as scripts) are exempt —
+  the same-origin console fetch is unaffected.
+- **Audit hygiene**: logs record only IP and user id — never passwords, tokens or PII.
+- Sessions are DB-stored random tokens (no JWT / JTI), so revocation is immediate and a
+  revoked session cannot be replayed.
+
+### A2A callbacks & upstream sync (SSRF)
+
+- **Real push notifications**: `HTTPNotifier` replaces the record-only mock and POSTs to the
+  caller-supplied `URL`. The destination is https-only and never resolves to a loopback /
+  private / link-local / multicast address (`internal/netutil.SafeClient`); when
+  `AGENTHUB_PUSH_SECRET` is set the payload is HMAC-SHA256 signed (timestamp + nonce + body)
+  so the receiver can verify authenticity, freshness (±5 min) and replay; `(taskId, state)`
+  is de-duplicated for one hour. A failed delivery only warns and never back-pressures the
+  task.
+- **Guarded sync client**: the upstream registry sync client uses the same `SafeClient` and
+  validates the URL before fetching.
+
+### Secrets, data & database
+
+- **Encryption at rest**: `AGENTHUB_ENCRYPTION_KEY` (**≥ 32 bytes in production**, else the
+  server refuses to start) isolates any future static encryption; a missing key falls back to
+  the session key with a startup warning and supports key rotation with old-key fallback.
+- API keys are stored hashed (`token_hash`); OAuth client secrets are environment-variable
+  references, never rows. An injection audit confirmed every SQL statement is parameterised.
+- **Database**: run with a least-privilege role; `scripts/provision-db-roles.sql` provisions
+  `app` (runs migrations) and `readonly` roles. The connection pool is tunable via
+  `AGENTHUB_DB_MAX_OPEN_CONNS` (25) / `AGENTHUB_DB_MAX_IDLE_CONNS` (10) /
+  `AGENTHUB_DB_CONN_MAX_LIFETIME` (30m). Whether the DB connection uses TLS is left to the
+  DSN (`sslmode=…`).
+- **Backup encryption**: when `AGENTHUB_ENCRYPTION_KEY` is set, checkpoint archives are
+  encrypted at rest (AES-256-GCM) to `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest;
+  verify recoverability with `scripts/backup-restore-drill.sh`.

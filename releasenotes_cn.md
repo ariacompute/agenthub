@@ -116,6 +116,10 @@ Agent 调用。
 - **CRUD 与发现**：`GET/POST /api/resources`、`GET/PUT/DELETE /api/resources/{id}`、
   `POST /api/resources/{id}/health`，支持 `?kind=`、`?q=`、`?namespace=` 与 `?status=`
   过滤和计数。
+- **实测健康探针**：`POST /api/resources/{id}/probe` 让资源自身的 connector 去测它到底好不好——agent 去拉它的 Agent Card、MCP 去 ping 它的 `initialize`——并把结论存回；探针若测不到，则记为 `unhealthy` 而非保留旧值。它与 `…/health` 不同：后者记录的是运维人员的判断。
+- **身份与会话**：`GET /api/auth/config` 返回已启用的 OAuth 提供方；`GET /api/auth/sessions` 与
+  `DELETE /api/auth/sessions/{id}` 供用户查看并吊销自己的会话，而 `DELETE /api/users/{id}/sessions`
+  （`sessions:manage`）可吊销其他用户的全部会话。会话是入库的随机令牌（无 JWT/JTI），吊销即时生效、不可重放。
 - **命名空间与审批**：`GET/POST /api/registries`、`PUT/DELETE /api/registries/{id}`、
   `GET /api/registries/approvals`（待审批队列）、`POST /api/resources/{id}/status`。
 - **上游源**：`GET/POST /api/registry-sources`、`PUT/DELETE /api/registry-sources/{id}`、
@@ -233,6 +237,10 @@ Agent 调用。
   执行；SQL 自身幂等，可重复执行、可审计、可回滚。`008_registry_governance.sql` 与
   `009_registry_sync.sql`补上治理列、去重启用唯一索引、命名空间与上游源——
   语句全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`，升级前已存在的条目保持 `approved`。
+  后续迁移沿用同一契约：`010_api_keys.sql`（API 密钥表）、`011_login_protection.sql`（账户锁定列）、
+  `012_threads.sql`（协作线程）、`013_persona.sql` / `014_channels.sql` / `015_thread_origin.sql`
+  （Persona / Channels / 语音 origin），以及 `016_wechat_login.sql`（放开 `users.email` 非空约束，
+  以便仅由 OAuth 绑定 `(provider, subject)` 标识的微信账号也能入库）。
 - **条件更新防丢更新**：任务状态迁移走 `UPDATE ... WHERE id=? AND state=?` 并校验
   `RowsAffected`，0 行时区分「任务不存在」与「并发冲突」。
 - **持久化不阻塞运行**：状态 / artifact / span 同步写；`events` 与 `push_records`
@@ -271,7 +279,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （打点 / 下载 / 恢复 / 定时），以及新增的**API 密钥**子页——为非交互式访问
   签发、限定范围、轮换与吊销长期持有的 bearer 凭据。
 - **文档**（`/docs`）：控制台自带文档，随构建发版、离线可读。五章——核心概念、A2A 方法、
-  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。端点表覆盖**全部 66 条路由**，
+  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**全部 90 条路由**，
   逐条给出方法、路径、所需权限，以及取自各 handler 真实编解码结构的请求/响应示例。
   入口位于侧边栏「管理」之后，**不加权限门控**：任何已登录账号都可读；而「管理」自身
   仍按其权限显隐，文档项不随之消失。
@@ -304,9 +312,6 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `--profile dev` 另起 bun 开发服务器（5173）。
 - **健康检查**：`/healthz` 返回版本、协议版本、资源与任务计数、模式、鉴权模式与
   **`database`（up / down / unknown）**；库不可达返回 503。
-- **桌面端产物**：每次 Release 同时发布 Windows / macOS / Linux 资产——原生安装包 +
-  便携压缩包 + 覆盖两者的校验和（见第十节）。同一个 workflow 里镜像 job 与桌面矩阵并列，
-  互不影响。
 
 ### 配置与安全治理
 
@@ -316,11 +321,16 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 - **鉴权**：真实账号 + 会话 + RBAC——首个账号即 owner，`/api/*` 无会话一律关闭，
   `AGENTHUB_COOKIE_SECURE` 把会话 cookie 钉在 HTTPS 上；**生产红线**：
   `AGENTHUB_ENV=prod` 未配 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` 时拒绝启动
-  （共享 admin token 已移除）。
+  （共享 admin token 已移除）。OAuth 支持 Google、GitHub、通用 OIDC 与**微信**网页登录
+  （`snsapi_login`）；微信账号仅以 `(provider, subject)` 绑定标识，故 `users.email` 放开非空
+  （迁移 `016_wechat_login.sql`）。
 - **限额**：`AGENTHUB_MAX_PARALLEL`（8）、`AGENTHUB_CLI_TIMEOUT`（15s）、
   `AGENTHUB_CLI_ALLOWLIST`（git / ls / cat / echo / date / aria-memo）、
   `AGENTHUB_MAX_OUTPUT_BYTES`（65536）、`AGENTHUB_EVENT_BUFFER`（512）、
   `AGENTHUB_PUSH_RECORD_LIMIT`（100）。
+- **安全中间件**（见第十三节）：按 IP 限流（认证端点 10 次/分钟/IP，其余 200 次/分钟/IP）、
+  对变更型请求做 CSRF 同源 `Origin` 校验、以及安全响应头（HSTS 仅在 TLS 下发出）。账户暴力破解
+  防护为**连续 5 次失败锁定 15 分钟**（迁移 `011_login_protection.sql`）。
 - **目录相关**：`AGENTHUB_MODEL_ROUTER_MODE`（`mock` | `openai_compatible`，
   默认 `mock`——条目自身配置优先于这个全局默认）、`AGENTHUB_REGISTRY_SYNC_ENABLED`
   （默认 **false**）、`AGENTHUB_REGISTRY_SYNC_INTERVAL`（默认 `1h`，开启同步时须为正）
@@ -339,6 +349,11 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （批准 / 驳回 / 废弃）、`sources:manage`（上游源与同步）、`apikeys:manage`
   （为任意用户列出 / 创建 / 轮换 / 吊销 API 密钥——密钥可行动但不可再签发密钥）。
   owner 持有全部权限。
+- **加密与数据库加固**：`AGENTHUB_ENCRYPTION_KEY`（生产须 ≥ 32 字节，由 `config.Validate`
+  强制；缺失则回退会话密钥并告警）隔离静态加密、并为备份归档加密。`AGENTHUB_PUSH_SECRET`
+  （设置时须 ≥ 16 字节）开启 HMAC 签名的 A2A 回调。连接池经 `AGENTHUB_DB_MAX_OPEN_CONNS`（25）/
+  `AGENTHUB_DB_MAX_IDLE_CONNS`（10）/ `AGENTHUB_DB_CONN_MAX_LIFETIME`（30m）可调；运行期凭据
+  改用 `scripts/provision-db-roles.sql` 生成的 `app` / `readonly` 最小权限角色。
 - **日志**：`slog` JSON，不打正文、密钥与向量；DSN 经 `store.RedactDSN` 脱敏后再记录。
 
 ---
@@ -366,9 +381,6 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
 - **前端**：`bunx vitest run` 57 项通过（languages / copy-fallback / enums-copy / api /
   format / errors / backup-api / style 护栏）。
-- **桌面端**：`desktop/src-tauri` 下 `cargo test` 34 项通过——URL 与配置校验、13 语契约、
-  转发前缀清单与 cookie 改写，以及**起真实环回代理 + 桩服务端**的端到端用例（断言 SSE
-  不被缓冲、逐帧到达）。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
@@ -386,69 +398,16 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 
 ---
 
-## 十、桌面外壳
-
-`desktop/` 是 **Tauri v2** 外壳（Rust + 系统 WebView），覆盖 Windows、macOS（arm64）
-与 Linux。它**不带后端、不带数据库**：把服务端托管的同一份控制台嵌进窗口，对着用户
-指定的服务端打开。控制台与 Go 服务端一行都没有为桌面端改动。
-
-**这一版带来的是重新构建的控制台，而不是重写的外壳。** 两个新屏与新增的控制面端点
-在这里不需要任何改动，这正是设计意图：转发只按前缀判定（`/api`、`/a2a`、`/healthz`、
-`/.well-known`），其余路径一律回退 `index.html`，于是窗口内的控制台路由与服务端一样由
-Vue 路由接管。`cargo test` 仍是 34 项全通过，无变化。
-
-### 为什么是环回代理
-
-控制台是 Web 应用：所有请求都是相对 URL（`/api/…` 且 `credentials: 'include'`），
-因此它需要一个「像服务端一样应答」的源。外壳给了它一个——**仅监听 127.0.0.1** 的
-`http://127.0.0.1:<随机端口>`，那里有一个反向代理托管内嵌控制台并向上游转发：
-
-- **转发前缀**：`/api`、`/a2a`、`/healthz`、`/.well-known`；其余一律回退 `index.html`，
-  与服务端静态托管同规则。
-- **会话 cookie**：`Set-Cookie` 在到达 WebView 前被改写——剥掉 `Secure` 与 `Domain`
-  （明文 http 的环回源存不下它们）、`SameSite=None` 改为 `Lax`、路径统一钉到 `/`；
-  `HttpOnly` 原样保留，于是页面读不到的 cookie 照样随行。
-- **流式转发**：响应以字节流转发，**不缓冲、不设整体超时**，因此
-  `/api/tasks/{id}/events`、`message/stream` 与检查点下载与浏览器里完全一致。
-- **重定向**：指向服务端的 `Location` 被改写回环回源，OAuth 往返因此留在应用内。
-
-### 连接、托盘与多语言
-
-- **首次启动**进入连接页，先探 `/healthz` 再落盘；地址存于外壳自有的 `config.json`
-  （0600，仅当前用户），「忽略自签证书」默认关闭。
-- **托盘**四项：打开控制台 / 连接设置… / 关于 / 退出，跟随所选语言；关闭窗口只是收进
-  托盘，不会退出。
-- **13 种语言**——与控制台同一份清单，阿拉伯语镜像——由 `cargo test` 施加与控制台 copy
-  相同的约束：13 语齐备、无空串、任何语言不得与英文原文相同。
-
-### 交付形态
-
-每次 Release 发布三个构建（linux-x86_64 / macos-aarch64 / windows-x86_64），
-每个都包含**原生安装包**（MSI / DMG / deb）、**便携压缩包**（zip / tar.gz）
-与覆盖两者的 **SHA256SUMS.txt**；安装包版本即 Release tag。Linux **不再出 AppImage**——
-`.deb` 负责安装、便携包负责解开即跑，AppImage 只是同一份二进制的第三种形态。macOS **仅 arm64**：原先的
-Intel 一格跑在已被 GitHub 退役的 `macos-13` 标签上，作业受理后永远等不到 runner，而矩阵
-是 `fail-fast: false`，于是整个 Release 一直挂着、既不成功也不失败；Intel Mac 请用
-`make desktop-build` 从源码构建。产物**未做代码签名**，首次启动会被系统拦下：
-
-| 平台 | 绕行方式 |
-| --- | --- |
-| macOS | *系统设置 → 隐私与安全性 → 仍要打开*；或解压后 `xattr -d com.apple.quarantine /Applications/agenthub.app` |
-| Windows | SmartScreen 选 *更多信息 → 仍要运行* |
-| Linux | 无需绕行：安装 `.deb`，或解开 `.tar.gz` 直接运行（二进制保留可执行位） |
-
----
-
-## 十一、示例目录
+## 十、示例目录
 
 `example/` 随仓库交付一份可直接灌进运行实例的目录：**41 份完整 `registry.Entry` 载荷**加一个
 可重复执行的装载脚本，于是新实例不再只能靠五条 `demo-*` 种子起步。
 
 ```bash
-cp .env.example .env          # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
-                              # 并填 AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
-./example/load.sh             # 按 uname -s 选平台
-./example/load.sh --all       # 两个平台都灌
+cp .env.example .env       # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
+                           # 并填 AGENTHUB_EXAMPLE_MODEL_ID / EMAIL / PASSWORD
+./example/load.sh          # 按 uname -s 选平台
+./example/load.sh --all  # 两个平台都灌
 ```
 
 装载是显式开启的：未设置 `AGENTHUB_EXAMPLE_ENABLED=true` 时装载脚本拒绝执行；
@@ -477,7 +436,7 @@ cp .env.example .env          # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true�
 
 ---
 
-## 十二、Persona、Channels、Connectors 与 Speech（M2）
+## 十一、Persona、Channels、Connectors 与 Speech（M2）
 
 在 M1 的资源注册与 A2A 编排之上，agenthub 新增 agentbuddy 消费的协作面：资源 **Persona**、
 外部 **Channels**、策略网关 **Connectors** 与 **Speech**（离线 STT/TTS）。全部新端点复用既有
@@ -501,7 +460,7 @@ cp .env.example .env          # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true�
 - **文档**：`/docs` 控制台已在 Collaboration 分组用 13 语完整记录全部新端点
   （见 `web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`）。
 
-## 十三、Kubernetes Operator（运维控制器）
+## 十二、Kubernetes Operator（运维控制器）
 
 面向 Kubernetes 原生部署，`agenthub-operator` 对 `AgentHub` CRD
 （`agenthub.ai/v1alpha1`）做调和（reconcile），为每个实例拉起完整工作负载：
@@ -519,3 +478,54 @@ PersistentVolumeClaim。子资源都带 owner 引用，随 CR 删除而回收，
   Role/RoleBinding/ServiceAccount 以及 CRD。
 - **调和策略**：`upsert` 创建被管对象并以 merge patch（而非整体 `Update`）更新，
   避免应用侧的并发状态写触发乐观锁冲突。
+
+---
+
+## 十三、安全加固
+
+agenthub 现已自带可直连公网所需的全部防护：安全响应头、按 IP 限流、CSRF 防御、账户锁定、
+SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数据库角色。未引入任何新的生产依赖——
+全部由标准库 + GORM 实现。设计同构于 `ariacompute/serve` 五大域加固，并按 agenthub 的单二进制、
+入库会话架构适配（完整方案见 `requirements-security.md`，实施记录见 `task-security.md`）。
+
+### 传输与边缘
+
+- **安全响应头**（`internal/middleware`）：`X-Content-Type-Options`、`Referrer-Policy`、
+  `Cross-Origin-Opener-Policy`、`Cross-Origin-Resource-Policy`，以及灰度期的
+  `Content-Security-Policy-Report-Only`。HSTS 仅在 `AGENTHUB_ENV=prod` 或请求已走 TLS
+  （`r.TLS` / `X-Forwarded-Proto: https`）时发出。二进制本身不终止 TLS——生产须在前面前置 TLS
+  终止反代（Caddy / nginx）。
+
+### 认证与限流
+
+- **账户锁定**（`migrations/011_login_protection.sql`）：连续 **5 次**失败登录锁定账户
+  **15 分钟**；登录成功清空计数与锁定。不存在的账户返回同一错误，无法被枚举；锁定期内返回新的
+  `account_locked`（429）码。
+- **按 IP 限流**：认证端点 **10 次/分钟/IP**；`/api` 与 `/a2a` 共用 **200 次/分钟/IP**
+  （超出返回 `429` + `Retry-After`）。静态、`/healthz` 与发现路径不限。
+- **CSRF**：变更型请求须携带同源 `Origin`；`GET/HEAD/OPTIONS`、无 `Origin` 的请求，以及非浏览器客户端
+  （如脚本）放行——同源的控制台 fetch 不受影响。
+- **审计卫生**：日志只记 IP 与 user id，绝不记密码、令牌或 PII。
+- 会话是入库的随机令牌（无 JWT / 无 JTI），吊销即时生效、不可重放。
+
+### A2A 回调与上游同步（SSRF）
+
+- **真实推送通知**：`HTTPNotifier` 取代仅留痕的 mock，向调用方提供的 `URL` 发起 POST。目标仅限
+  https，且永不会解析到环回 / 私网 / 链路本地 / 多播地址（`internal/netutil.SafeClient`）；当
+  `AGENTHUB_PUSH_SECRET` 设置时，载荷以 HMAC-SHA256（时间戳 + nonce + body）签名，供接收方验证
+  真实性、新鲜度（±5 分钟）与重放；`(taskId, state)` 做 **1 小时幂等**去重。投递失败只告警，
+  绝不回压任务。
+- **受防护的同步客户端**：上游注册中心同步客户端复用同一 `SafeClient`，并在 `Fetch` 入口校验 URL。
+
+### 密钥、数据与数据库
+
+- **静态加密**：`AGENTHUB_ENCRYPTION_KEY`（生产须 **≥ 32 字节**，否则拒绝启动）隔离未来的静态
+  加密；缺失时回退会话密钥并告警，并支持旧密钥回退的密钥轮换。
+- API 密钥以哈希存储（`token_hash`）；OAuth 客户端密钥是环境变量引用，绝不入库。注入审计确认全部
+  SQL 均参数化。
+- **数据库**：运行期改用最小权限角色；`scripts/provision-db-roles.sql` 生成 `app`（负责迁移）与
+  `readonly` 两角色。连接池经 `AGENTHUB_DB_MAX_OPEN_CONNS`（25）/ `AGENTHUB_DB_MAX_IDLE_CONNS`（10）/
+  `AGENTHUB_DB_CONN_MAX_LIFETIME`（30m）可调；数据库连接是否启用 TLS 由 DSN 自行决定（`sslmode=…`）。
+- **备份加密**：设置 `AGENTHUB_ENCRYPTION_KEY` 时，检查点归档以 AES-256-GCM 静态加密为
+  `<file>.tar.gz.enc` 并附 `<file>.enc.sha256` 清单；定期用 `scripts/backup-restore-drill.sh`
+  演练可恢复性。
