@@ -243,34 +243,32 @@ textarea:focus {
   gap: 8px;
 }
 
-/* The collapse control sits with the build string, below the navigation: it
-   changes the chrome, so it must never read as one of the destinations. */
+/* The collapse control is a small zoom arrow pinned to the sidebar's edge: it
+   scales the rail rather than being a labelled button, so it never reads as a
+   destination. It hangs half over the border so it stays attached to the rail
+   without eating into the navigation. */
 .sidebar-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  margin-block-start: 2px;
-  padding: 9px 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  position: absolute;
+  top: 50%;
+  inset-inline-end: -12px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--stroke-1);
+  border-radius: 999px;
+  background: var(--bg-surface);
   color: var(--text-3);
-  font-size: 12px;
-  text-align: start;
   cursor: pointer;
-  transition: background 0.16s ease, color 0.16s ease;
+  z-index: 21;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
 }
 
 .sidebar-toggle:hover {
   background: var(--accent-softer);
   color: var(--text-1);
-}
-
-.sidebar-toggle span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-color: var(--stroke-2);
 }
 
 /* In RTL the sidebar hangs off the right edge, so the chevron mirrors with it. */
@@ -1092,8 +1090,7 @@ textarea:focus {
   .brand-tagline,
   .brand-name,
   .nav-item span,
-  .sidebar-foot span,
-  .sidebar-toggle span {
+  .sidebar-foot span {
     display: none;
   }
   .nav-item {
@@ -1117,8 +1114,7 @@ textarea:focus {
 [data-sidebar='collapsed'] .brand-tagline,
 [data-sidebar='collapsed'] .brand-name,
 [data-sidebar='collapsed'] .nav-item span,
-[data-sidebar='collapsed'] .sidebar-foot span,
-[data-sidebar='collapsed'] .sidebar-toggle span {
+[data-sidebar='collapsed'] .sidebar-foot span {
   display: none;
 }
 
@@ -1126,12 +1122,6 @@ textarea:focus {
 [data-sidebar='collapsed'] .sidebar-foot {
   justify-content: center;
   align-items: center;
-}
-
-[data-sidebar='collapsed'] .nav-item,
-[data-sidebar='collapsed'] .sidebar-toggle {
-  justify-content: center;
-  padding-inline: 0;
 }
 
 /* Light theme flips the same grey scale; it never introduces a hue. */

@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
-import { BookOpen, Boxes, Cloud, Library, Network, PanelLeftClose, PanelLeftOpen, Shield, Terminal, Workflow } from 'lucide-vue-next'
+import { BookOpen, Boxes, ChevronLeft, ChevronRight, Cloud, Library, Network, Shield, Terminal, Workflow } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
 
 const route = useRoute()
@@ -32,7 +32,7 @@ onMounted(() => {
 })
 
 const toggleLabel = computed(() => t(collapsed.value ? 'sidebarExpand' : 'sidebarCollapse'))
-const toggleIcon = computed(() => (collapsed.value ? PanelLeftOpen : PanelLeftClose))
+const toggleIcon = computed(() => (collapsed.value ? ChevronRight : ChevronLeft))
 
 const items = computed(() => {
   const base = [
@@ -113,17 +113,20 @@ const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildN
            ellipsized away at the default sidebar width. -->
       <span v-if="build" class="sidebar-build" :title="buildLabel">{{ build }}</span>
       <span v-if="buildNote" class="sidebar-build sidebar-build-note" :title="buildLabel">{{ buildNote }}</span>
-      <button
-        class="sidebar-toggle"
-        type="button"
-        :aria-expanded="!collapsed"
-        :aria-label="toggleLabel"
-        :title="toggleLabel"
-        @click="apply(!collapsed)"
-      >
-        <component :is="toggleIcon" :size="16" />
-        <span>{{ toggleLabel }}</span>
-      </button>
     </div>
+
+    <!-- The collapse control is a small zoom arrow pinned to the sidebar's
+         edge instead of a labelled button: it scales the rail and never reads
+         as a destination. The label still drives the tooltip and aria-label. -->
+    <button
+      class="sidebar-toggle"
+      type="button"
+      :aria-expanded="!collapsed"
+      :aria-label="toggleLabel"
+      :title="toggleLabel"
+      @click="apply(!collapsed)"
+    >
+      <component :is="toggleIcon" :size="16" />
+    </button>
   </aside>
 </template>
