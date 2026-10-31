@@ -102,6 +102,16 @@ func RateLimit(next http.Handler, limiter *Limiter, isStrict func(path string) b
 			return
 		}
 		ip := clientIP(r)
+		// The loopback desktop client (agentbuddy) and local dev reach the
+		// server on 127.0.0.1, so every request from them collapses into a
+		// single per-IP bucket. Throttling them by IP would break legitimate
+		// logout→login and polling flows, and the credential-stuffing defence
+		// this cap provides does not apply to a host-only reachable address.
+		// CSRF already trusts loopback for the same reason, so stay consistent.
+		if isLoopback(ip) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if isStrict(path) {
 			if !limiter.Allow("auth:"+ip, 10, time.Minute) {
 				writeRateLimited(w)

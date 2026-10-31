@@ -263,7 +263,9 @@ TLS.
   clears the counter and lock. Unknown accounts always return the same error, so they cannot be
   enumerated. (`migrations/011_login_protection.sql`)
 - Per-IP rate limiting: auth endpoints are capped at **10 req/min/IP**, everything under `/api` and
-  `/a2a` at **200 req/min/IP** (`429` + `Retry-After`).
+  `/a2a` at **200 req/min/IP** (`429` + `Retry-After`). **Loopback clients** (the agentbuddy desktop
+  shell and local dev, both seen as `127.0.0.1`/`::1`) are exempt, since their traffic collapses into a
+  single shared bucket and the credential-stuffing defence does not apply to host-only addresses.
 - CSRF: state-changing requests must carry a same-origin `Origin` (loopback and non-browser clients
   such as the desktop client and scripts are exempt), else `403`. The console uses same-origin
   fetch with the session cookie, so it is unaffected.

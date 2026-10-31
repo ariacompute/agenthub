@@ -229,7 +229,8 @@ kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 
 **认证与限流**：暴力破解防护——**5 次**失败登录锁定 **15 分钟**，成功登录清零计数与锁定；不存在的账户
 一律返回相同错误，无法被枚举（`migrations/011_login_protection.sql`）。按 IP 限流：认证端点 **10 次/分钟/IP**，
-`/api` 与 `/a2a` 其余 **200 次/分钟/IP**（`429` + `Retry-After`）。CSRF：变更型请求要求 `Origin` 同源
+`/api` 与 `/a2a` 其余 **200 次/分钟/IP**（`429` + `Retry-After`）。**环回客户端**（agentbuddy 桌面外壳与本地
+开发，均识别为 `127.0.0.1`/`::1`）豁免，因为其流量会塌缩进同一个共享桶，且该防御对仅本机可达的地址并不适用。CSRF：变更型请求要求 `Origin` 同源
 （环回与非浏览器客户端如桌面代理、脚本豁免），否则 `403`；控制台同源 fetch + cookie，不受影响。审计仅记
 IP 与 user_id，绝不记密码/令牌/PII。
 

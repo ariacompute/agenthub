@@ -91,3 +91,34 @@ func TestRateLimitSkipsStatic(t *testing.T) {
 		t.Fatal("non /api path must reach next")
 	}
 }
+
+// The loopback desktop client (agentbuddy) and local dev arrive on 127.0.0.1,
+// which collapses every request into one shared per-IP bucket. Rate limiting
+// must not throttle them, or a normal logout→login flow trips 429. CSRF already
+// trusts loopback for the same reason.
+func TestRateLimitExemptsLoopback(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	isAuth := func(p string) bool { return len(p) >= 10 && p[:10] == "/api/auth/" }
+	h := RateLimit(next, NewLimiter(), isAuth)
+	for _, ip := range []string{"127.0.0.1", "[::1]", "localhost"} {
+		for i := 0; i < 50; i++ {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+			req.RemoteAddr = ip + ":54321"
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s auth request %d: want 200 got %d", ip, i, rec.Code)
+			}
+		}
+	}
+	// And the shared /api bucket is likewise unbounded for loopback.
+	for i := 0; i < 300; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/x", nil)
+		req.RemoteAddr = "127.0.0.1:54321"
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("loopback /api request %d: want 200 got %d", i, rec.Code)
+		}
+	}
+}
