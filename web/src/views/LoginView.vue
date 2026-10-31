@@ -192,11 +192,12 @@ async function submit() {
     </section>
 
     <footer class="login-foot">
-      <span v-if="build" class="sidebar-build">{{ build }}</span>
       <span v-if="hub.health?.buildNote" class="sidebar-build sidebar-build-note">
         {{ hub.health.buildNote }}
       </span>
     </footer>
+
+    <span v-if="build" class="login-build sidebar-build" :title="build">{{ build }}</span>
   </div>
 </template>
 
@@ -317,5 +318,15 @@ async function submit() {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+/* The release string is pinned to the page's bottom-left corner (logical
+   inset so it mirrors to the bottom-right under RTL); it is data, never
+   translated, and sits outside the centred column flow. */
+.login-build {
+  position: fixed;
+  inset-inline-start: 24px;
+  inset-block-end: 24px;
+  z-index: 5;
 }
 </style>
