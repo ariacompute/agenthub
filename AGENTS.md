@@ -52,6 +52,9 @@ persistence ← internal/store（GORM 实现）
 | `hub.PushRepository` | `store.NewPushRepository` | `push_records`：mock notifier 捕获的每次回调（url/state/config 快照） |
 | `auth.UserStore` / `SessionStore` / `OAuthStore` | `store.NewUserStore` / `NewSessionStore` / `NewOAuthStore` | `users` / `sessions` / `oauth_accounts` |
 | `authz.AuthzStore` | `store.NewAuthzStore` | `groups` / `roles` / `permissions` / `user_groups` / `user_roles` / `group_roles` / `role_permissions` / `resource_grants` |
+| `computers.Store` | `store.NewComputersStore` | `computers`：agent 沙箱（browser/shell/screen），含状态与最近动作回显 |
+| `schedules.Store` | `store.NewSchedulesStore` | `schedules`：目标/周期任务（cron_expr / enabled / next_run） |
+| `knowledge.Store` | `store.NewKnowledgeStore` | `knowledge`：mock RAG 片段（agent_id / chunk_text / source_ref） |
 
 - **依赖倒置**：端口接口定义在 `registry` / `hub`，实现在 `store`，因此 `hub`、`registry` **不 import `store`**。
 - **两套行为**：不注入 GORM 仓库时 `registry.Registry` / `hub.TaskStore` / `hub.Broker` /
@@ -69,7 +72,7 @@ persistence ← internal/store（GORM 实现）
 - `internal/httputil`：`WriteJSON/WriteError/WriteErr/Decode`（机器可读 code）+ SSE（`Stream/WriteSSE/Comment/KeepAlive`）
 - `internal/a2a`：**冻结契约**。`types.go`（Task/Message/Part/Artifact/AgentCard）、
   `jsonrpc.go`（2.0 信封 + 错误码）、`methods.go`（方法名与 v0.1 别名映射）
-- `internal/model`：GORM 模型 —— `Resource` / `Task` / `TaskArtifact` / `TaskSpan` /
+- `internal/model`：GORM 模型 —— `Resource` / `Task` / `TaskArtifact` / `TaskSpan` / `Computer` / `Schedule` / `Knowledge` /
   `TaskPending` / `TaskPush` / `PushRecord` / `Event` / `SchemaMigration`，以及 `JSONField`
   （`driver.Valuer` + `sql.Scanner`，列类型 `jsonb`，**不引入** `gorm.io/datatypes`）
 - `internal/auth`：**认证内核**（零新依赖，全部标准库）。`password.go`（PBKDF2-HMAC-SHA256，
@@ -81,8 +84,9 @@ persistence ← internal/store（GORM 实现）
 - `internal/store`：`db.go`（`Open`/`Ping`/`Close`/`RedactDSN`，连接池 25/10/30min、`PrepareStmt`）、
   `migrate.go`（`go:embed` + `schema_migrations` 按序单事务执行）、`seed.go`（demo 五类资源）、
   `resource_store.go` / `task_store.go` / `event_store.go` / `push_store.go` /
-  `auth_store.go` / `authz_store.go` / `backup_store.go` / `registry_store.go`
-  （命名空间 + 审批 + 上游源，八个仓库实现）
+  `auth_store.go` / `authz_store.go` / `backup_store.go` / `registry_store.go` /
+  `computers_store.go` / `schedules_store.go` / `knowledge_store.go`
+  （命名空间 + 审批 + 上游源 + agent 能力，十一个仓库实现）
 - `internal/registry`：`registry.go`（`Kind`/`Health`/`Transport`/`Entry` + CRUD + 发现 +
   `ResourceStore` 端口 + 委托）、`export.go`（聚合 Agent Card + MCP server 描述，**只导出
   approved**）、`kinds.go`（五类 + `custom` 的 per-kind 配置：`ModelConfig`/`AgentConfig`/
@@ -117,13 +121,20 @@ persistence ← internal/store（GORM 实现）
   `api_backups.go`（检查点列表/打点/下载/删除/恢复 + 定时读写，全部 `backups:manage`）、
   `api_registry.go`（命名空间 CRUD + `/api/resources/{id}/status` 审批动作 + 待审批队列）、
   `api_sync.go`（上游源 CRUD + 手动同步，上游失败返回 502 并透传上游 code）
+- `internal/handlers`（续，agent 能力端点 F10–F16）：`computers.go`（F11 agent 计算机：
+  `GET/POST /api/computers`、`GET /api/computers/{id}`，mock 适配器，真实控制标 `TODO(real)`）、
+  `schedules.go`（F13 目标调度：`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}`，
+  mock 调度器复用 hub 创建 task）、`knowledge.go`（F14 知识库：`GET /api/knowledge` mock RAG 检索 +
+  技能蒸馏触发点记录，真实向量检索标 `TODO(real)`）
 - `migrations/`：`001_resources.sql` … `004_push_records.sql`、`005_auth.sql`（users/sessions/
   oauth_accounts）、`006_rbac.sql`（groups/roles/permissions/各种关联表/resource_grants + 内置
   角色权限种子）、`007_backups.sql`（`backup_checkpoints` / `backup_schedules` + `backups:manage`
   权限与 admin 角色关联，全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`）、
   `008_registry_governance.sql`（`resources` 治理列 + `idx_resources_dedup` 唯一索引 +
-  `registries` 表 + 三个新权限与 admin 关联）、`009_registry_sync.sql`（`registry_sources`），
-  经 `embed.go` 内嵌
+  `registries` 表 + 三个新权限与 admin 关联）、  `009_registry_sync.sql`（`registry_sources`）、
+  `017_computers.sql`（`computers`：agent 沙箱 browser/shell/screen）、
+  `018_schedules.sql`（`schedules`：目标/周期任务）、
+  `019_knowledge.sql`（`knowledge`：mock RAG 片段），均 `IF NOT EXISTS`，经 `embed.go` 内嵌
 - `README.md` / `README_cn.md` 的「AWS Agent Registry 特性对比」章：与 AWS Agent Registry 的
   逐项对比（含已有 / 本次补齐 / 明确不做三张清单与 recordType ↔ Kind 字段级映射）
 - `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go` 与
@@ -332,13 +343,16 @@ make web-install / make web-dev / make web-build / make web-test
     即身份体系出现前的开放行为，`/healthz` 如实上报 `auth: disabled`。
   - 凭据与口令只以派生值落库（`password_hash`、`session_token_hash`），日志只记 user id 与结果。
 - 控制面错误码到状态码的映射集中在 `internal/handlers/api.go:writeDomainErr`
-  （`invalid_*`/`duplicate` → 400，`*_not_found` → 404，`not_cancelable`/`not_resumable` → 400），
-  新增领域错误需同步该映射，否则会退化为 500。
+  （`invalid_*`/`duplicate` → 400，`*_not_found` → 404，`not_cancelable`/`not_resumable` → 400；
+  agent 能力码（`writeDomainErr` 映射）：`computer_not_found`/`schedule_not_found` → 404、`skill_distill_disabled` → 403、
+  `schedule_invalid` → 400、`feature_unavailable` → 503（computers/schedules/knowledge 三端点 store 未接入时的统一哨兵，
+  取代原 `computer_disabled`/`knowledge_unavailable` 的分别命名），新增领域错误需同步该映射，否则会退化为 500。
 - 每次启动都会尝试写入 5 个 `demo-*` 种子资源（每类一个），`ON CONFLICT (id) DO NOTHING` 保证幂等；
   用户覆盖过的同名条目**不会被种子改写**，保证 README 冒烟可复现。
 - 前端未执行 `make web-build` 时 `/` 返回 404（机器可读 `not_found`），不是服务故障。
-- 不实现：RAG、浏览器自动化、多语言 SDK、LLM-as-judge 评分（属 `memo` /
-  `bankmind` / `playground` 或后续项）。
+- 不实现（仍属后续项）：多语言 SDK、LLM-as-judge 评分（属 `memo` / `bankmind` / `playground` 或后续项）。
+  RAG 与浏览器自动化（Computer Use）已以**确定性 mock 适配器**形式落地（`/api/knowledge`、`/api/computers`），
+  真实向量检索与真实计算机控制统一标 `TODO(real)`，不在首版。
 
 ## agentbuddy 接入（桌面客户端）
 
@@ -366,5 +380,6 @@ make web-install / make web-dev / make web-build / make web-test
   - `GET /api/connectors`、`PUT /api/connectors/{id}/policy`、`GET/POST /api/connectors/{id}/actions`：
     对 `kind=mcp` 资源暴露外部调用，`ask_first` 策略经 `Hub.ParkConnector` 挂起 `input-required` 任务等待人工批准。
   - `POST /api/threads/{id}/audio`：服务端转写（STT mock）后作为 `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact；受 `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制。
-  - `Persona`：`Entry.Persona`（`AvatarURL`/`Bio`/`Capabilities`）经 `normalizePersona` 归一化，落 `resources.persona` JSONB。
+  - `Persona`：`Entry.Persona`（`AvatarURL`/`Bio`/`Capabilities`）经 `normalizePersona` 归一化，落 `resources.persona` JSONB；本轮进一步扩展为角色画像（`role`/`instruction`/`mbti`/`avatar`，F10），仍由 `POST/PUT /api/resources` 写入。
+  - **Agent 能力端点（F10–F16 脚手架）**：`GET/POST /api/computers`、`GET /api/computers/{id}`（F11 计算机，mock 适配器）、`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}`（F13 目标调度，mock 调度器）、`GET /api/knowledge`（F14 知识库 mock RAG）；深层能力（真实计算机控制 / 调度引擎 / 向量检索）一律 `TODO(real)`，首版为确定性 mock。
   - 上述端点均在桌面壳（agentbuddy）前缀白名单（`/api`）覆盖之内，新增服务端端点无需改桌面端代码。

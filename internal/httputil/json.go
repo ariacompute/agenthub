@@ -98,6 +98,17 @@ const (
 	CodeAudioUnsupported      Code = "audio_unsupported"
 	CodeAudioTranscribeFailed Code = "audio_transcribe_failed"
 	CodeSpeechDisabled        Code = "speech_disabled"
+
+	// Computers, schedules and knowledge: agent capabilities (F10-F16). Each code
+	// names the guardrail that stopped the call so the console can localise it.
+	CodeComputerNotFound     Code = "computer_not_found"
+	CodeScheduleNotFound     Code = "schedule_not_found"
+	CodeScheduleInvalid      Code = "schedule_invalid"
+	CodeSkillDistillDisabled Code = "skill_distill_disabled"
+	// FeatureUnavailable is the single sentinel for any agent-capability endpoint
+	// whose store is not wired in (computers / schedules / knowledge). It replaces
+	// the previous computer_disabled / knowledge_unavailable split.
+	CodeFeatureUnavailable Code = "feature_unavailable"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -183,6 +194,15 @@ func WriteErr(w http.ResponseWriter, err error) {
 	// it like a stale session and re-issues rather than retrying blindly.
 	case CodeAPIKeyExpired, CodeAPIKeyRevoked:
 		WriteError(w, http.StatusUnauthorized, e.Code)
+	// Computers, schedules and knowledge (F10-F16).
+	case CodeComputerNotFound, CodeScheduleNotFound:
+		WriteError(w, http.StatusNotFound, e.Code)
+	case CodeSkillDistillDisabled:
+		WriteError(w, http.StatusForbidden, e.Code)
+	case CodeScheduleInvalid:
+		WriteError(w, http.StatusBadRequest, e.Code)
+	case CodeFeatureUnavailable:
+		WriteError(w, http.StatusServiceUnavailable, e.Code)
 	default:
 		WriteError(w, http.StatusInternalServerError, e.Code)
 	}

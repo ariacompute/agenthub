@@ -16,10 +16,13 @@ import (
 	"agenthub/internal/authz"
 	"agenthub/internal/backup"
 	"agenthub/internal/channels"
+	"agenthub/internal/computers"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
+	"agenthub/internal/knowledge"
 	"agenthub/internal/registry"
+	"agenthub/internal/schedules"
 	"agenthub/internal/store"
 	"agenthub/internal/threads"
 
@@ -59,6 +62,13 @@ type Deps struct {
 	// for the voice endpoint. It is nil only in unit tests; main injects
 	// adapter.DefaultSpeech so the handler never depends on a package global.
 	Speech adapter.Speech
+	// Computers persists agent sandboxes (browser / shell / screen). Nil when the
+	// feature is disabled, in which case the endpoints report it as unavailable.
+	Computers computers.Store
+	// Schedules persists proactive goals. Nil when disabled.
+	Schedules schedules.Store
+	// Knowledge persists RAG chunks (mock). Nil when disabled.
+	Knowledge knowledge.Store
 }
 
 // Register builds the router.
@@ -152,6 +162,22 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("PUT /api/connectors/{id}/policy", d.requirePermission(authz.PermResourcesWrite, d.handlePutConnectorPolicy))
 	mux.HandleFunc("GET /api/connectors/{id}/actions", d.requirePermission(authz.PermResourcesRead, d.handleListConnectorActions))
 	mux.HandleFunc("POST /api/connectors/{id}/actions", d.requirePermission(authz.PermResourcesWrite, d.handleConnectorAction))
+
+	// F11: Agent computers — per-agent sandboxes (browser / shell / screen) the
+	// console may attach to. Read/write hang off resources permissions.
+	mux.HandleFunc("GET /api/computers", d.requirePermission(authz.PermResourcesRead, d.handleListComputers))
+	mux.HandleFunc("POST /api/computers", d.requirePermission(authz.PermResourcesWrite, d.handleCreateComputer))
+	mux.HandleFunc("GET /api/computers/{id}", d.requirePermission(authz.PermResourcesRead, d.handleGetComputer))
+
+	// F13: proactive goals / schedules. Read/write hang off tasks permissions.
+	mux.HandleFunc("GET /api/schedules", d.requirePermission(authz.PermTasksRead, d.handleListSchedules))
+	mux.HandleFunc("POST /api/schedules", d.requirePermission(authz.PermTasksWrite, d.handleCreateSchedule))
+	mux.HandleFunc("GET /api/schedules/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetSchedule))
+	mux.HandleFunc("PUT /api/schedules/{id}", d.requirePermission(authz.PermTasksWrite, d.handleUpdateSchedule))
+	mux.HandleFunc("DELETE /api/schedules/{id}", d.requirePermission(authz.PermTasksWrite, d.handleDeleteSchedule))
+
+	// F14: knowledge — mock RAG retrieval over stored chunks.
+	mux.HandleFunc("GET /api/knowledge", d.requirePermission(authz.PermResourcesRead, d.handleListKnowledge))
 
 	// Voice: a recorded clip is transcribed server side and forwarded into the thread.
 	mux.HandleFunc("POST /api/threads/{id}/audio", d.requirePermission(authz.PermTasksWrite, d.handleThreadAudio))

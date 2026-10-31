@@ -73,6 +73,12 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeNotFound, http.StatusNotFound},
 		{CodeMethodNotAllowed, http.StatusMethodNotAllowed},
 		{CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
+		// Agent capabilities (F10-F16).
+		{CodeComputerNotFound, http.StatusNotFound},
+		{CodeScheduleNotFound, http.StatusNotFound},
+		{CodeSkillDistillDisabled, http.StatusForbidden},
+		{CodeScheduleInvalid, http.StatusBadRequest},
+		{CodeFeatureUnavailable, http.StatusServiceUnavailable},
 		{Code("resource_not_found"), http.StatusInternalServerError},
 	}
 	for _, c := range cases {

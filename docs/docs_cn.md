@@ -253,6 +253,20 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `POST` | `/api/connectors/{id}/actions` | `resources:write` — 变更资源 | 运行连接器动作；off 拒绝，allowed 立即执行，ask_first 挂起一个待人工批准的 input-required 任务。 | `{ action, args? }` | `Task \| 202 (ask_first parks an input-required task)` |
 | `POST` | `/api/threads/{id}/audio` | `tasks:write` — 取消与恢复任务 | 上传语音片段；转写为文字后作为语音消息委派，并将 agent 回复附为 TTS 音频。 | `multipart/form-data; first file part is the audio clip` | `{ transcript, taskId? }` |
 
+### 能力
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/computers` | `resources:read` — 查看资源 | 列出全部计算机 | — | `Computer[] { id, ownerId, agentId, kind(browser\|shell\|screen), sessionRef, status, lastAction, createdAt }` |
+| `POST` | `/api/computers` | `resources:write` — 变更资源 | 在计算机中新建一条 | `{ agentId, kind?(browser\|shell\|screen), sessionRef?, status?, lastAction? } — unknown kind falls back to browser` | `Computer — 201` |
+| `GET` | `/api/computers/{id}` | `resources:read` — 查看资源 | 按 id 读取其中一条计算机 | — | `Computer \| 404 computer_not_found` |
+| `GET` | `/api/schedules` | `tasks:read` — 查看任务 | 列出全部调度 | — | `Schedule[] { id, goal, trigger(manual\|cron\|event), cronExpr, enabled, nextRun, lastRunAt, lastStatus }` |
+| `POST` | `/api/schedules` | `tasks:write` — 取消与恢复任务 | 在调度中新建一条 | `{ goal(required), trigger?(manual\|cron\|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid` | `Schedule — 201` |
+| `GET` | `/api/schedules/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条调度 | — | `Schedule \| 404 schedule_not_found` |
+| `PUT` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 整体替换其中一条调度 | `{ goal?, trigger?, cronExpr?, enabled? }` | `Schedule \| 404 schedule_not_found` |
+| `DELETE` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条调度 | — | `204, no body` |
+| `GET` | `/api/knowledge` | `resources:read` — 查看资源 | 列出全部知识库 | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
+
 展开一行即可看到它的请求与响应。
 
 ## 认证与权限
@@ -281,16 +295,16 @@ API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证�
 
 | 状态码 | 含义 | 错误码 |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid` |
 | `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials` |
-| `403` | Forbidden | `forbidden, user_disabled, builtin_role` |
-| `404` | Not Found | `not_found, backup_not_found` |
+| `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
 | `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive` |
 | `413` | Payload Too Large | `payload_too_large` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
 | `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email` |
-| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress` |
+| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable` |
 
 响应体恒为 {"code": "..."}。请记录错误码，而不是附带的说明文字。
 

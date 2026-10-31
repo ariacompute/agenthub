@@ -65,6 +65,24 @@
 
 上述端点复用既有 `resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组；详见 `releasenotes.md` §12 与 `/docs` 控制台的 Collaboration 分组。
 
+### 1.4 范围内（本轮新增，已落地）
+
+参考 agentbuddy `requirements.md` 的 F10–F16 标杆特性分析，agenthub 侧落地「服务端契约 + mock 适配器」：
+真实计算机控制 / 调度引擎 / 向量检索统一标 `TODO(real)`，首版为确定性 mock。
+
+- **Computers（F11）**：`GET/POST /api/computers`、`GET /api/computers/{id}` 暴露 agent 沙箱
+  （browser / shell / screen）；handler 走 mock 适配器返回占位会话与动作回显，真实控制标 `TODO(real)`。
+  新机器码 `computer_not_found`(404) / `feature_unavailable`(503，store 未接入时的统一哨兵)。落 `computers` 表（`017_computers.sql`）。
+- **Schedules（F13）**：`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}` 暴露目标 / 周期任务；
+  mock 调度器用内存 ticker 复用 hub 创建 task，真实调度引擎标 `TODO(real)`。
+  新机器码 `schedule_not_found`(404) / `schedule_invalid`(400)。落 `schedules` 表（`018_schedules.sql`）。
+- **Knowledge（F14）**：`GET /api/knowledge` 暴露 mock RAG 检索（确定性片段），真实向量检索标 `TODO(real)`；
+  技能蒸馏仅记录触发点（`skill_distill_disabled`(403)）。落 `knowledge` 表（`019_knowledge.sql`）。
+- **Persona（F10）**：`Entry.Persona` 扩展角色画像（`role`/`instruction`/`mbti`/`avatar`），
+  经 `POST/PUT /api/resources` 写入，`resources.persona` JSONB 列（复用 `013_persona.sql`）。
+- **复用与约束**：上述端点复用既有 `resources:*` / `tasks:*` 权限，不新增角色或用户组；
+  迁移均为 `017/018/019`（接 `016_wechat_login.sql` 之后），全 `IF NOT EXISTS`。
+
 ## 2. 协议契约
 
 ### 2.1 传输与信封
@@ -180,6 +198,9 @@
 | `task_push` | `PushNotificationConfig` 快照 |
 | `events` | 每个 broker 帧（`(task_id, seq)` 主键），供 `since=<seq>` 回放 |
 | `push_records` | 每次回调留痕，按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留最近 N 条/任务 |
+| `computers` | agent 沙箱（browser/shell/screen）：状态 + 最近动作回显（迁移 `017`） |
+| `schedules` | 目标/周期任务：cron_expr / enabled / next_run / last_run（迁移 `018`） |
+| `knowledge` | mock RAG 片段：agent_id / chunk_text / source_ref（迁移 `019`） |
 | `schema_migrations` | 已执行的迁移文件 |
 
 约束：
@@ -247,6 +268,15 @@ POST   /api/threads/{id}/messages             → 201 {message, delegated, faile
 GET    /api/threads/{id}/events               → SSE（tasks:read；回访线程历史 + 跟随被委派任务，agent 回复落库）
 GET    /a2a/stream?task=<id>                   → SSE（控制台用，无 JSON-RPC 封装）
 GET    /healthz                                → 状态与计数（无鉴权）
+GET    /api/computers                         → {computers}（resources:read；F11 agent 沙箱列表）
+POST   /api/computers                         → 201 Computer（resources:write；kind∈browser/shell/screen）
+GET    /api/computers/{id}                    → Computer | 404（resources:read；含最近动作回显）
+GET    /api/schedules                         → {schedules}（tasks:read；F13 目标/周期任务）
+POST   /api/schedules                         → 201 Schedule（tasks:write；goal/cron_expr/enabled）
+GET    /api/schedules/{id}                    → Schedule | 404（tasks:read）
+PUT    /api/schedules/{id}                    → Schedule | 404（tasks:write；启停/编辑）
+DELETE /api/schedules/{id}                    → 204 | 404（tasks:write）
+GET    /api/knowledge[?agentId=]              → {chunks}（resources:read；F14 mock RAG 检索）
 ```
 
 ### 4.3 健康检查
@@ -266,6 +296,8 @@ GET    /healthz                                → 状态与计数（无鉴权�
 `invalid_state_transition`·`task_not_resumable`·`task_not_cancelable`·`no_resource_available`·`invalid_flow` → 400，
 目录治理码：`invalid_kind_config`·`invalid_status_transition`·`invalid_namespace`·`invalid_source` → 400，
 `sync_in_flight` → 409；上游注册中心不可达时 `/api/registry-sources/{id}/sync` 返回 502 并透传上游 code。
+agent 能力码（F10–F16）：`computer_not_found`·`schedule_not_found` → 404、`skill_distill_disabled` → 403、
+`schedule_invalid` → 400、`feature_unavailable` → 503（computers/schedules/knowledge 三端点 store 未接入时的统一哨兵，取代原 `computer_disabled`/`knowledge_unavailable`；状态映射见 `writeDomainErr`）。
 
 ### 5.2 JSON-RPC 错误码
 

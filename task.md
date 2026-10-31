@@ -349,6 +349,38 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - 新增 `scripts/check-emudhra.sh`：离线按 emSign 根（信任锚）指纹扫描 CA bundle，规避前向/拦截代理造成的在线探测假阳性。
 - 构建后核验：`docker run --rm <agenthub-image> scripts/check-emudhra.sh /etc/ssl/certs/ca-certificates.crt`。
 
+## M5 — Agent 能力端点（F10–F16 服务端脚手架，已落地）
+
+背景：配合 agentbuddy `requirements.md` 的 F10–F16 标杆特性分析，agenthub 侧落地服务端契约
+（迁移 `017/018/019`、机器码、computers/schedules/knowledge 端点、Listeners/probes/`store_test` 同步）；
+真实计算机控制 / 调度引擎 / 向量检索统一标 `TODO(real)`，首版为确定性 mock。不新增权限码
+（复用 `resources:*` / `tasks:*`），新端点全部落在 `/api` 前缀下（桌面壳环回代理自动覆盖）。
+
+### 1. 迁移（幂等，接 `016` 之后）
+- [x] `migrations/017_computers.sql`：`computers`（agent_id, kind∈browser/shell/screen, session_ref, status, last_action, created_at），`IF NOT EXISTS`。
+- [x] `migrations/018_schedules.sql`：`schedules`（goal, trigger, cron_expr, enabled, next_run, owner, last_run_at, last_status）。
+- [x] `migrations/019_knowledge.sql`：`knowledge`（agent_id, chunk_text, source_ref, created_at），mock RAG。
+- [x] `internal/store/store_test.go` 迁移顺序测试（`want` 切片）追加 `017/018/019`。
+
+### 2. 领域与持久化（依赖倒置）
+- [x] `internal/model/computers.go` / `schedules.go` / `knowledge.go`：GORM 模型 + `JSONField`。
+- [x] `internal/computers` / `internal/schedules` / `internal/knowledge`：类型 + `Store` 端口（镜像 channels 模式）。
+- [x] `internal/store/computers_store.go` / `schedules_store.go` / `knowledge_store.go`：GORM 双模实现（`NewComputersStore` 等）。
+
+### 3. 服务层与端点
+- [x] `internal/httputil/json.go`：新增 6 个 `Code*`（computer/schedule/knowledge/skill）；`WriteErr` 映射状态（404/403/400/503）。
+- [x] `internal/handlers/computers.go`：`GET/POST /api/computers`、`GET /api/computers/{id}`（mock 适配器）。
+- [x] `internal/handlers/schedules.go`：`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}`（mock 调度器复用 hub）。
+- [x] `internal/handlers/knowledge.go`：`GET /api/knowledge`（mock RAG 检索 + 技能蒸馏触发点记录）。
+- [x] `internal/handlers/handlers.go`：`Deps` 增 `Computers/Schedules/Knowledge`，注册 9 条 `/api` 路由。
+
+### 4. 路由发现同步
+- [x] `internal/handlers/listen.go` `Listeners()` 追加 9 个端点；`listen_test.go` `probes` 同步（被 `TestListenersCoverRoutes` 兜底）。
+
+### 5. 装配与验证
+- [x] `cmd/agenthub-server/main.go`：注入三个新 store 到 `Deps`。
+- [x] `go build ./...`、`go vet`、`go test -race ./...` 全绿（含 `TestEmbeddedMigrationsAreOrderedAndIdempotent`、`TestListenersCoverRoutes`）。
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

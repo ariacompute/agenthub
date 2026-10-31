@@ -119,6 +119,7 @@ export const endpointGroups = [
   { id: 'apikeys', groupKey: 'groupApiKeys' },
   { id: 'ops', groupKey: 'groupOps' },
   { id: 'collaboration', groupKey: 'groupCollaboration' },
+  { id: 'capabilities', groupKey: 'groupCapabilities' },
 ]
 
 /**
@@ -1015,6 +1016,100 @@ export const httpEndpoints = [
     request: 'multipart/form-data; first file part is the audio clip',
     response: '{ transcript, taskId? }',
   },
+
+  // ---- agent capabilities (F10–F16) ----
+  // When the matching store is not wired in, every endpoint below answers 503
+  // feature_unavailable (see errorGroups) instead of 404/403.
+  {
+    group: 'capabilities',
+    method: 'GET',
+    path: '/api/computers',
+    permission: 'resources:read',
+    descKey: 'verbList',
+    nounKey: 'nounComputers',
+    request: '',
+    response: 'Computer[] { id, ownerId, agentId, kind(browser|shell|screen), sessionRef, status, lastAction, createdAt }',
+  },
+  {
+    group: 'capabilities',
+    method: 'POST',
+    path: '/api/computers',
+    permission: 'resources:write',
+    descKey: 'verbCreate',
+    nounKey: 'nounComputers',
+    request: '{ agentId, kind?(browser|shell|screen), sessionRef?, status?, lastAction? } — unknown kind falls back to browser',
+    response: 'Computer — 201',
+  },
+  {
+    group: 'capabilities',
+    method: 'GET',
+    path: '/api/computers/{id}',
+    permission: 'resources:read',
+    descKey: 'verbGet',
+    nounKey: 'nounComputers',
+    request: '',
+    response: 'Computer | 404 computer_not_found',
+  },
+  {
+    group: 'capabilities',
+    method: 'GET',
+    path: '/api/schedules',
+    permission: 'tasks:read',
+    descKey: 'verbList',
+    nounKey: 'nounSchedules',
+    request: '',
+    response: 'Schedule[] { id, goal, trigger(manual|cron|event), cronExpr, enabled, nextRun, lastRunAt, lastStatus }',
+  },
+  {
+    group: 'capabilities',
+    method: 'POST',
+    path: '/api/schedules',
+    permission: 'tasks:write',
+    descKey: 'verbCreate',
+    nounKey: 'nounSchedules',
+    request: '{ goal(required), trigger?(manual|cron|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid',
+    response: 'Schedule — 201',
+  },
+  {
+    group: 'capabilities',
+    method: 'GET',
+    path: '/api/schedules/{id}',
+    permission: 'tasks:read',
+    descKey: 'verbGet',
+    nounKey: 'nounSchedules',
+    request: '',
+    response: 'Schedule | 404 schedule_not_found',
+  },
+  {
+    group: 'capabilities',
+    method: 'PUT',
+    path: '/api/schedules/{id}',
+    permission: 'tasks:write',
+    descKey: 'verbReplace',
+    nounKey: 'nounSchedules',
+    request: '{ goal?, trigger?, cronExpr?, enabled? }',
+    response: 'Schedule | 404 schedule_not_found',
+  },
+  {
+    group: 'capabilities',
+    method: 'DELETE',
+    path: '/api/schedules/{id}',
+    permission: 'tasks:write',
+    descKey: 'verbDelete',
+    nounKey: 'nounSchedules',
+    request: '',
+    response: '204, no body',
+  },
+  {
+    group: 'capabilities',
+    method: 'GET',
+    path: '/api/knowledge',
+    permission: 'resources:read',
+    descKey: 'verbList',
+    nounKey: 'nounKnowledge',
+    request: '?agentId=',
+    response: 'Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }',
+  },
 ]
 
 /**
@@ -1026,16 +1121,16 @@ export const httpEndpoints = [
  * status also keeps the table honest without translating sixty code strings.
  */
 export const errorGroups = [
-  { status: '400', reason: 'Bad Request', codes: 'bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required' },
+  { status: '400', reason: 'Bad Request', codes: 'bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid' },
   { status: '401', reason: 'Unauthorized', codes: 'unauthorized, unauthenticated, session_expired, invalid_credentials' },
-  { status: '403', reason: 'Forbidden', codes: 'forbidden, user_disabled, builtin_role' },
-  { status: '404', reason: 'Not Found', codes: 'not_found, backup_not_found' },
+  { status: '403', reason: 'Forbidden', codes: 'forbidden, user_disabled, builtin_role, skill_distill_disabled' },
+  { status: '404', reason: 'Not Found', codes: 'not_found, backup_not_found, computer_not_found, schedule_not_found' },
   { status: '405', reason: 'Method Not Allowed', codes: 'method_not_allowed' },
   { status: '409', reason: 'Conflict', codes: 'email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive' },
   { status: '413', reason: 'Payload Too Large', codes: 'payload_too_large' },
   { status: '500', reason: 'Internal Server Error', codes: 'internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed' },
   { status: '502', reason: 'Bad Gateway', codes: 'oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email' },
-  { status: '503', reason: 'Service Unavailable', codes: 'backup_engine_unavailable, restore_busy, restore_in_progress' },
+  { status: '503', reason: 'Service Unavailable', codes: 'backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable' },
 ]
 
 /** Codes an adapter produces; they say something about the resource, not the caller. */

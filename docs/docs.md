@@ -253,6 +253,20 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `POST` | `/api/connectors/{id}/actions` | `resources:write` — Change resources | Run a connector action; off refuses, allowed runs at once, ask_first parks an input-required task for approval. | `{ action, args? }` | `Task \| 202 (ask_first parks an input-required task)` |
 | `POST` | `/api/threads/{id}/audio` | `tasks:write` — Cancel and resume tasks | Upload a voice clip; transcribe it, delegate as a voice message, and attach the agent reply as TTS audio. | `multipart/form-data; first file part is the audio clip` | `{ transcript, taskId? }` |
 
+### Capabilities
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/computers` | `resources:read` — Read resources | List all computers | — | `Computer[] { id, ownerId, agentId, kind(browser\|shell\|screen), sessionRef, status, lastAction, createdAt }` |
+| `POST` | `/api/computers` | `resources:write` — Change resources | Create a new entry among the computers | `{ agentId, kind?(browser\|shell\|screen), sessionRef?, status?, lastAction? } — unknown kind falls back to browser` | `Computer — 201` |
+| `GET` | `/api/computers/{id}` | `resources:read` — Read resources | Read one of the computers by id | — | `Computer \| 404 computer_not_found` |
+| `GET` | `/api/schedules` | `tasks:read` — Read tasks | List all schedules | — | `Schedule[] { id, goal, trigger(manual\|cron\|event), cronExpr, enabled, nextRun, lastRunAt, lastStatus }` |
+| `POST` | `/api/schedules` | `tasks:write` — Cancel and resume tasks | Create a new entry among the schedules | `{ goal(required), trigger?(manual\|cron\|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid` | `Schedule — 201` |
+| `GET` | `/api/schedules/{id}` | `tasks:read` — Read tasks | Read one of the schedules by id | — | `Schedule \| 404 schedule_not_found` |
+| `PUT` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Replace one of the schedules outright | `{ goal?, trigger?, cronExpr?, enabled? }` | `Schedule \| 404 schedule_not_found` |
+| `DELETE` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the schedules | — | `204, no body` |
+| `GET` | `/api/knowledge` | `resources:read` — Read resources | List all knowledge | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
+
 Open a row to see its request and response.
 
 ## Authentication and permissions
@@ -281,16 +295,16 @@ Failures answer with a machine-readable code. Grouped here by the HTTP status th
 
 | Status | Meaning | Codes |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid` |
 | `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials` |
-| `403` | Forbidden | `forbidden, user_disabled, builtin_role` |
-| `404` | Not Found | `not_found, backup_not_found` |
+| `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
 | `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive` |
 | `413` | Payload Too Large | `payload_too_large` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
 | `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email` |
-| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress` |
+| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable` |
 
 The body is always {"code": "..."}. Log the code rather than any prose that came with it.
 

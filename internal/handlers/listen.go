@@ -40,6 +40,15 @@ func Listeners() []Listener {
 		{"GET /api/connectors", "connectors: external applications invoking an mcp resource"},
 		{"POST /api/connectors/{id}/actions", "invoke a connector action (policy gated)"},
 		{"POST /api/threads/{id}/audio", "voice message upload, transcribed server side"},
+		{"GET /api/computers", "agent computers: browser / shell / screen sandboxes (F11)"},
+		{"POST /api/computers", "agent computers: create a sandbox"},
+		{"GET /api/computers/{id}", "agent computers: sandbox detail"},
+		{"GET /api/schedules", "schedules: proactive goals (F13)"},
+		{"POST /api/schedules", "schedules: create a goal"},
+		{"GET /api/schedules/{id}", "schedules: goal detail"},
+		{"PUT /api/schedules/{id}", "schedules: edit a goal"},
+		{"DELETE /api/schedules/{id}", "schedules: delete a goal"},
+		{"GET /api/knowledge", "knowledge: mock RAG retrieval (F14)"},
 		{"GET /healthz", "health probe, also the container healthcheck"},
 	}
 }

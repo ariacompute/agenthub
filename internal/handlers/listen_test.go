@@ -72,7 +72,17 @@ func TestListenersCoverRoutes(t *testing.T) {
 		// Allowed connector: the probe runs the full send path.
 		"POST /api/connectors/{id}/actions": {http.MethodPost, "/api/connectors/" + mcp.ID + "/actions", `{"action":"invoke","args":{}}`},
 		"POST /api/threads/{id}/audio":      {http.MethodPost, "/api/threads/" + finished + "/audio", ""},
-		"GET /healthz":                      {http.MethodGet, "/healthz", ""},
+		// Computers / schedules / knowledge answer 503 without a store wired in, not 404.
+		"GET /api/computers":         {http.MethodGet, "/api/computers", ""},
+		"POST /api/computers":        {http.MethodPost, "/api/computers", `{"kind":"browser"}`},
+		"GET /api/computers/{id}":    {http.MethodGet, "/api/computers/comp1", ""},
+		"GET /api/schedules":         {http.MethodGet, "/api/schedules", ""},
+		"POST /api/schedules":        {http.MethodPost, "/api/schedules", `{"goal":"demo"}`},
+		"GET /api/schedules/{id}":    {http.MethodGet, "/api/schedules/sched1", ""},
+		"PUT /api/schedules/{id}":    {http.MethodPut, "/api/schedules/sched1", `{"goal":"demo"}`},
+		"DELETE /api/schedules/{id}": {http.MethodDelete, "/api/schedules/sched1", ""},
+		"GET /api/knowledge":         {http.MethodGet, "/api/knowledge", ""},
+		"GET /healthz":               {http.MethodGet, "/healthz", ""},
 	}
 
 	listeners := Listeners()
