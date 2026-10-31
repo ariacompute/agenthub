@@ -238,9 +238,10 @@ Agent 调用。
   `009_registry_sync.sql`补上治理列、去重启用唯一索引、命名空间与上游源——
   语句全部 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`，升级前已存在的条目保持 `approved`。
   后续迁移沿用同一契约：`010_api_keys.sql`（API 密钥表）、`011_login_protection.sql`（账户锁定列）、
-  `012_threads.sql`（协作线程）、`013_persona.sql` / `014_channels.sql` / `015_thread_origin.sql`
+  `012_threads.sql`（协作线程）、  `013_persona.sql` / `014_channels.sql` / `015_thread_origin.sql`
   （Persona / Channels / 语音 origin），以及 `016_wechat_login.sql`（放开 `users.email` 非空约束，
-  以便仅由 OAuth 绑定 `(provider, subject)` 标识的微信账号也能入库）。
+  以便仅由 OAuth 绑定 `(provider, subject)` 标识的微信账号也能入库），以及 `017_computers.sql` /
+  `018_schedules.sql` / `019_knowledge.sql`（agent 沙箱 / 主动调度 / mock RAG 片段）。
 - **条件更新防丢更新**：任务状态迁移走 `UPDATE ... WHERE id=? AND state=?` 并校验
   `RowsAffected`，0 行时区分「任务不存在」与「并发冲突」。
 - **持久化不阻塞运行**：状态 / artifact / span 同步写；`events` 与 `push_records`
@@ -279,7 +280,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （打点 / 下载 / 恢复 / 定时），以及新增的**API 密钥**子页——为非交互式访问
   签发、限定范围、轮换与吊销长期持有的 bearer 凭据。
 - **文档**（`/docs`）：控制台自带文档，随构建发版、离线可读。五章——核心概念、A2A 方法、
-  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**全部 90 条路由**，
+  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**完整路由表（约 100 条）**，
   逐条给出方法、路径、所需权限，以及取自各 handler 真实编解码结构的请求/响应示例。
   入口位于侧边栏「管理」之后，**不加权限门控**：任何已登录账号都可读；而「管理」自身
   仍按其权限显隐，文档项不随之消失。
@@ -436,15 +437,15 @@ cp .env.example .env       # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 
 ---
 
-## 十一、Persona、Channels、Connectors 与 Speech（M2）
+## 十一、Persona、Agent 能力、Channels、Connectors 与 Speech（M2）
 
 在 M1 的资源注册与 A2A 编排之上，agenthub 新增 agentbuddy 消费的协作面：资源 **Persona**、
 外部 **Channels**、策略网关 **Connectors** 与 **Speech**（离线 STT/TTS）。全部新端点复用既有
 `resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组。
 
-- **Persona**：`Entry.Persona`（`AvatarURL` / `Bio` / `Capabilities`）由 `normalizePersona`
-  归一化（`Bio` ≤256 字符、`AvatarURL` 仅限 http(s)、整体为空归 nil），落 `resources.persona`
-  （迁移 `013_persona.sql`）。
+- **Persona（F10）**：`Entry.Persona`（`DisplayName` / `Title` / `Tagline` / `AvatarURL`）由
+  `normalizePersona` 归一化——各文本字段去除首尾空格并截断到 256 字符、`AvatarURL` 仅限
+  http(s)（否则置空）、整体为空时归 nil——落 `resources.persona` JSONB（迁移 `013_persona.sql`）。
 - **Channels**：绑定到线程的 Slack / Teams / Telegram / SMS 通道。入站走签名校验的公开
   webhook（`POST /api/channels/{id}/webhook`，密钥仅存环境变量名）转发进线程；出站走 SSRF 安全的
   `Deliver`（`POST /api/channels/{id}/deliver`，`netutil.ValidateURL` + `SafeClient`，回显
@@ -457,8 +458,27 @@ cp .env.example .env       # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
   `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact。受
   `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制；迁移 `015_thread_origin.sql` 为
   `thread_messages` 增加 `origin` 列。
-- **文档**：`/docs` 控制台已在 Collaboration 分组用 13 语完整记录全部新端点
-  （见 `web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`）。
+- **Agent 能力端点（F10–F16 脚手架）**：在 Persona 之外，agenthub 新增 agent 能力面的首片——
+  agent 沙箱、主动调度与 mock RAG。全部为确定性脚手架：深层能力（真实 browser / shell / screen
+  控制、真实调度引擎、向量检索）统一标 `TODO(real)`，留待后续里程碑。不新增角色或权限码，端点复用
+  既有 `resources:*` 与 `tasks:*`。
+  - **Computers（F11）**：绑定到 agent、种类为 `browser` / `shell` / `screen` 的沙箱。
+    `GET/POST /api/computers` 与 `GET /api/computers/{id}` 创建、列出沙箱并读取单个。首版只记录
+    控制台可挂载的会话（`session_ref` / `status` / `last_action`）；真实沙箱驱动标 `TODO(real)`。
+    落 `computers`（迁移 `017_computers.sql`）。
+  - **Schedules（F13）**：hub 按 cron 或外部触发主动推进的目标。`GET/POST /api/schedules`、
+    `GET/PUT/DELETE /api/schedules/{id}` 管理目标；首版只存意图（`goal` / `trigger` / `cron_expr` /
+    `enabled` / `next_run`），mock 调度器在被触发时复用 `Hub` 创建任务——把表达式注册进真实调度器
+    标 `TODO(real)`。落 `schedules`（迁移 `018_schedules.sql`）。
+  - **Knowledge（F14）**：mock RAG 检索。`GET /api/knowledge?agentId=…` 返回为该 agent 存储的
+    `chunk_text` / `source_ref`；真实向量嵌入与相似度排序标 `TODO(real)`。落 `knowledge`
+    （迁移 `019_knowledge.sql`）。
+  - **权限与错误**：Computers 挂 `resources:read` / `resources:write`，Schedules 挂
+    `tasks:read` / `tasks:write`，Knowledge 挂 `resources:read`。未知 id 返回 `computer_not_found`
+    / `schedule_not_found`（404），无目标调度返回 `schedule_invalid`（400），而 store 未接入时端点直接
+    返回 `feature_unavailable`（503）而非 404——因此未建这些表的部署可干净降级。
+- **文档**：`/docs` 控制台已在 Collaboration 分组用 13 语完整记录全部新端点，含 agent 能力、
+  Channels、Connectors 与 Speech（见 `web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`）。
 
 ## 十二、Kubernetes Operator（运维控制器）
 

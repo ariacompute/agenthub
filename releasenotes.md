@@ -304,7 +304,9 @@ while the container itself stays stateless.
   tables), `011_login_protection.sql` (account lockout columns), `012_threads.sql`
   (collaboration threads), `013_persona.sql` / `014_channels.sql` / `015_thread_origin.sql`
   (Persona / Channels / voice origin), and `016_wechat_login.sql` (nullable `users.email`
-  so a WeChat account keyed only by its OAuth binding can be stored).
+  so a WeChat account keyed only by its OAuth binding can be stored), and
+  `017_computers.sql` / `018_schedules.sql` / `019_knowledge.sql` (agent sandboxes /
+  proactive schedules / mock RAG chunks).
 - **Conditional updates prevent lost updates**: task transitions use
   `UPDATE ... WHERE id=? AND state=?` plus a `RowsAffected` check, and zero rows is split
   into "no such task" vs "concurrent conflict".
@@ -357,9 +359,11 @@ screen and a visual inspector for the A2A contract.
   bearer credentials for non-interactive access.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
-  sticky index that follows the reader. The endpoint table covers all 90 routes with
-  method, path, required permission and request/response samples taken from the handlers
-  themselves. It sits after Administration in the sidebar and is deliberately **not**
+  sticky index that follows the reader. The endpoint table covers the full route table
+  (~100 routes) with method, path, required permission and request/response samples taken
+  from the handlers themselves — now including the agent-capability, channel, connector,
+  speech and API-key endpoints. It sits after Administration in the sidebar and is
+  deliberately **not**
   permission-gated: anyone who can sign in may read it, while Administration itself still
   appears and disappears with its permissions.
   Content and copy are split in two: `lib/docs-content.js` holds the machine-shaped half
@@ -548,7 +552,7 @@ validation) plus the upstream install and start commands for each platform.
 
 ---
 
-## 11. Persona, Channels, Connectors & Speech (M2)
+## 11. Persona, Agent Capabilities, Channels, Connectors & Speech (M2)
 
 On top of M1's registry and A2A orchestration, agenthub now ships the collaboration
 surface that agentbuddy consumes: a resource **Persona**, external **Channels**, a
@@ -556,9 +560,11 @@ policy-gated **Connectors** gateway, and **Speech** (offline STT/TTS). All new e
 reuse the existing `resources:read` / `tasks:read` / `tasks:write` permissions — no new
 roles or groups.
 
-- **Persona**: `Entry.Persona` (`AvatarURL` / `Bio` / `Capabilities`) is normalised by
-  `normalizePersona` (Bio ≤256 chars, `AvatarURL` restricted to http(s), coalesced to nil
-  when empty) and stored in `resources.persona` (migration `013_persona.sql`).
+- **Persona (F10)**: `Entry.Persona` (`DisplayName` / `Title` / `Tagline` / `AvatarURL`)
+  is normalised by `normalizePersona` — every text field is trimmed and capped at 256
+  chars, `AvatarURL` is restricted to http(s) and dropped otherwise, and the whole struct
+  coalesces to nil when empty — and stored in `resources.persona` as JSONB (migration
+  `013_persona.sql`).
 - **Channels**: Slack / Teams / Telegram / SMS surfaces bound to a thread. Inbound runs
   through a signed, public webhook (`POST /api/channels/{id}/webhook`, secret held only as
   an env-var name) that forwards into the thread; outbound runs through an SSRF-safe
@@ -573,8 +579,35 @@ roles or groups.
   mock), delegates it into the thread as an `origin=voice` message, and attaches the agent's
   reply as a TTS audio artifact. Gated by `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES`;
   migration `015_thread_origin.sql` adds the `origin` column to `thread_messages`.
+- **Agent capability endpoints (F10–F16 scaffold)**: beyond Persona, agenthub now ships the
+  first slice of the agent-capability surface — agent sandboxes, proactive schedules and
+  mock RAG. All are deterministic scaffolds: the deep behaviours (real browser / shell /
+  screen control, a real scheduler engine, vector retrieval) are marked `TODO(real)` and
+  deferred to a later milestone. No new roles or permission codes were introduced; the
+  endpoints reuse `resources:*` and `tasks:*`.
+  - **Computers (F11)**: per-agent sandboxes of kind `browser` / `shell` / `screen` an agent
+    may drive. `GET/POST /api/computers` and `GET /api/computers/{id}` create and list
+    sandboxes and read one back. The first release records the session the console may
+    attach to (`session_ref` / `status` / `last_action`); a real sandboxed driver is
+    `TODO(real)`. Backed by `computers` (migration `017_computers.sql`).
+  - **Schedules (F13)**: proactive goals the hub works on, on a cron or an external trigger.
+    `GET/POST /api/schedules`, `GET/PUT/DELETE /api/schedules/{id}` manage goals; the first
+    release stores the intent (`goal` / `trigger` / `cron_expr` / `enabled` / `next_run`)
+    and the mock scheduler reuses `Hub` to create a task when invoked — registering the
+    expression with a real scheduler is `TODO(real)`. Backed by `schedules` (migration
+    `018_schedules.sql`).
+  - **Knowledge (F14)**: mock RAG over stored chunks. `GET /api/knowledge?agentId=…` returns
+    the `chunk_text` / `source_ref` stored for an agent; real embedding and similarity
+    ranking are `TODO(real)`. Backed by `knowledge` (migration `019_knowledge.sql`).
+  - **Permissions & errors**: Computers hang off `resources:read` / `resources:write`;
+    Schedules off `tasks:read` / `tasks:write`; Knowledge off `resources:read`. An unknown
+    id returns `computer_not_found` / `schedule_not_found` (404), a goal-less schedule
+    returns `schedule_invalid` (400), and when a store is not wired in the endpoint answers
+    `feature_unavailable` (503) rather than 404 — so a deployment that does not provision
+    these tables degrades cleanly.
 - **Docs**: the `/docs` console now documents every new endpoint in its Collaboration group,
-  in 13 languages (see `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js`).
+  in 13 languages, including the agent-capability, channel, connector and speech endpoints
+  (see `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js`).
 
 ## 12. Kubernetes Operator
 
