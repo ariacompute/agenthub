@@ -55,6 +55,7 @@ persistence ← internal/store（GORM 实现）
 | `computers.Store` | `store.NewComputersStore` | `computers`：agent 沙箱（browser/shell/screen），含状态与最近动作回显 |
 | `schedules.Store` | `store.NewSchedulesStore` | `schedules`：目标/周期任务（cron_expr / enabled / next_run） |
 | `knowledge.Store` | `store.NewKnowledgeStore` | `knowledge`：mock RAG 片段（agent_id / chunk_text / source_ref） |
+| `router.Store` | `store.NewRouterStore` | `router_triggers` / `router_threads` / `router_subscriptions` / `router_tickets` / `router_assignments` / `router_decisions` / `router_policies` / `router_events`：触发流、订阅、工单与每次运行的事实，供断线 `since=<seq>` 回放 |
 
 - **依赖倒置**：端口接口定义在 `registry` / `hub`，实现在 `store`，因此 `hub`、`registry` **不 import `store`**。
 - **两套行为**：不注入 GORM 仓库时 `registry.Registry` / `hub.TaskStore` / `hub.Broker` /
@@ -113,6 +114,20 @@ persistence ← internal/store（GORM 实现）
   `broker.go`（事件扇出 + 有界队列异步落库）、`flow.go`（`then/branch/parallel`）、
   `orchestrator.go`（send/stream/get/cancel/resume/push + MockNotifier 落库 + Prune ticker）、
   `quiesce.go`（`Drain`/`Allow`/`ActiveTaskCount` 闸门 + `ResetEventSeq`，恢复期间拒新任务并等待在途任务）
+- `internal/router`：**调度内核**（双层调度的 Router 层，端口在此定义、实现在 `store`，零新依赖）。
+  `types.go`（`Trigger`/`Disposition`/`Thread`/`Subscription`/`Ticket`/`Assignment`/`Decision`/`Event`/`Stats`
+  与哨兵错误）、`ports.go`（`Store`/`Assessor`/`Executor`/`Clock`）、`memory.go`（内存 `Store`，
+  与 GORM 实现同语义，单测零外部依赖）、`engine.go`（**单写者**：去重 `Intake` + 订阅扇出 +
+  `EvaluateDue` + `Bind`/`Unsubscribe`/`Handback`/`CloseTicket`/`Prune`，只写库并返回待执行意图）、
+  `filter.go`（程序层：来源模式 `off|candidate|request_only` + 白名单/`@提及`/关键词/静默时段 + 自回显抑制）、
+  `assess.go`（语义层：`RuleAssessor` 与 `LLMAssessor`，一拍批量一次调用 + 严格枚举解析 + 逐条回退规则）、
+  `compose.go`（工单简报拼装：正文截断 + 最近 N 条 + 关联 ID）、`passes.go`（节拍单飞 + 请求合并 +
+  panic 隔离 + 健康计数）、`executor.go`（`HubExecutor`：`hub.Send`/`hub.Resume` + 槽位信号量 +
+  `input-required → waitsForPerson` + 退避重试）、`bus.go`（有界事件扇出 + `since` 回放）、
+  `service.go`（对外门面 `Run`/`Stop`/`Stats`/`ListTriggers`/`ListTickets`/`Cancel`/`Handback`/
+  `Unsubscribe`/`Kick`/`Policies`/`Inject`/`Subscribe`）
+- `internal/schedules`：`cron.go`（`NextRun`/`ValidateCron`/`Advance`，复用 `backup.ParseCron` 的五段解析器，
+  保存即算出下次到期、触发后再算一次）
 - `internal/handlers`：`handlers.go`（路由注册中心 + 静态回退 + `/healthz` 的 `database` 字段）、
   `principal.go`（`identify`/`requireAuth`/`requirePermission` + 可见性过滤 + 计数重算）、
   `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放）、
@@ -123,9 +138,12 @@ persistence ← internal/store（GORM 实现）
   `api_sync.go`（上游源 CRUD + 手动同步，上游失败返回 502 并透传上游 code）
 - `internal/handlers`（续，agent 能力端点 F10–F16）：`computers.go`（F11 agent 计算机：
   `GET/POST /api/computers`、`GET /api/computers/{id}`，mock 适配器，真实控制标 `TODO(real)`）、
-  `schedules.go`（F13 目标调度：`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}`，
-  mock 调度器复用 hub 创建 task）、`knowledge.go`（F14 知识库：`GET /api/knowledge` mock RAG 检索 +
-  技能蒸馏触发点记录，真实向量检索标 `TODO(real)`）
+  `schedules.go`（F13 目标调度：`GET/POST /api/schedules`、`GET/PUT/DELETE /api/schedules/{id}`、
+  `POST /api/schedules/{id}/run` 立即触发一次；cron 保存即算 `next_run`，非法表达式返回
+  `schedule_invalid`）、`knowledge.go`（F14 知识库：`GET /api/knowledge` mock RAG 检索 +
+  技能蒸馏触发点记录，真实向量检索标 `TODO(real)`）、`router.go`（`/api/router/*` 控制面：
+  `stats`/`triggers`/`tickets`/`policies`/`passes`/`events` SSE，`routerReady` 在未注入
+  `Deps.Router` 时统一回 503 `feature_unavailable`）
 - `migrations/`：`001_resources.sql` … `004_push_records.sql`、`005_auth.sql`（users/sessions/
   oauth_accounts）、`006_rbac.sql`（groups/roles/permissions/各种关联表/resource_grants + 内置
   角色权限种子）、`007_backups.sql`（`backup_checkpoints` / `backup_schedules` + `backups:manage`
@@ -134,7 +152,10 @@ persistence ← internal/store（GORM 实现）
   `registries` 表 + 三个新权限与 admin 关联）、  `009_registry_sync.sql`（`registry_sources`）、
   `017_computers.sql`（`computers`：agent 沙箱 browser/shell/screen）、
   `018_schedules.sql`（`schedules`：目标/周期任务）、
-  `019_knowledge.sql`（`knowledge`：mock RAG 片段），均 `IF NOT EXISTS`，经 `embed.go` 内嵌
+  `019_knowledge.sql`（`knowledge`：mock RAG 片段）、
+  `020_router.sql`（`router_triggers` / `router_threads` / `router_subscriptions` / `router_tickets` /
+  `router_assignments` / `router_decisions` / `router_policies` / `router_events`，含
+  `(source, dedupe_key)` 与 `(disposition, next_due)` 部分索引），均 `IF NOT EXISTS`，经 `embed.go` 内嵌
 - `README.md` / `README_cn.md` 的「AWS Agent Registry 特性对比」章：与 AWS Agent Registry 的
   逐项对比（含已有 / 本次补齐 / 明确不做三张清单与 recordType ↔ Kind 字段级映射）
 - `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go` 与
@@ -355,6 +376,11 @@ make web-install / make web-dev / make web-build / make web-test
   agent 能力码（`writeDomainErr` 映射）：`computer_not_found`/`schedule_not_found` → 404、`skill_distill_disabled` → 403、
   `schedule_invalid` → 400、`feature_unavailable` → 503（computers/schedules/knowledge 三端点 store 未接入时的统一哨兵，
   取代原 `computer_disabled`/`knowledge_unavailable` 的分别命名），新增领域错误需同步该映射，否则会退化为 500。
+  - 调度器码（`router.go:writeRouterErr`）：`router_ticket_not_found`/`router_trigger_not_found`/
+    `router_thread_not_found` → 404、`router_ticket_closed`/`router_handback_exhausted`/
+    `router_resource_unset` → 409、`router_policy_invalid` → 400；`Deps.Router == nil` 时全部走
+    503 `feature_unavailable`。新增码须同时登记 `httputil` 常量、`writeRouterErr` 与前端
+    `CODE_KEYS` + 13 语 `copy/errors-copy.js`。
 - 每次启动都会尝试写入 5 个 `demo-*` 种子资源（每类一个），`ON CONFLICT (id) DO NOTHING` 保证幂等；
   用户覆盖过的同名条目**不会被种子改写**，保证 README 冒烟可复现。
 - 前端未执行 `make web-build` 时 `/` 返回 404（机器可读 `not_found`），不是服务故障。
@@ -389,5 +415,7 @@ make web-install / make web-dev / make web-build / make web-test
     对 `kind=mcp` 资源暴露外部调用，`ask_first` 策略经 `Hub.ParkConnector` 挂起 `input-required` 任务等待人工批准。
   - `POST /api/threads/{id}/audio`：服务端转写（STT mock）后作为 `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact；受 `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制。
   - `Persona`：`Entry.Persona`（`AvatarURL`/`Bio`/`Capabilities`）经 `normalizePersona` 归一化，落 `resources.persona` JSONB；本轮进一步扩展为角色画像（`role`/`instruction`/`mbti`/`avatar`，F10），仍由 `POST/PUT /api/resources` 写入。
-  - **Agent 能力端点（F10–F16 脚手架）**：`GET/POST /api/computers`、`GET /api/computers/{id}`（F11 计算机，mock 适配器）、`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}`（F13 目标调度，mock 调度器）、`GET /api/knowledge`（F14 知识库 mock RAG）；深层能力（真实计算机控制 / 调度引擎 / 向量检索）一律 `TODO(real)`，首版为确定性 mock。
+  - **Agent 能力端点（F10–F16）**：`GET/POST /api/computers`、`GET /api/computers/{id}`（F11 计算机，mock 适配器）、`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}`、`POST /api/schedules/{id}/run`（F13 目标调度，**cron 已真实推进**：保存即算 `next_run`，到期自动触发并回写 `last_run_at`/`last_status`/`next_run`）、`GET /api/knowledge`（F14 知识库 mock RAG）。深层能力中「真实计算机控制 / 向量检索」仍标 `TODO(real)`；调度不再 mock。
+  - **调度器控制面（Router 层）**：`GET /api/router/stats`、`GET/POST /api/router/triggers`、`GET /api/router/triggers/{id}`、`GET /api/router/tickets`、`GET /api/router/tickets/{id}`、`POST /api/router/tickets/{id}/cancel`、`POST /api/router/tickets/{id}/handback`、`DELETE /api/router/threads/{id}/subscription`、`GET /api/router/policies`、`PUT /api/router/policies/{source}`、`POST /api/router/passes`、`GET /api/router/events`（SSE，`?since=<seq>&subject=` 先回放再实时）；全部只用 `tasks:read` / `tasks:write`，无新权限码。
+  - **入口改造（唯一两处）**：`handlePostThreadMessage` 与 `delegateThread` 在 `Deps.Router != nil` 时改走 `Intake`，否则保留原有直发 `Hub.Send`——因此关闭调度器时既有行为与测试零变化。
   - 上述端点均在桌面壳（agentbuddy）前缀白名单（`/api`）覆盖之内，新增服务端端点无需改桌面端代码。

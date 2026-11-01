@@ -3,13 +3,16 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/auth"
 	"agenthub/internal/channels"
 	"agenthub/internal/httputil"
+	"agenthub/internal/router"
 	"agenthub/internal/threads"
 )
 
@@ -372,6 +375,31 @@ func (d Deps) delegateThread(r *http.Request, threadID, text string) {
 		return
 	}
 	mentions := mentionsOf(text)
+	// With the scheduler on, the message enters as one trigger and the router
+	// decides: a thread some ticket already follows is passed straight to it,
+	// and a fresh conversation opens at most one ticket instead of one per
+	// participant.
+	if d.Router != nil {
+		now := time.Now().UTC()
+		trig := &router.Trigger{
+			Source:    string(router.SourceChannel),
+			SourceID:  threadID,
+			ThreadID:  threadID,
+			ActorKind: router.ActorHuman,
+			Kind:      "message",
+			Body:      text,
+			Explicit:  len(mentions) > 0,
+			At:        now,
+			DueAt:     now,
+		}
+		if len(th.Participants) > 0 {
+			trig.Meta = map[string]any{"participants": th.Participants, "resource": th.Participants[0]}
+		}
+		if _, _, ierr := d.Router.Inject(r.Context(), trig); ierr != nil {
+			slog.Warn("channels: route inbound message", "thread", threadID, "error", ierr)
+		}
+		return
+	}
 	for _, p := range th.Participants {
 		if len(mentions) > 0 && !mentions[p] {
 			continue

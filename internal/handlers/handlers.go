@@ -22,6 +22,7 @@ import (
 	"agenthub/internal/hub"
 	"agenthub/internal/knowledge"
 	"agenthub/internal/registry"
+	"agenthub/internal/router"
 	"agenthub/internal/schedules"
 	"agenthub/internal/store"
 	"agenthub/internal/threads"
@@ -69,6 +70,11 @@ type Deps struct {
 	Schedules schedules.Store
 	// Knowledge persists RAG chunks (mock). Nil when disabled.
 	Knowledge knowledge.Store
+	// Router is the scheduler: the single writer that turns triggers into
+	// tickets and launches them as tasks. Nil when the feature is off, in which
+	// case its endpoints answer 503 rather than 404 and the thread / channel
+	// ingress keeps its previous direct-to-hub behaviour.
+	Router *router.Service
 }
 
 // Register builds the router.
@@ -175,6 +181,26 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/schedules/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetSchedule))
 	mux.HandleFunc("PUT /api/schedules/{id}", d.requirePermission(authz.PermTasksWrite, d.handleUpdateSchedule))
 	mux.HandleFunc("DELETE /api/schedules/{id}", d.requirePermission(authz.PermTasksWrite, d.handleDeleteSchedule))
+	// Running a goal now goes through the router, so the manual firing and the
+	// cron firing produce the same trigger, ticket and trace.
+	mux.HandleFunc("POST /api/schedules/{id}/run", d.requirePermission(authz.PermTasksWrite, d.handleRunSchedule))
+
+	// The scheduler: triggers in, tickets out, and the water level in between.
+	// Read hangs off tasks:read and write off tasks:write, the same pair the
+	// schedule endpoints use: scheduling is a way of running tasks.
+	mux.HandleFunc("GET /api/router/stats", d.requirePermission(authz.PermTasksRead, d.handleRouterStats))
+	mux.HandleFunc("GET /api/router/triggers", d.requirePermission(authz.PermTasksRead, d.handleListRouterTriggers))
+	mux.HandleFunc("POST /api/router/triggers", d.requirePermission(authz.PermTasksWrite, d.handleCreateRouterTrigger))
+	mux.HandleFunc("GET /api/router/triggers/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetRouterTrigger))
+	mux.HandleFunc("GET /api/router/tickets", d.requirePermission(authz.PermTasksRead, d.handleListRouterTickets))
+	mux.HandleFunc("GET /api/router/tickets/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetRouterTicket))
+	mux.HandleFunc("POST /api/router/tickets/{id}/cancel", d.requirePermission(authz.PermTasksWrite, d.handleCancelRouterTicket))
+	mux.HandleFunc("POST /api/router/tickets/{id}/handback", d.requirePermission(authz.PermTasksWrite, d.handleHandbackRouterTrigger))
+	mux.HandleFunc("DELETE /api/router/threads/{id}/subscription", d.requirePermission(authz.PermTasksWrite, d.handleDropRouterSubscription))
+	mux.HandleFunc("GET /api/router/policies", d.requirePermission(authz.PermTasksRead, d.handleListRouterPolicies))
+	mux.HandleFunc("PUT /api/router/policies/{source}", d.requirePermission(authz.PermTasksWrite, d.handleSaveRouterPolicy))
+	mux.HandleFunc("POST /api/router/passes", d.requirePermission(authz.PermTasksWrite, d.handleKickRouterPass))
+	mux.HandleFunc("GET /api/router/events", d.requirePermission(authz.PermTasksRead, d.handleRouterEvents))
 
 	// F14: knowledge — mock RAG retrieval over stored chunks.
 	mux.HandleFunc("GET /api/knowledge", d.requirePermission(authz.PermResourcesRead, d.handleListKnowledge))

@@ -267,6 +267,25 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `DELETE` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the schedules | — | `204, no body` |
 | `GET` | `/api/knowledge` | `resources:read` — Read resources | List all knowledge | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
 
+### Scheduler
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/schedules/{id}/run` | `tasks:write` — Cancel and resume tasks | Fire one of the schedules now, without waiting for the cron slot | — | `Trigger — 202, needs AGENTHUB_ROUTER_ENABLED=true` |
+| `GET` | `/api/router/stats` | `tasks:read` — Read tasks | Water level: queue depth, tickets in hand, last batch size, beats run. | — | `Stats { pending, queued, runningTickets, waiting, batchSize, passes, lastPassAt, subscribers, streams, live }` |
+| `GET` | `/api/router/triggers` | `tasks:read` — Read tasks | List all triggers | `?source=&disposition=&thread=&ticket=&limit=` | `{ triggers: Trigger[] }` |
+| `POST` | `/api/router/triggers` | `tasks:write` — Cancel and resume tasks | Create a new entry among the triggers | `{ source?(manual\|cron\|thread\|channel), sourceId?, threadId?, kind?, body?, explicit?, meta? }` | `Trigger — 202; a redelivery answers 200 { duplicate: true }` |
+| `GET` | `/api/router/triggers/{id}` | `tasks:read` — Read tasks | Read one of the triggers by id | — | `Trigger \| 404 router_trigger_not_found` |
+| `GET` | `/api/router/tickets` | `tasks:read` — Read tasks | List all tickets | `?state=&open=true&limit=` | `{ tickets: Ticket[] }` |
+| `GET` | `/api/router/tickets/{id}` | `tasks:read` — Read tasks | Read one of the tickets by id | — | `TicketDetail { ticket, subscriptions, assignments, decisions, trigger } \| 404 router_ticket_not_found` |
+| `POST` | `/api/router/tickets/{id}/cancel` | `tasks:write` — Cancel and resume tasks | End the ticket and stop the task it started. | — | `TicketDetail \| 404 / 409 router_ticket_closed` |
+| `POST` | `/api/router/tickets/{id}/handback` | `tasks:write` — Cancel and resume tasks | A worker returns a trigger to the queue for another worker. | `{ triggerId(required), reason? } — one hand-back per trigger` | `{ requeued: true } \| 409 router_handback_exhausted` |
+| `DELETE` | `/api/router/threads/{id}/subscription` | `tasks:write` — Cancel and resume tasks | Drop every subscription on a thread. | — | `204, no body \| 404 router_thread_not_found` |
+| `GET` | `/api/router/policies` | `tasks:read` — Read tasks | List all routing rules | — | `{ policies: Policy[] } — mode(off\|candidate\|request_only), allow, keywords, quietStart, quietEnd, resource` |
+| `PUT` | `/api/router/policies/{source}` | `tasks:write` — Cancel and resume tasks | Replace one of the routing rules outright | `{ mode(off\|candidate\|request_only), allow?, keywords?, quietStart?, quietEnd?, resource? }` | `Policy \| 400 router_policy_invalid` |
+| `POST` | `/api/router/passes` | `tasks:write` — Cancel and resume tasks | Run one scheduling beat now instead of waiting for the interval. | — | `{ kicked: true } — 202` |
+| `GET` | `/api/router/events` | `tasks:read` — Read tasks | SSE: replay from `since`, then follow the scheduler live. | `?since=<seq>&subject=` | `text/event-stream, event name router_event` |
+
 Open a row to see its request and response.
 
 ## Authentication and permissions
@@ -303,12 +322,12 @@ Failures answer with a machine-readable code. Grouped here by the HTTP status th
 
 | Status | Meaning | Codes |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid` |
 | `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials` |
 | `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled` |
-| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset` |
 | `413` | Payload Too Large | `payload_too_large` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
 | `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email` |

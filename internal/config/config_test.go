@@ -243,6 +243,27 @@ func TestValidateRejectsBadInput(t *testing.T) {
 			c.BackupDir = "/var/lib/agenthub/backups"
 			c.BackupMode = "whenever"
 		}},
+		// The scheduler's tuning is only enforced once it is switched on, but a
+		// value that breaks it must not be accepted silently.
+		{"router on without an interval", func(c *Config) {
+			c.RouterEnabled = true
+			c.RouterInterval = 0
+		}},
+		{"router with an absurd batch", func(c *Config) {
+			c.RouterEnabled = true
+			c.RouterInterval = time.Second
+			c.RouterBatchMax = 1000
+		}},
+		{"router with no ticket slots", func(c *Config) {
+			c.RouterEnabled = true
+			c.RouterInterval = time.Second
+			c.RouterMaxTickets = 0
+		}},
+		{"router with an unknown assess mode", func(c *Config) {
+			c.RouterEnabled = true
+			c.RouterInterval = time.Second
+			c.RouterAssessMode = "oracle"
+		}},
 	}
 	for _, c := range cases {
 		cfg := &Config{

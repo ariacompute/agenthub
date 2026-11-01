@@ -377,6 +377,63 @@ Streaming has **no `[DONE]` sentinel**: a run ends with the
 
 Branch conditions: `""` (default arm) / `always` / `contains:<text>` / `kind:<kind>` / `has:<key>`.
 
+## Scheduler (router)
+
+`internal/router` turns the platform from a directory that answers when called into a two-layer
+scheduler: a **router** layer decides *whether* an event deserves work, a **worker** layer runs the
+work through the ordinary task state machine. Nothing in `hub` changes — a ticket becomes a
+`message/send` (or a `tasks/resume`), so spans, events, push callbacks and HITL parking all apply
+unchanged.
+
+Four sources feed one queue: a cron expression coming due, a message posted into a collaboration
+thread, an inbound channel webhook, and a manual injection (`POST /api/router/triggers`). Every
+trigger carries a dedupe key, so a redelivered webhook is answered `200 {"duplicate":true}` instead
+of opening a second ticket.
+
+Filtering has two stages:
+
+- **Program layer** — a per-source policy (`off | candidate | request_only`) plus an allow list of
+  principals, `@mention`, keywords, quiet hours and self-echo suppression. It is offline and
+  deterministic, and it settles most of the traffic.
+- **Semantic layer** — everything one beat admits is assessed **in a single batch call**
+  (`accept / attach / stop / ignore`), against a model resource when
+  `AGENTHUB_ROUTER_ASSESS_MODE=model`, and by the rules alone otherwise. Trigger text is treated as
+  untrusted data, the answer is parsed against a closed vocabulary, and an unusable answer falls
+  back to the rule verdict per trigger — never to "let it through".
+
+A trigger that lands on a thread somebody already subscribed to skips the decision and goes
+straight to the subscriber, and a human message outranks an assessment. A worker may hand a trigger
+back to the queue exactly once, and when a ticket ends its unread events return to evaluation
+instead of being dropped.
+
+The beat is fixed (`AGENTHUB_ROUTER_INTERVAL`, default `2s`) and single flight: a request that
+arrives mid-beat is merged into the one that starts right after it. Tickets beyond
+`AGENTHUB_ROUTER_MAX_TICKETS` (default `8`) stay queued for a later beat instead of opening a
+goroutine, and a failed run retries with back-off up to `AGENTHUB_ROUTER_MAX_ATTEMPTS` (default `3`).
+
+The scheduler is **off by default** — `AGENTHUB_ROUTER_ENABLED=true` turns it on, because an
+instance that has not decided which worker a trigger should run on must not start opening tasks by
+itself. While it is off, `/api/router/*` and `/api/schedules/{id}/run` answer
+`503 feature_unavailable`, and thread messages keep the direct `Hub.Send` path they had before.
+`AGENTHUB_ROUTER_RESOURCE` names the fallback worker; cron expressions reuse the five-field parser
+the checkpoint scheduler already ships, so "next run" is computed on save and again after every
+fire.
+
+### Compared with the dsh superagent router
+
+| Capability | agenthub |
+| --- | --- |
+| Unified intake with an idempotency key | yes — four sources, dedupe on `(source, dedupe_key)`, a redelivery answers `200 {duplicate:true}` |
+| Fast path rules (source mode, allow list, `@mention`, keywords, quiet hours) | yes — `internal/router/filter.go`, offline and deterministic |
+| Semantic layer as one batched call with a closed verdict vocabulary | yes — `accept / attach / stop / ignore`, with a per-trigger fallback to the rule verdict, never a pass-through |
+| Thread subscriptions with direct pass-through | yes — human messages outrank an assessment |
+| One hand-back per trigger | yes — a second attempt answers `409 router_handback_exhausted` |
+| Unread events return to evaluation when a ticket closes | yes |
+| Fixed beat, single flight, request merging | yes — `2s`, one beat at a time, a mid-beat request merges into the next |
+| Worker isolation, concurrency slots, back-off | yes — `hub.Send`/`hub.Resume` under a slot semaphore, retries up to `AGENTHUB_ROUTER_MAX_ATTEMPTS` |
+| Durable effects queue / transactional outbox | **not built, by choice** — a committed intent is driven synchronously after the transaction, and single writer + idempotent replay cover the failure window |
+| Persona voice, reply composition, long-term memory | **not in scope** — a worker answers through the ordinary task and thread surface |
+
 ## Error contract
 
 The backend returns **machine readable codes only**, never prose; the console maps each code to

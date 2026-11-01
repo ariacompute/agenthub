@@ -81,8 +81,23 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /api/schedules/{id}":    {http.MethodGet, "/api/schedules/sched1", ""},
 		"PUT /api/schedules/{id}":    {http.MethodPut, "/api/schedules/sched1", `{"goal":"demo"}`},
 		"DELETE /api/schedules/{id}": {http.MethodDelete, "/api/schedules/sched1", ""},
-		"GET /api/knowledge":         {http.MethodGet, "/api/knowledge", ""},
-		"GET /healthz":               {http.MethodGet, "/healthz", ""},
+		// The router endpoints answer 503 without a service wired in, not 404.
+		"POST /api/schedules/{id}/run":                 {http.MethodPost, "/api/schedules/sched1/run", ""},
+		"GET /api/router/stats":                        {http.MethodGet, "/api/router/stats", ""},
+		"GET /api/router/triggers":                     {http.MethodGet, "/api/router/triggers", ""},
+		"POST /api/router/triggers":                    {http.MethodPost, "/api/router/triggers", `{"source":"manual","body":"demo"}`},
+		"GET /api/router/triggers/{id}":                {http.MethodGet, "/api/router/triggers/trg1", ""},
+		"GET /api/router/tickets":                      {http.MethodGet, "/api/router/tickets", ""},
+		"GET /api/router/tickets/{id}":                 {http.MethodGet, "/api/router/tickets/tkt1", ""},
+		"POST /api/router/tickets/{id}/cancel":         {http.MethodPost, "/api/router/tickets/tkt1/cancel", ""},
+		"POST /api/router/tickets/{id}/handback":       {http.MethodPost, "/api/router/tickets/tkt1/handback", `{"triggerId":"trg1"}`},
+		"DELETE /api/router/threads/{id}/subscription": {http.MethodDelete, "/api/router/threads/th1/subscription", ""},
+		"GET /api/router/policies":                     {http.MethodGet, "/api/router/policies", ""},
+		"PUT /api/router/policies/{source}":            {http.MethodPut, "/api/router/policies/thread", `{"mode":"candidate"}`},
+		"POST /api/router/passes":                      {http.MethodPost, "/api/router/passes", ""},
+		"GET /api/router/events":                       {http.MethodGet, "/api/router/events?since=0", ""},
+		"GET /api/knowledge":                           {http.MethodGet, "/api/knowledge", ""},
+		"GET /healthz":                                 {http.MethodGet, "/healthz", ""},
 	}
 
 	listeners := Listeners()

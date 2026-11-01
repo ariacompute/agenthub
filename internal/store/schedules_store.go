@@ -82,15 +82,27 @@ func (s *schedulesStore) Create(ctx context.Context, in *schedules.Schedule) (*s
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	// Mock next run: a minute out. A real scheduler would parse cron_expr.
-	if in.Enabled && in.Trigger == "cron" && in.CronExpr != "" {
-		next := now.Add(time.Minute)
+	// The next run is derived from the expression at save time, so the field the
+	// router scans is real rather than a placeholder.
+	if next := nextRunAt(in, now); !next.IsZero() {
 		row.NextRun = &next
 	}
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return nil, err
 	}
 	return toDomainSchedule(&row), nil
+}
+
+// nextRunAt is when a saved schedule fires next, or the zero time when it is not
+// a cron schedule. An expression the parser rejects yields the zero time: the
+// row is still saved, and the router marks it invalid on its next scan, which is
+// more useful to an operator than a rejected save.
+func nextRunAt(in *schedules.Schedule, from time.Time) time.Time {
+	next, err := schedules.NextRun(in.CronExpr, from)
+	if err != nil || next.IsZero() {
+		return time.Time{}
+	}
+	return next
 }
 
 func (s *schedulesStore) Update(ctx context.Context, in *schedules.Schedule) (*schedules.Schedule, error) {
@@ -111,6 +123,12 @@ func (s *schedulesStore) Update(ctx context.Context, in *schedules.Schedule) (*s
 		if t, err := time.Parse(time.RFC3339, in.NextRun); err == nil {
 			updates["next_run"] = t
 		}
+	} else if t := nextRunAt(in, time.Now().UTC()); t.IsZero() {
+		// The expression changed or the schedule was disabled: clear the field so
+		// the router never fires a slot that no longer exists.
+		updates["next_run"] = nil
+	} else {
+		updates["next_run"] = t
 	}
 	if err := s.db.WithContext(ctx).Model(&model.Schedule{}).Where("id = ?", in.ID).Updates(updates).Error; err != nil {
 		return nil, err

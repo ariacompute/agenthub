@@ -109,6 +109,16 @@ const (
 	// whose store is not wired in (computers / schedules / knowledge). It replaces
 	// the previous computer_disabled / knowledge_unavailable split.
 	CodeFeatureUnavailable Code = "feature_unavailable"
+
+	// Router: the scheduler. Each code names the guardrail that refused the
+	// command, so the console can say why rather than "something went wrong".
+	CodeRouterTicketNotFound    Code = "router_ticket_not_found"
+	CodeRouterTriggerNotFound   Code = "router_trigger_not_found"
+	CodeRouterThreadNotFound    Code = "router_thread_not_found"
+	CodeRouterTicketClosed      Code = "router_ticket_closed"
+	CodeRouterHandbackExhausted Code = "router_handback_exhausted"
+	CodeRouterPolicyInvalid     Code = "router_policy_invalid"
+	CodeRouterResourceUnset     Code = "router_resource_unset"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -195,12 +205,17 @@ func WriteErr(w http.ResponseWriter, err error) {
 	case CodeAPIKeyExpired, CodeAPIKeyRevoked:
 		WriteError(w, http.StatusUnauthorized, e.Code)
 	// Computers, schedules and knowledge (F10-F16).
-	case CodeComputerNotFound, CodeScheduleNotFound:
+	case CodeComputerNotFound, CodeScheduleNotFound, CodeRouterTicketNotFound,
+		CodeRouterTriggerNotFound, CodeRouterThreadNotFound:
 		WriteError(w, http.StatusNotFound, e.Code)
 	case CodeSkillDistillDisabled:
 		WriteError(w, http.StatusForbidden, e.Code)
-	case CodeScheduleInvalid:
+	case CodeScheduleInvalid, CodeRouterPolicyInvalid:
 		WriteError(w, http.StatusBadRequest, e.Code)
+	// A closed ticket or an exhausted hand-back is a conflict: the state refuses
+	// the command, the command itself was well formed.
+	case CodeRouterTicketClosed, CodeRouterHandbackExhausted, CodeRouterResourceUnset:
+		WriteError(w, http.StatusConflict, e.Code)
 	case CodeFeatureUnavailable:
 		WriteError(w, http.StatusServiceUnavailable, e.Code)
 	default:

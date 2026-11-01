@@ -322,6 +322,51 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 分支条件：`""`（默认臂）/ `always` / `contains:<text>` / `kind:<kind>` / `has:<key>`。
 
+## 调度器（router）
+
+`internal/router` 把平台从「注册即被调用」的被动目录升级为双层调度：**Router 层**判断一个事件
+值不值得开工，**Worker 层**把这件事交给既有的任务状态机执行。`hub` 的公开语义零改动——一张工单会变成
+一次 `message/send`（或 `tasks/resume`），因此 span、事件流、push 回调与 HITL 挂起全部照旧生效。
+
+四类来源汇入同一队列：cron 表达式到期、协作线程里的一条消息、渠道 webhook 入站、以及手动注入
+（`POST /api/router/triggers`）。每条触发都带去重键，重复投递的 webhook 只会得到
+`200 {"duplicate":true}`，不会开出第二张工单。
+
+过滤分两级：
+
+- **程序层**——按来源的策略（`off | candidate | request_only`）叠加发起者白名单、`@提及`、关键词、
+  静默时段与自回显抑制。它离线、确定，能筛掉绝大部分流量。
+- **语义层**——一拍内放行的触发合并成**一次批量调用**判定（`accept / attach / stop / ignore`）：
+  `AGENTHUB_ROUTER_ASSESS_MODE=model` 时问询一个 model 资源，否则只跑规则。触发正文一律按
+  不可信数据对待，回答只解析白名单枚举，非法或失败的输出逐条回退到规则结论——绝不因此「放行」。
+
+落在已有人订阅的线程上的触发不再决策，直接派给订阅者；人类消息优先于评估结论。执行者可以把一条触发
+交回队列，但只允许一次；工单结束时未读事件回流评估，而不是被丢弃。
+
+节拍固定（`AGENTHUB_ROUTER_INTERVAL`，默认 `2s`）且单飞：节拍进行中到达的请求会并入紧随其后的那一拍。
+超出 `AGENTHUB_ROUTER_MAX_TICKETS`（默认 `8`）的工单留到下一拍，不额外开 goroutine；失败的运行按退避
+重试，上限 `AGENTHUB_ROUTER_MAX_ATTEMPTS`（默认 `3`）。
+
+调度器**默认关闭**——`AGENTHUB_ROUTER_ENABLED=true` 才开启，因为一个还没想好「触发该落到哪个执行者」
+的实例不该自己开工。关闭期间 `/api/router/*` 与 `/api/schedules/{id}/run` 返回
+`503 feature_unavailable`，线程消息保持原有直发 `Hub.Send` 的路径。`AGENTHUB_ROUTER_RESOURCE` 指定兜底
+执行者；cron 表达式复用检查点调度器已有的五段解析器，因此「下次到期」在保存时算出、每次触发后再算一次。
+
+### 与 dsh superagent router 的能力对照
+
+| 能力 | agenthub |
+| --- | --- |
+| 统一入口 + 幂等键 | 有——四类来源，按 `(source, dedupe_key)` 去重，重复投递返回 `200 {duplicate:true}` |
+| 快速规则（来源模式 / 白名单 / `@提及` / 关键词 / 静默时段） | 有——`internal/router/filter.go`，离线且确定 |
+| 语义层「一拍一次批量调用」+ 封闭结论词表 | 有——`accept / attach / stop / ignore`，非法或失败逐条回退规则结论，绝不放行 |
+| 会话订阅直通 | 有——人类消息优先于评估结论 |
+| 每条触发仅可交回一次 | 有——第二次返回 `409 router_handback_exhausted` |
+| 工单结束时未读事件回流评估 | 有 |
+| 固定节拍 / 单飞 / 请求合并 | 有——默认 `2s`，同一刻只跑一拍，节拍中的请求并入下一拍 |
+| Worker 隔离 + 并发槽位 + 退避 | 有——`hub.Send`/`hub.Resume` 在信号量下执行，重试上限 `AGENTHUB_ROUTER_MAX_ATTEMPTS` |
+| 持久 Effects 队列 / 事务 Outbox | **明确不做**——提交后同步驱动意图，靠「单写者 + 幂等重放」覆盖失败窗口 |
+| 人格化回复 / 长期记忆 | **不在范围**——执行者通过既有任务与会话表面发声 |
+
 ## 错误约定
 
 后端**只返回机器可读 code**，绝不含自然语言；控制台在前端把 code 映射为本地化文案。

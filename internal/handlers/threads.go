@@ -11,6 +11,7 @@ import (
 	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
+	"agenthub/internal/router"
 	"agenthub/internal/threads"
 )
 
@@ -99,6 +100,41 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	userMsg, err := d.Threads.AddMessage(r.Context(), userMsg)
 	if err != nil {
 		httputil.WriteErr(w, err)
+		return
+	}
+
+	// With the scheduler on, the message becomes a trigger instead of a direct
+	// send. The router decides: an @mention is an explicit request, so it opens a
+	// ticket bound to this thread; a follow-up on a thread a ticket already owns
+	// is passed straight through to that ticket, without a second decision.
+	if d.Router != nil {
+		trig := &router.Trigger{
+			Source:    string(router.SourceThread),
+			SourceID:  id + "#" + userMsg.ID,
+			ThreadID:  id,
+			ActorID:   p.UserID,
+			ActorName: p.Name,
+			ActorKind: router.ActorHuman,
+			Kind:      "message",
+			Body:      body.Body,
+			Explicit:  len(body.Mentions) > 0,
+			At:        time.Now().UTC(),
+			DueAt:     time.Now().UTC(),
+		}
+		if len(body.Mentions) > 0 {
+			trig.Meta = map[string]any{"mentions": body.Mentions, "resource": body.Mentions[0]}
+		}
+		created, _, rerr := d.Router.Inject(r.Context(), trig)
+		if rerr != nil {
+			httputil.WriteErr(w, rerr)
+			return
+		}
+		httputil.WriteJSON(w, http.StatusCreated, map[string]any{
+			"message":   userMsg,
+			"delegated": []string{},
+			"failed":    []string{},
+			"routed":    created != nil,
+		})
 		return
 	}
 

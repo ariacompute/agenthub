@@ -18,6 +18,14 @@ import (
 	"agenthub/internal/registry"
 )
 
+// RouterAssessRule and RouterAssessModel are the two semantic layer modes of the
+// scheduler. "rule" is offline and deterministic; "model" adds a model resource
+// that classifies the triggers the rules deliberately leave open.
+const (
+	RouterAssessRule  = "rule"
+	RouterAssessModel = "model"
+)
+
 // Version is the agenthub release reported by /healthz and the Agent Card. It
 // carries the git tag verbatim, prefix included ("v0.2.0").
 //
@@ -158,6 +166,36 @@ type Config struct {
 	SpeechMode string
 	// AudioMaxBytes caps the per-request audio upload for POST /api/threads/{id}/audio.
 	AudioMaxBytes int
+
+	// The scheduler (router). It is off by default: an instance that has not
+	// decided which worker a trigger should run on must not start opening tasks
+	// by itself. Turning it on is one switch, and every other value below has a
+	// working default.
+	RouterEnabled bool
+	// RouterInterval is the beat: how often the engine looks for due triggers.
+	RouterInterval time.Duration
+	// RouterBatchMax caps how many triggers one evaluation decides at once. It is
+	// the batching knob: larger means fewer, bigger model calls.
+	RouterBatchMax int
+	// RouterMaxTickets bounds concurrent worker runs; a ticket beyond the bound
+	// waits for a later beat instead of piling up a goroutine.
+	RouterMaxTickets int
+	// RouterMaxAttempts is the retry budget before a ticket is closed as failed.
+	RouterMaxAttempts int
+	// RouterAssessMode selects the semantic layer: "rule" runs on the program
+	// layer alone (offline, deterministic), "model" also asks a registered model
+	// resource. A model that fails falls back to the rules either way.
+	RouterAssessMode string
+	// RouterAssessResource names the model resource the semantic layer asks. Empty
+	// means the first healthy kind=model record.
+	RouterAssessResource string
+	// RouterResource is the worker a ticket runs on when its policy names none.
+	RouterResource string
+	// RouterTriggerTTL and RouterPruneInterval control retention of the trigger
+	// stream, decisions and events. Tickets are never pruned: they are the record
+	// of what was done.
+	RouterTriggerTTL    time.Duration
+	RouterPruneInterval time.Duration
 }
 
 // BackupEnabled reports whether checkpointing is configured at all. Everything
@@ -231,6 +269,18 @@ func Load() (*Config, error) {
 		ChannelsEnabled:     envBool("AGENTHUB_CHANNELS_ENABLED", false),
 		SpeechMode:          envStr("AGENTHUB_SPEECH_MODE", registry.ProviderModeMock),
 		AudioMaxBytes:       envInt("AGENTHUB_AUDIO_MAX_BYTES", 16<<20),
+		// The scheduler ships switched off. The rest of its values are defaults
+		// an operator only touches to tune, not to make it work.
+		RouterEnabled:        envBool("AGENTHUB_ROUTER_ENABLED", false),
+		RouterInterval:       envDur("AGENTHUB_ROUTER_INTERVAL", 2*time.Second),
+		RouterBatchMax:       envInt("AGENTHUB_ROUTER_BATCH_MAX", 20),
+		RouterMaxTickets:     envInt("AGENTHUB_ROUTER_MAX_TICKETS", 8),
+		RouterMaxAttempts:    envInt("AGENTHUB_ROUTER_MAX_ATTEMPTS", 3),
+		RouterAssessMode:     envStr("AGENTHUB_ROUTER_ASSESS_MODE", RouterAssessRule),
+		RouterAssessResource: envStr("AGENTHUB_ROUTER_ASSESS_RESOURCE", ""),
+		RouterResource:       envStr("AGENTHUB_ROUTER_RESOURCE", ""),
+		RouterTriggerTTL:     envDur("AGENTHUB_ROUTER_TRIGGER_TTL", 168*time.Hour),
+		RouterPruneInterval:  envDur("AGENTHUB_ROUTER_PRUNE_INTERVAL", 10*time.Minute),
 		OAuth: auth.OAuthConfig{
 			Enabled: envBool("AGENTHUB_OAUTH_ENABLED", true),
 			Google: auth.ProviderConfig{
@@ -367,6 +417,36 @@ func (c *Config) Validate() error {
 	}
 	if c.AudioMaxBytes < 1<<20 {
 		return fmt.Errorf("AGENTHUB_AUDIO_MAX_BYTES must be at least 1 MiB")
+	}
+	// The scheduler's tuning is only checked when it is switched on: an instance
+	// that never enables it stays valid exactly as it was.
+	if c.RouterEnabled {
+		if c.RouterInterval <= 0 {
+			return fmt.Errorf("AGENTHUB_ROUTER_INTERVAL must be positive when AGENTHUB_ROUTER_ENABLED is true")
+		}
+		if c.RouterBatchMax < 1 || c.RouterBatchMax > 100 {
+			return fmt.Errorf("AGENTHUB_ROUTER_BATCH_MAX must be 1..100, got %d", c.RouterBatchMax)
+		}
+		if c.RouterMaxTickets < 1 || c.RouterMaxTickets > 64 {
+			return fmt.Errorf("AGENTHUB_ROUTER_MAX_TICKETS must be 1..64, got %d", c.RouterMaxTickets)
+		}
+		if c.RouterMaxAttempts < 1 || c.RouterMaxAttempts > 10 {
+			return fmt.Errorf("AGENTHUB_ROUTER_MAX_ATTEMPTS must be 1..10, got %d", c.RouterMaxAttempts)
+		}
+		if c.RouterTriggerTTL <= 0 || c.RouterPruneInterval <= 0 {
+			return fmt.Errorf("AGENTHUB_ROUTER_TRIGGER_TTL and AGENTHUB_ROUTER_PRUNE_INTERVAL must be positive")
+		}
+	}
+	// An unset mode is the offline default: a caller that built the struct by hand
+	// must not be rejected for leaving it empty.
+	if strings.TrimSpace(c.RouterAssessMode) == "" {
+		c.RouterAssessMode = RouterAssessRule
+	}
+	switch c.RouterAssessMode {
+	case RouterAssessRule, RouterAssessModel:
+	default:
+		return fmt.Errorf("AGENTHUB_ROUTER_ASSESS_MODE must be %q or %q, got %q",
+			RouterAssessRule, RouterAssessModel, c.RouterAssessMode)
 	}
 	return nil
 }

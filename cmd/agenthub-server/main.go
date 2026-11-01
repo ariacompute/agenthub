@@ -21,8 +21,10 @@ import (
 	"agenthub/internal/handlers"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
+	"agenthub/internal/router"
 	"agenthub/internal/secure"
 	"agenthub/internal/store"
+	"agenthub/internal/threads"
 
 	"gorm.io/gorm"
 )
@@ -179,7 +181,49 @@ func main() {
 	schedulesStore := store.NewSchedulesStore(db)
 	knowledgeStore := store.NewKnowledgeStore(db)
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech}
+	// The scheduler. Off unless an operator switched it on: it opens tasks on its
+	// own, which is not a behaviour an instance should acquire by upgrading.
+	// Its tickets run as ordinary hub tasks, so a scheduled run inherits the state
+	// machine, spans, artifacts, events and push notifications of any other run.
+	var routerSvc *router.Service
+	routerCtx, stopRouter := context.WithCancel(context.Background())
+	defer stopRouter()
+	if cfg.RouterEnabled {
+		routerSvc = router.NewService(router.ServiceOptions{
+			Store:     store.NewRouterStore(db),
+			Runner:    h,
+			Schedules: schedulesStore,
+			Generator: routerGenerator(cfg, reg),
+			History:   threadHistory(threadsStore),
+			ThreadLink: func(ctx context.Context, threadID, taskID, resourceID string) error {
+				_, err := threadsStore.UpsertAgentMessage(ctx, threadID, taskID, resourceID, "")
+				return err
+			},
+			Clock:       time.Now,
+			Interval:    cfg.RouterInterval,
+			MaxParallel: cfg.RouterMaxTickets,
+			MaxAttempts: cfg.RouterMaxAttempts,
+			BatchMax:    cfg.RouterBatchMax,
+			Resource:    cfg.RouterResource,
+			TriggerTTL:  cfg.RouterTriggerTTL,
+			PruneEvery:  cfg.RouterPruneInterval,
+		})
+		defer routerSvc.Stop()
+		go func() {
+			if err := routerSvc.Run(routerCtx); err != nil {
+				slog.Error("router: beat stopped", "error", err)
+			}
+		}()
+		slog.Info("router: scheduler enabled",
+			"interval", cfg.RouterInterval, "batch", cfg.RouterBatchMax,
+			"maxTickets", cfg.RouterMaxTickets, "assess", cfg.RouterAssessMode,
+			"resource", cfg.RouterResource)
+	} else {
+		slog.Info("router: scheduler disabled",
+			"hint", "set AGENTHUB_ROUTER_ENABLED=true, schedules then fire on their cron expression")
+	}
+
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Wrap(handlers.Register(deps), cfg),
@@ -340,4 +384,72 @@ func setupLogger(cfg *config.Config) {
 		level = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+}
+
+// routerGenerator builds the semantic layer's model backend. It returns nil — and
+// so leaves the scheduler on its program rules — in three cases, each logged:
+// the mode is "rule", no real provider is configured, or no kind=model resource
+// exists. The mock provider deliberately does not qualify: it answers with a
+// summary rather than JSON, which the assessor would reject on every beat, and a
+// layer that always fails is worse than one that is honestly absent.
+func routerGenerator(cfg *config.Config, reg *registry.Registry) router.Generator {
+	if cfg.RouterAssessMode != config.RouterAssessModel {
+		return nil
+	}
+	if cfg.ModelRouterMode != registry.ProviderModeOpenAICompatible {
+		slog.Warn("router: semantic assessment needs a real model provider",
+			"hint", "set AGENTHUB_MODEL_ROUTER_MODE="+registry.ProviderModeOpenAICompatible+" and configure the model resource; running on the program rules")
+		return nil
+	}
+	entry := pickModelEntry(reg, cfg.RouterAssessResource)
+	if entry == nil {
+		slog.Warn("router: no usable kind=model resource", "resource", cfg.RouterAssessResource,
+			"hint", "register one, or set AGENTHUB_ROUTER_ASSESS_RESOURCE; running on the program rules")
+		return nil
+	}
+	slog.Info("router: semantic assessment via model resource", "resource", entry.ID, "name", entry.Name)
+	return adapter.NewModelRouterFor(entry, cfg.ModelRouterMode)
+}
+
+// pickModelEntry returns the requested model resource, or the first healthy one.
+func pickModelEntry(reg *registry.Registry, id string) *registry.Entry {
+	if reg == nil {
+		return nil
+	}
+	if id != "" {
+		entry, ok := reg.Get(id)
+		if !ok || entry.Kind != registry.KindModel {
+			return nil
+		}
+		return entry
+	}
+	for _, entry := range reg.List(string(registry.KindModel), "") {
+		if entry.Health != registry.HealthUnhealthy {
+			return entry
+		}
+	}
+	return nil
+}
+
+// threadHistory feeds the tail of a conversation into the worker brief, so a
+// follow-up does not force the worker to re-read the whole thread.
+func threadHistory(ts threads.Store) router.HistoryProvider {
+	if ts == nil {
+		return nil
+	}
+	return func(ctx context.Context, threadID string, limit int) ([]string, error) {
+		msgs, err := ts.ListMessages(ctx, threadID, 0)
+		if err != nil {
+			return nil, err
+		}
+		start := len(msgs) - limit
+		if start < 0 {
+			start = 0
+		}
+		out := make([]string, 0, len(msgs)-start)
+		for _, m := range msgs[start:] {
+			out = append(out, m.AuthorType+": "+m.Body)
+		}
+		return out, nil
+	}
 }

@@ -381,6 +381,56 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - [x] `cmd/agenthub-server/main.go`：注入三个新 store 到 `Deps`。
 - [x] `go build ./...`、`go vet`、`go test -race ./...` 全绿（含 `TestEmbeddedMigrationsAreOrderedAndIdempotent`、`TestListenersCoverRoutes`）。
 
+## M6 — 调度器（Router 层，已落地）
+
+背景：把 F13 的 mock 调度器换成真正的双层调度（Router 层判定 + Worker 层执行）。新建 `internal/router`
+包，遵守「单一写者 / 状态在事务内、外部动作在提交后 / 命令与事实分离」三条纪律；不实现 Effects 持久队列
+与 Outbox（Passes 提交后同步驱动 + 单飞 + 幂等重放替代）；cron 复用 `backup.ParseCron` 而非新增依赖；
+开关默认关闭，`Deps.Router == nil` 时全线 503 且线程入口保持原直发路径。不新增权限码。
+
+### 1. 领域与端口（零外部依赖）
+- [x] `internal/router/types.go`：`Trigger`/`Disposition`/`Thread`/`Subscription`/`Ticket`/`Assignment`/`Decision`/`Event`/`Stats` + 枚举校验 + `TriggerQuery`/`TicketQuery` + 6 个哨兵错误。
+- [x] `internal/router/ports.go`：`Store`/`Assessor`/`Executor`/`Clock` 端口（由消费方定义）。
+- [x] `internal/router/memory.go`：内存 `Store`（与 GORM 实现同语义，单测零外部依赖）。
+
+### 2. 持久化
+- [x] `internal/model/router.go`：8 张表的 GORM 模型（jsonb 列复用既有 `JSONField`）。
+- [x] `migrations/020_router.sql`：`router_triggers`/`threads`/`subscriptions`/`tickets`/`assignments`/`decisions`/`policies`/`events`，全 `IF NOT EXISTS` + `(source, dedupe_key)` 与 `(disposition, next_due)` 索引。
+- [x] `internal/store/router_store.go`：`NewRouterStore` 实现 `router.Store`；`store_test.go` 的 `want` 切片追加 `020_router.sql`。
+
+### 3. Engine（单写者）
+- [x] `internal/router/engine.go`：`Intake`（去重 + 过滤 + 扇出）/ `EvaluateDue` / `Route` / `Bind` / `Unsubscribe` / `Handback` / `CloseTicket` / `Prune`，只写库并返回待执行意图。
+- [x] `internal/router/filter.go`：程序层四来源 × `off|candidate|request_only` × 白名单 × `@提及` × 关键词 × 静默时段 × 自回显抑制。
+- [x] `internal/router/assess.go`：`RuleAssessor` + `LLMAssessor`（`adapter.ModelRouter`，严格枚举解析，逐条回退规则）。
+- [x] `internal/router/compose.go`：工单简报拼装（正文截断 + 最近 N 条 + 关联 ID）。
+
+### 4. 节拍与执行
+- [x] `internal/router/passes.go`：节拍单飞 + `Kick()` 请求合并 + panic 隔离 + 健康计数。
+- [x] `internal/router/executor.go`：`HubExecutor`（`hub.Send`/`hub.Resume` + 槽位信号量 + `input-required → waiting` + 退避重试）。
+- [x] `internal/router/bus.go`：有界事件扇出（慢订阅者丢最旧帧）+ `since` 回放。
+- [x] `internal/router/service.go`：对外门面（`Run`/`Stop`/`Stats`/列表/`Cancel`/`Handback`/`Unsubscribe`/`Kick`/`Policies`/`Inject`/`Subscribe`）。
+
+### 5. 控制面与入口
+- [x] `internal/httputil/json.go`：新增 `router_ticket_not_found`/`router_trigger_not_found`/`router_thread_not_found`/`router_ticket_closed`/`router_handback_exhausted`/`router_policy_invalid`/`router_resource_unset` 与状态映射。
+- [x] `internal/handlers/router.go`：12 个 `/api/router/*` 端点 + SSE；`routerReady` 闸门返回 503 `feature_unavailable`。
+- [x] `internal/handlers/handlers.go`：`Deps.Router` + 注册 12 条路由（`tasks:read`/`tasks:write`）。
+- [x] `internal/handlers/listen.go` / `listen_test.go`：`Listeners()` 与 `probes` 同步 12 条（不得 404）。
+- [x] `internal/handlers/threads.go` / `channels.go`：`Deps.Router != nil` 时改走 `Intake`，否则保留直发 `Hub.Send`。
+- [x] `internal/handlers/schedules.go`：`POST /api/schedules/{id}/run` 立即触发；cron 非法返回 `schedule_invalid`，mock 注释删除。
+- [x] `internal/schedules/cron.go`：`NextRun`/`ValidateCron`/`Advance`（复用 `backup.ParseCron`）。
+
+### 6. 装配、配置与验证
+- [x] `internal/config/config.go`：10 个 `AGENTHUB_ROUTER_*` 配置项 + `Validate()` 边界（interval>0、batch 1..100、tickets 1..64、attempts 1..10、ttl/prune>0、assess mode 枚举）。
+- [x] `cmd/agenthub-server/main.go`：建 Store → `router.NewService` → 条件 `Run(ctx)`；关闭时序为 `Service.Stop()` → `Hub.Close()` → `store.Close`。
+- [x] 单测：`engine_test.go`/`filter_test.go`/`assess_test.go`/`passes_test.go`/`executor_test.go`/`cron_test.go`/`router_test.go` + `tests/router_e2e_test.go`（内存端到端）。
+- [x] `go build ./...`、`go vet ./...`、`go test ./...` 全绿。
+
+### 7. 文档
+- [x] `docs/docs-content.js` + `docs-copy.js`（13 语）：新增「调度器」分组与 14 条端点行、路由错误码；`bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md` / `docs/docs_cn.md`（**不手改生成物**）。
+- [x] `README.md` / `README_cn.md`：「调度器（router）」章（双层职责、两级过滤、订阅直通、节拍、开关与配置）。
+- [x] `AGENTS.md`：`internal/router`、`internal/schedules`、`handlers/router.go`、`020_router.sql`、持久化表与错误码映射。
+- [x] `requirements.md`：§1.5 范围、§4.2 端点、§5.1 错误码、§10 调度器契约（数据模型/行为/安全/配置/验收）。
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

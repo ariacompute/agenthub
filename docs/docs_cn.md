@@ -267,6 +267,25 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `DELETE` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条调度 | — | `204, no body` |
 | `GET` | `/api/knowledge` | `resources:read` — 查看资源 | 列出全部知识库 | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
 
+### 调度器
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/schedules/{id}/run` | `tasks:write` — 取消与恢复任务 | 不等 cron 到点，立即触发一次调度 | — | `Trigger — 202, needs AGENTHUB_ROUTER_ENABLED=true` |
+| `GET` | `/api/router/stats` | `tasks:read` — 查看任务 | 水位：待判定队列、手中工单、本批数量、已跑节拍。 | — | `Stats { pending, queued, runningTickets, waiting, batchSize, passes, lastPassAt, subscribers, streams, live }` |
+| `GET` | `/api/router/triggers` | `tasks:read` — 查看任务 | 列出全部触发 | `?source=&disposition=&thread=&ticket=&limit=` | `{ triggers: Trigger[] }` |
+| `POST` | `/api/router/triggers` | `tasks:write` — 取消与恢复任务 | 在触发中新建一条 | `{ source?(manual\|cron\|thread\|channel), sourceId?, threadId?, kind?, body?, explicit?, meta? }` | `Trigger — 202; a redelivery answers 200 { duplicate: true }` |
+| `GET` | `/api/router/triggers/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条触发 | — | `Trigger \| 404 router_trigger_not_found` |
+| `GET` | `/api/router/tickets` | `tasks:read` — 查看任务 | 列出全部工单 | `?state=&open=true&limit=` | `{ tickets: Ticket[] }` |
+| `GET` | `/api/router/tickets/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条工单 | — | `TicketDetail { ticket, subscriptions, assignments, decisions, trigger } \| 404 router_ticket_not_found` |
+| `POST` | `/api/router/tickets/{id}/cancel` | `tasks:write` — 取消与恢复任务 | 结束该工单并停止它启动的任务。 | — | `TicketDetail \| 404 / 409 router_ticket_closed` |
+| `POST` | `/api/router/tickets/{id}/handback` | `tasks:write` — 取消与恢复任务 | 执行者把一条触发交回队列，等另一个执行者接手。 | `{ triggerId(required), reason? } — one hand-back per trigger` | `{ requeued: true } \| 409 router_handback_exhausted` |
+| `DELETE` | `/api/router/threads/{id}/subscription` | `tasks:write` — 取消与恢复任务 | 取消该会话上的全部订阅。 | — | `204, no body \| 404 router_thread_not_found` |
+| `GET` | `/api/router/policies` | `tasks:read` — 查看任务 | 列出全部路由规则 | — | `{ policies: Policy[] } — mode(off\|candidate\|request_only), allow, keywords, quietStart, quietEnd, resource` |
+| `PUT` | `/api/router/policies/{source}` | `tasks:write` — 取消与恢复任务 | 整体替换其中一条路由规则 | `{ mode(off\|candidate\|request_only), allow?, keywords?, quietStart?, quietEnd?, resource? }` | `Policy \| 400 router_policy_invalid` |
+| `POST` | `/api/router/passes` | `tasks:write` — 取消与恢复任务 | 不等下一个节拍，立即推进一轮调度。 | — | `{ kicked: true } — 202` |
+| `GET` | `/api/router/events` | `tasks:read` — 查看任务 | SSE：先从 `since` 回放，再实时跟随调度器。 | `?since=<seq>&subject=` | `text/event-stream, event name router_event` |
+
 展开一行即可看到它的请求与响应。
 
 ## 认证与权限
@@ -303,12 +322,12 @@ API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证�
 
 | 状态码 | 含义 | 错误码 |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid` |
 | `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials` |
 | `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled` |
-| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset` |
 | `413` | Payload Too Large | `payload_too_large` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
 | `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email` |
