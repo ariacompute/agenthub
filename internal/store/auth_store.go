@@ -97,12 +97,25 @@ func (s *userStore) Update(ctx context.Context, u *auth.User) error {
 	if u == nil || u.ID == "" {
 		return fmt.Errorf("store: update user: user or id is empty")
 	}
+	status := orDefault(u.Status, auth.StatusActive)
 	fields := map[string]any{
 		"email":      strPtr(u.Email),
 		"name":       u.Name,
-		"status":     orDefault(u.Status, auth.StatusActive),
+		"status":     status,
 		"is_owner":   u.IsOwner,
 		"updated_at": time.Now().UTC(),
+	}
+	// disabled_at is derived from status and never set on its own: enabling
+	// clears it, disabling stamps it once and keeps that date across later
+	// edits, so the two columns cannot tell different stories.
+	if status == auth.StatusDisabled {
+		at := time.Now().UTC()
+		if u.DisabledAt != nil {
+			at = *u.DisabledAt
+		}
+		fields["disabled_at"] = at
+	} else {
+		fields["disabled_at"] = nil
 	}
 	// An empty hash means "keep the current one", so clearing a password stays
 	// an explicit decision made elsewhere.

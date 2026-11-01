@@ -918,6 +918,57 @@ func TestUserLifecycle(t *testing.T) {
 	}
 }
 
+// TestCreateUserHonoursStatus covers pre-provisioning: the drawer can create an
+// account that exists but cannot sign in yet, and a status the API cannot honour
+// is refused before anything is written.
+func TestCreateUserHonoursStatus(t *testing.T) {
+	d, _ := authTestDeps(t, "")
+	h := Register(d)
+	do(t, h, http.MethodPost, "/api/auth/register", `{"email":"owner@example.com","password":"correct horse"}`, nil)
+	owner := sessionOf(t, h, "owner@example.com", "correct horse")
+
+	w := do(t, h, http.MethodPost, "/api/users",
+		`{"email":"pre@example.com","password":"correct horse","status":"disabled"}`, authHeader(owner))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create disabled: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		User struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"user"`
+	}
+	decodeJSON(t, w, &created)
+	if created.User.Status != auth.StatusDisabled {
+		t.Fatalf("created status = %q, want %q", created.User.Status, auth.StatusDisabled)
+	}
+	// The account exists, but nobody can use it until an administrator enables it.
+	if w := do(t, h, http.MethodPost, "/api/auth/login",
+		`{"email":"pre@example.com","password":"correct horse"}`, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("disabled login: status = %d, want 403", w.Code)
+	}
+	if w := do(t, h, http.MethodPut, "/api/users/"+created.User.ID,
+		`{"status":"active"}`, authHeader(owner)); w.Code != http.StatusOK {
+		t.Fatalf("enable: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	sessionOf(t, h, "pre@example.com", "correct horse")
+
+	// A status the API does not know is rejected up front, so the address is
+	// still free for the corrected attempt.
+	if w := do(t, h, http.MethodPost, "/api/users",
+		`{"email":"paused@example.com","password":"correct horse","status":"paused"}`, authHeader(owner)); w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status: status = %d, want 400", w.Code)
+	}
+	if w := do(t, h, http.MethodPost, "/api/auth/login",
+		`{"email":"paused@example.com","password":"correct horse"}`, nil); w.Code != http.StatusUnauthorized {
+		t.Fatalf("a rejected create must not leave an account: status = %d, want 401", w.Code)
+	}
+	if w := do(t, h, http.MethodPost, "/api/users",
+		`{"email":"paused@example.com","password":"correct horse"}`, authHeader(owner)); w.Code != http.StatusCreated {
+		t.Fatalf("the address must still be free: status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
 // TestHealthzReportsAuthMode keeps the /healthz contract stable for the console
 // and for operators debugging a login loop.
 func TestHealthzReportsAuthMode(t *testing.T) {

@@ -4,6 +4,7 @@ import { useAuthStore, PERMISSIONS } from '../lib/auth-store.js'
 import { useHubStore } from '../lib/store.js'
 import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { errorMessage } from '../lib/errors.js'
+import { userFieldErrors } from '../lib/user-form.js'
 import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
 import UnsavedPrompt from '../components/UnsavedPrompt.vue'
 import { KeyRound, Plus, Shield, Trash2, UserPlus, Users, DatabaseBackup } from 'lucide-vue-next'
@@ -36,6 +37,27 @@ const form = reactive({
 })
 
 const grantForm = reactive({ resourceId: '', principalKind: 'user', principalId: '', level: 'read' })
+
+// Field level problems the drawer can name itself. The values are machine codes
+// - the same ones the server returns - so both paths render identical copy from
+// errors-copy.js and nothing here hardcodes prose.
+const fieldErrors = reactive({ email: '', password: '' })
+
+function clearFieldErrors() {
+  fieldErrors.email = ''
+  fieldErrors.password = ''
+}
+
+// Validates everything the client can judge before the request goes out, so a
+// rejected save names every bad field at once instead of one round trip per rule.
+function validateUser() {
+  // An empty password box while editing means "keep the current one"; a password
+  // that was typed still has to pass the rule the server enforces.
+  const errors = userFieldErrors(form, { keepPassword: editing.value !== null && form.password === '' })
+  fieldErrors.email = errors.email
+  fieldErrors.password = errors.password
+  return !errors.email && !errors.password
+}
 
 const errorText = computed(() => errorMessage(auth.errorCode))
 
@@ -124,6 +146,10 @@ function resetMatrix() {
 
 function openCreate() {
   editing.value = null
+  // An error left over from a previous save belongs to that attempt, not this
+  // one; the drawer would otherwise open already shouting about it.
+  auth.clearError()
+  clearFieldErrors()
   Object.assign(form, { id: '', email: '', name: '', password: '', status: 'active', roles: [], groups: [] })
   baseline.value = snapshot(form)
   drawerOpen.value = true
@@ -131,6 +157,8 @@ function openCreate() {
 
 function openEdit(user) {
   editing.value = user
+  auth.clearError()
+  clearFieldErrors()
   Object.assign(form, {
     id: user.id,
     email: user.email,
@@ -180,6 +208,8 @@ async function saveAndClose() {
 }
 
 async function submitUser() {
+  auth.clearError()
+  if (!validateUser()) return
   const payload = {
     email: form.email,
     name: form.name,
@@ -191,7 +221,18 @@ async function submitUser() {
   const ok = editing.value
     ? await auth.updateUser(editing.value.id, payload)
     : await auth.createUser({ ...payload, password: form.password })
-  if (ok) closeDrawer()
+  if (ok) {
+    closeDrawer()
+    return
+  }
+  // The server is the final judge: move its verdict next to the field it is
+  // about (an address already taken, a password it still refuses) and leave
+  // everything else in the banner - a role deleted since the drawer opened, a
+  // request the API rejected outright.
+  const code = auth.errorCode
+  if (code === 'invalid_email' || code === 'email_taken') fieldErrors.email = code
+  else if (code === 'weak_password') fieldErrors.password = code
+  if (fieldErrors.email || fieldErrors.password) auth.clearError()
 }
 
 async function remove(user) {
@@ -479,14 +520,28 @@ watch(query, (value) => {
 
     <!-- ---------- user drawer ---------- -->
     <div v-if="drawerOpen" class="drawer-backdrop" @click.self="requestClose">
-      <form class="drawer card" @submit.prevent="submitUser">
+      <!-- novalidate: the browser's own bubbles are neither localised by the
+           console nor able to name more than one field at a time, so validation
+           is ours (validateUser) and the messages come from errors-copy. -->
+      <form class="drawer card" novalidate @submit.prevent="submitUser">
         <div class="page-head">
           <h2>{{ t('drawerTitle') }}</h2>
         </div>
 
         <div class="field">
           <label for="user-email">{{ t('fieldEmail') }}</label>
-          <input id="user-email" v-model="form.email" type="email" required :aria-label="t('fieldEmail')" />
+          <input
+            id="user-email"
+            v-model="form.email"
+            type="email"
+            :aria-label="t('fieldEmail')"
+            :aria-invalid="Boolean(fieldErrors.email)"
+            :aria-describedby="fieldErrors.email ? 'user-email-error' : undefined"
+            @input="fieldErrors.email = ''"
+          />
+          <span v-if="fieldErrors.email" id="user-email-error" class="field-error">
+            {{ errorMessage(fieldErrors.email) }}
+          </span>
         </div>
         <div class="field">
           <label for="user-name">{{ t('fieldName') }}</label>
@@ -500,8 +555,16 @@ watch(query, (value) => {
             type="password"
             autocomplete="new-password"
             :aria-label="t('fieldPassword')"
+            :aria-invalid="Boolean(fieldErrors.password)"
+            :aria-describedby="fieldErrors.password ? 'user-password-error' : undefined"
+            @input="fieldErrors.password = ''"
           />
-          <span v-if="editing" class="muted">{{ t('passwordHint') }}</span>
+          <!-- Create has no existing password to keep, so the hint has to state
+               the rule the server actually enforces (weak_password). -->
+          <span class="muted">{{ editing ? t('passwordHint') : account.t('passwordHint') }}</span>
+          <span v-if="fieldErrors.password" id="user-password-error" class="field-error">
+            {{ errorMessage(fieldErrors.password) }}
+          </span>
         </div>
         <div class="field">
           <label for="user-status">{{ t('fieldStatus') }}</label>
@@ -545,6 +608,10 @@ watch(query, (value) => {
             <span v-if="!auth.groupsCatalogue.length" class="muted">—</span>
           </div>
         </div>
+
+        <!-- The page level banner sits behind the backdrop, so a rejected save
+             has to say what went wrong here, next to the button that failed. -->
+        <p v-if="auth.errorCode" class="error-line">{{ errorText }}</p>
 
         <div class="drawer-actions">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
@@ -613,6 +680,15 @@ watch(query, (value) => {
 .field-label {
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* Field level validation. The palette is monochrome, so the mark is a rule and
+   full-brightness text rather than a colour. */
+.field-error {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--text-1);
+  color: var(--text-1);
+  font-size: 11.5px;
 }
 
 .chip-picker {

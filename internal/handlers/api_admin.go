@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
@@ -79,6 +80,7 @@ func (d Deps) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Email    string   `json:"email"`
 		Password string   `json:"password"`
 		Name     string   `json:"name"`
+		Status   string   `json:"status"`
 		Roles    []string `json:"roles"`
 		Groups   []string `json:"groups"`
 	}
@@ -86,17 +88,42 @@ func (d Deps) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteErr(w, err)
 		return
 	}
+	// Checked before anything is written: a status the API cannot honour must
+	// not leave an account behind under an address the caller can no longer use.
+	switch body.Status {
+	case "", auth.StatusActive, auth.StatusDisabled:
+	default:
+		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeBadRequest)
+		return
+	}
 	u, err := d.Auth.Register(r.Context(), body.Email, body.Password, body.Name)
 	if err != nil {
 		writeAuthErr(w, err)
 		return
+	}
+	// Pre-provisioning: the account exists but cannot sign in until an
+	// administrator enables it. Register always produces an active account, so
+	// this is a second write rather than an option on the first, and it runs
+	// before the membership so a failure leaves nothing half-assigned.
+	if body.Status == auth.StatusDisabled {
+		store, ok := d.userStore()
+		if !ok {
+			httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
+			return
+		}
+		now := time.Now().UTC()
+		u.Status, u.DisabledAt = auth.StatusDisabled, &now
+		if err := store.Update(r.Context(), u); err != nil {
+			writeAuthErr(w, err)
+			return
+		}
 	}
 	if err := d.setMembership(r, u.ID, body.Roles, body.Groups); err != nil {
 		httputil.WriteErr(w, err)
 		return
 	}
 	u.Roles, u.Groups = body.Roles, body.Groups
-	d.Log.Info("handler: user created", "user", u.ID, "by", PrincipalFrom(r).UserID)
+	d.Log.Info("handler: user created", "user", u.ID, "status", u.Status, "by", PrincipalFrom(r).UserID)
 	httputil.WriteJSON(w, http.StatusCreated, map[string]any{"user": userView(u)})
 }
 
