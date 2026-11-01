@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -113,8 +114,38 @@ func (d Deps) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeAuthErr(w, err)
 		return
 	}
+	if d.grantSelfRegistrationRole(r.Context(), u) {
+		u.Roles = []string{authz.RoleViewer}
+	}
 	d.Log.Info("handler: user registered", "user", u.ID)
 	httputil.WriteJSON(w, http.StatusCreated, map[string]any{"user": userView(u)})
+}
+
+// grantSelfRegistrationRole gives a brand-new self-service account the read-only
+// role. Registration is open to anyone who can reach the login page, so the
+// account must start with the smallest useful permission set — read the
+// catalogue and the tasks it can see, write nothing — and an administrator
+// widens it afterwards. Accounts an administrator creates through POST
+// /api/users are untouched: they get exactly the roles that were asked for.
+//
+// The account already exists by the time this runs, so a failure is reported
+// and reported only: failing the request would leave the address taken and the
+// caller unable to retry, while the admin screen can always set the membership
+// by hand.
+func (d Deps) grantSelfRegistrationRole(ctx context.Context, u *auth.User) bool {
+	if u == nil || u.IsOwner {
+		// The owner holds every permission implicitly; a viewer row would only
+		// misdescribe it.
+		return false
+	}
+	if d.Authz == nil || d.Authz.Store() == nil {
+		return false
+	}
+	if err := d.Authz.Store().SetUserRoles(ctx, u.ID, []string{authz.RoleViewer}); err != nil {
+		d.Log.Error("handler: grant default role", "user", u.ID, "role", authz.RoleViewer, "error", err)
+		return false
+	}
+	return true
 }
 
 func (d Deps) handleLogin(w http.ResponseWriter, r *http.Request) {

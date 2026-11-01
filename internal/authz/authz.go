@@ -105,6 +105,17 @@ const (
 	LevelWrite     = "write"
 )
 
+// Ids of the built-in roles. They are seeded by migration 006 and flagged
+// builtin, so the console can rename their permissions but never delete them.
+// Code that grants a role without an administrator asking (self-service
+// registration) refers to these constants instead of copying the string, so a
+// rename in the migration is a compile error here rather than a silent miss.
+const (
+	RoleViewer   = "role-viewer"
+	RoleOperator = "role-operator"
+	RoleAdmin    = "role-admin"
+)
+
 // Principal is the authenticated identity carried in the request context. It is
 // resolved once per request: permissions, groups and roles are read together so
 // handlers never fan out per check.

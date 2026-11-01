@@ -510,19 +510,40 @@ watch(query, (value) => {
             <option value="disabled">{{ t('statusDisabled') }}</option>
           </select>
         </div>
+        <!-- Membership is rendered as ticked chips, not a native multi-select:
+             a listbox always lists the whole catalogue, so an account with no
+             role looked exactly like one holding every role. Here an assigned
+             role is a box with a tick in it, and an unassigned one is an empty
+             box. -->
         <div class="field">
-          <label for="user-roles">{{ t('fieldRoles') }}</label>
-          <select id="user-roles" v-model="form.roles" multiple :aria-label="t('fieldRoles')">
-            <option v-for="role in auth.rolesCatalogue" :key="role.id" :value="role.id">{{ role.name }}</option>
-          </select>
+          <span class="field-label">{{ t('fieldRoles') }}</span>
+          <div class="chip-picker" role="group" :aria-label="t('fieldRoles')">
+            <label
+              v-for="role in auth.rolesCatalogue"
+              :key="role.id"
+              class="chip chip-pick"
+              :class="{ 'chip-pick-on': form.roles.includes(role.id) }"
+            >
+              <input v-model="form.roles" type="checkbox" :value="role.id" />
+              <span>{{ role.name }}</span>
+            </label>
+            <span v-if="!auth.rolesCatalogue.length" class="muted">—</span>
+          </div>
         </div>
         <div class="field">
-          <label for="user-groups">{{ t('fieldGroups') }}</label>
-          <select id="user-groups" v-model="form.groups" multiple :aria-label="t('fieldGroups')">
-            <option v-for="group in auth.groupsCatalogue" :key="group.id" :value="group.id">
-              {{ group.name }}
-            </option>
-          </select>
+          <span class="field-label">{{ t('fieldGroups') }}</span>
+          <div class="chip-picker" role="group" :aria-label="t('fieldGroups')">
+            <label
+              v-for="group in auth.groupsCatalogue"
+              :key="group.id"
+              class="chip chip-pick"
+              :class="{ 'chip-pick-on': form.groups.includes(group.id) }"
+            >
+              <input v-model="form.groups" type="checkbox" :value="group.id" />
+              <span>{{ group.name }}</span>
+            </label>
+            <span v-if="!auth.groupsCatalogue.length" class="muted">—</span>
+          </div>
         </div>
 
         <div class="drawer-actions">
@@ -586,6 +607,47 @@ watch(query, (value) => {
 .admin-foot {
   margin-block-start: 12px;
   font-size: 12px;
+}
+
+/* ---------- membership picker ---------- */
+.field-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.chip-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-pick {
+  cursor: pointer;
+  border-color: var(--stroke-1);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.chip-pick input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--text-1);
+}
+
+.chip-pick:hover {
+  border-color: var(--stroke-2);
+}
+
+/* A ticked chip is filled and bright: assignment is the one thing this control
+   must never leave ambiguous. */
+.chip-pick-on {
+  border-color: var(--stroke-3);
+  background: var(--accent-soft);
+  color: var(--text-1);
 }
 
 /* Admin table styles (`.admin-table` and friends, plus the narrow-screen

@@ -253,6 +253,13 @@ func (s *memAuthz) PermissionsOfRoles(_ context.Context, roleIDs []string) ([]st
 	return out, nil
 }
 
+func (s *memAuthz) SetUserRoles(_ context.Context, userID string, roleIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.roles[userID] = append([]string{}, roleIDs...)
+	return nil
+}
+
 func (s *memAuthz) GrantsForResource(_ context.Context, resourceID string) ([]authz.Grant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -458,6 +465,75 @@ func TestRegisterThenLogin(t *testing.T) {
 	// A wrong password must not produce a session.
 	if w := do(t, h, http.MethodPost, "/api/auth/login", `{"email":"owner@example.com","password":"wrong password"}`, nil); w.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong password: status = %d, want 401", w.Code)
+	}
+}
+
+// TestSelfRegistrationStartsWithViewer pins what an open sign-up lands on: the
+// account may read what its role allows and nothing more, so leaving
+// registration open is safe. An administrator-created account is deliberately
+// excluded — it gets exactly the roles the administrator asked for, which is
+// often none until the first review.
+func TestSelfRegistrationStartsWithViewer(t *testing.T) {
+	d, az := authTestDeps(t, "", &registry.Entry{Kind: registry.KindModel, Name: "m1"})
+	h := Register(d)
+
+	// The first account owns the instance and already holds every permission:
+	// tagging it with the viewer role would misdescribe it.
+	do(t, h, http.MethodPost, "/api/auth/register", `{"email":"owner@example.com","password":"correct horse"}`, nil)
+	owner := sessionOf(t, h, "owner@example.com", "correct horse")
+
+	w := do(t, h, http.MethodPost, "/api/auth/register",
+		`{"email":"newbie@example.com","password":"correct horse","name":"N"}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("register: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		User struct {
+			Roles []string `json:"roles"`
+		} `json:"user"`
+	}
+	decodeJSON(t, w, &created)
+	if len(created.User.Roles) != 1 || created.User.Roles[0] != authz.RoleViewer {
+		t.Fatalf("self-registered roles = %v, want [%s]", created.User.Roles, authz.RoleViewer)
+	}
+
+	// The role is stored, not just echoed: the next request resolves it from the
+	// authorization store, and what it carries is a read grant only.
+	az.mu.Lock()
+	az.rolePerm[authz.RoleViewer] = []string{authz.PermResourcesRead}
+	az.mu.Unlock()
+	newbie := sessionOf(t, h, "newbie@example.com", "correct horse")
+	me := do(t, h, http.MethodGet, "/api/auth/me", "", authHeader(newbie))
+	if me.Code != http.StatusOK {
+		t.Fatalf("me: status = %d", me.Code)
+	}
+	var who struct {
+		User struct {
+			Roles []string `json:"roles"`
+		} `json:"user"`
+	}
+	decodeJSON(t, me, &who)
+	if len(who.User.Roles) != 1 || who.User.Roles[0] != authz.RoleViewer {
+		t.Fatalf("resolved roles = %v, want [%s]", who.User.Roles, authz.RoleViewer)
+	}
+	if w := do(t, h, http.MethodGet, "/api/resources", "", authHeader(newbie)); w.Code != http.StatusOK {
+		t.Fatalf("reading with viewer: status = %d, want 200", w.Code)
+	}
+	if w := do(t, h, http.MethodPost, "/api/resources", `{"kind":"model","name":"x"}`, authHeader(newbie)); w.Code != http.StatusForbidden {
+		t.Fatalf("writing with viewer: status = %d, want 403", w.Code)
+	}
+
+	// An account the administrator creates stays role-less until they assign
+	// one, even though it is created through the same service.
+	if w := do(t, h, http.MethodPost, "/api/users",
+		`{"email":"byadmin@example.com","password":"correct horse"}`, authHeader(owner)); w.Code != http.StatusCreated {
+		t.Fatalf("admin create: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	byAdmin := sessionOf(t, h, "byadmin@example.com", "correct horse")
+	me = do(t, h, http.MethodGet, "/api/auth/me", "", authHeader(byAdmin))
+	decodeJSON(t, me, &who)
+	if len(who.User.Roles) != 0 {
+		t.Fatalf("admin-created roles = %v, want none", who.User.Roles)
 	}
 }
 
