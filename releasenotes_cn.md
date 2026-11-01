@@ -70,6 +70,8 @@ Agent 调用。
 - **error.message 即 code 字符串**：不含空格与自然语言，多语言 100% 由前端 copy 层承担。
 - **适配器码**：`unknown_kind` / `cli_command_not_allowed` / `adapter_timeout` /
   `resource_unreachable`。
+- **状态映射穷举**：`WriteErr` 是「码 → 状态」的唯一出口，而用例会解析 `json.go` 证明每个已声明的
+  `Code` 都钉住了状态——漏登记在构建期就失败，而不是运行时悄悄回 500。
 
 ---
 
@@ -376,7 +378,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `DATABASE_URL` 门控。
 - **覆盖率**：`make test-cover` 跑 `-coverprofile` 并打印 `go tool cover -func`。
   带库时：`a2a` 97.8%、`model` 93.9%、`registry` 89.7%、`authz` 87.9%、`hub` 87.8%、
-  `adapter` 83.3%、`config` 80.3%、`httputil` 80.2%、`handlers` 68.7%、`backup` 58.2%、
+  `adapter` 83.3%、`config` 80.3%、`httputil` 91.5%、`handlers` 68.7%、`backup` 58.2%、
   `auth` 56.9%、`store` 22.6%（未设 `DATABASE_URL` 时它的用例 skip，数字不代表真实覆盖）。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
@@ -389,6 +391,16 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （本人 vs 全部）、创建时范围钳制、管理守卫（403 / 404 / 400）、更新与吊销，以及
   bearer 密钥认证；`tests/apikey_integration_test.go` 以 `DATABASE_URL` 门控 PostgreSQL
   路径（迁移、令牌哈希查找、范围往返、吊销 + 审计行）。
+- **异常路径护栏**：新增用例开始钉住过去会「静默降级」的失败面。`internal/httputil/httputil_test.go`
+  断言**每个**已声明错误码的状态，并用 `go/parser` 解析 `json.go`，因此新码漏登记会直接失败，
+  而不是运行时回 500；`internal/handlers/wrap_test.go` 钉住 panic → JSON 错误与 HSTS / 安全头；
+  `internal/auth/apikey_test.go` 覆盖令牌生成、生效窗口、范围钳制、principal 优先于会话以及
+  secure-cookie 告警；`internal/handlers/api_admin_lists_test.go` 覆盖管理端列表端点与授权资源过滤；
+  `internal/router/bus_test.go` + `internal/router/service_test.go` 驱动调度门面
+  （inject / run / cancel / hand back / bind / policies / stream + replay）与事件总线
+  （主题过滤、慢消费者、关闭、nil 安全）；`internal/netutil/ssrf_test.go` 钉住 SSRF 护栏
+  （loopback、可信私网、拒绝跟随重定向）；`internal/handlers/speech_test.go` 把空片段（400）
+  与超限片段（413）拆成两条用例。
 - **脚本化接口测试**：`scripts/test-api.sh` 新增治理段落——建命名空间、记录走
   `draft → pending → approved`（并验证 `draft → approved` 被拒、草稿不进可发现列表）、
   去重启用键、fixture 源同步两次（首轮导入、次轮刷新）。对着运行中实例：**167 通过、
@@ -457,7 +469,9 @@ cp .env.example .env       # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 - **Speech**：`POST /api/threads/{id}/audio` 上传语音片段，服务端离线转写（STT mock）后作为
   `origin=voice` 消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact。受
   `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制；迁移 `015_thread_origin.sql` 为
-  `thread_messages` 增加 `origin` 列。
+  `thread_messages` 增加 `origin` 列。片段超过体积上限时返回 **413 `audio_too_large`**（而非
+  `400 audio_unsupported`），控制台因此能区分「录短一点」与「这个格式永远不行」；上限在
+  multipart 填缓冲阶段与读取文件阶段都会拦截——`http.MaxBytesReader` 实际是在前一阶段触发的。
 - **Agent 能力端点（F10–F16 脚手架）**：在 Persona 之外，agenthub 新增 agent 能力面的首片——
   agent 沙箱、主动调度与 mock RAG。全部为确定性脚手架：深层能力（真实 browser / shell / screen
   控制、真实调度引擎、向量检索）统一标 `TODO(real)`，留待后续里程碑。不新增角色或权限码，端点复用

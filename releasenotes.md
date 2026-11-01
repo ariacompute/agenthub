@@ -86,6 +86,9 @@ protocol can discover, invoke, and take over task orchestration.
   localization is 100% the frontend copy layer's job.
 - **Adapter codes**: `unknown_kind` / `cli_command_not_allowed` / `adapter_timeout` /
   `resource_unreachable`.
+- **Exhaustive status mapping**: `WriteErr` is the single place a code becomes a status, and
+  a test parses `json.go` to prove every declared `Code` has a pinned status — a forgotten
+  mapping fails the build instead of answering 500 at runtime.
 
 ---
 
@@ -480,7 +483,7 @@ screen and a visual inspector for the A2A contract.
   `DATABASE_URL`.
 - **Coverage**: `make test-cover` runs `-coverprofile` and prints
   `go tool cover -func`. With a database attached, `a2a` 97.8%, `model` 93.9%, `registry`
-  89.7%, `hub` 87.8%, `authz` 87.9%, `adapter` 83.3%, `config` 80.3%, `httputil` 80.2%,
+  89.7%, `hub` 87.8%, `authz` 87.9%, `adapter` 83.3%, `config` 80.3%, `httputil` 91.5%,
   `handlers` 68.7%, `backup` 58.2%, `auth` 56.9%, `store` 22.6% (its cases skip without
   `DATABASE_URL`, so that number says nothing until one is set).
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
@@ -497,6 +500,20 @@ screen and a visual inspector for the A2A contract.
   bearer-key authentication against an in-memory key store; `tests/apikey_integration_test.go`
   gates the PostgreSQL path (migration, token-hash lookup, scopes round trip, revoke +
   audit row) on `DATABASE_URL`.
+- **Guards beyond the happy path**: the tests now pin the failure modes that used to be
+  silent. `internal/httputil/httputil_test.go` asserts the status of **every** declared
+  error code and parses `json.go` with `go/parser`, so a code added without a pinned status
+  fails the suite instead of degrading to 500; `internal/handlers/wrap_test.go` pins the
+  panic → JSON error path plus the HSTS / security headers; `internal/auth/apikey_test.go`
+  covers token minting, the active window, scope clamping, principal precedence over the
+  session and the secure-cookie warning; `internal/handlers/api_admin_lists_test.go` covers
+  the admin list endpoints and the grant resource filter;
+  `internal/router/bus_test.go` + `internal/router/service_test.go` drive the scheduler
+  facade (inject / run / cancel / hand back / bind / policies / stream + replay) and the
+  event bus (subject filtering, slow subscribers, close, nil safety);
+  `internal/netutil/ssrf_test.go` pins the SSRF guards (loopback, trusted private hosts,
+  redirect refusal); `internal/handlers/speech_test.go` separates an empty clip (400) from
+  an oversized one (413).
 - **Scripted API test**: `scripts/test-api.sh` grew a governance section —
   creating a namespace, watching a record go `draft → pending → approved` (and proving
   that `draft → approved` is refused and a draft stays out of the discoverable list), the
@@ -579,6 +596,10 @@ roles or groups.
   mock), delegates it into the thread as an `origin=voice` message, and attaches the agent's
   reply as a TTS audio artifact. Gated by `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES`;
   migration `015_thread_origin.sql` adds the `origin` column to `thread_messages`.
+  A clip over the cap answers **413 `audio_too_large`** rather than `400 audio_unsupported`,
+  so the console can tell "record something shorter" from "that format will never work";
+  the cap is enforced both while the multipart reader fills its buffer and while the file
+  part is read, which is where `http.MaxBytesReader` actually trips.
 - **Agent capability endpoints (F10–F16 scaffold)**: beyond Persona, agenthub now ships the
   first slice of the agent-capability surface — agent sandboxes, proactive schedules and
   mock RAG. All are deterministic scaffolds: the deep behaviours (real browser / shell /
