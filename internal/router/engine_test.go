@@ -3,16 +3,31 @@ package router
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
 // clock is a hand-cranked time source: the tests drive the beat instead of
-// sleeping through it.
-type clock struct{ at time.Time }
+// sleeping through it. The mutex is not decoration: a beat runs in its own
+// goroutine and reads the clock while the test body cranks it, which -race
+// reports as a data race on an otherwise correct test.
+type clock struct {
+	mu sync.Mutex
+	at time.Time
+}
 
-func (c *clock) now() time.Time          { return c.at }
-func (c *clock) advance(d time.Duration) { c.at = c.at.Add(d) }
+func (c *clock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
 
 func newTestEngine(t *testing.T) (*Engine, *MemoryStore, *clock) {
 	t.Helper()

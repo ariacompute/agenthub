@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,9 +55,16 @@ func TestRunnerBranch(t *testing.T) {
 
 func TestRunnerParallel(t *testing.T) {
 	store := NewTaskStore()
-	var got []string
+	// Parallel members invoke concurrently, so the recorder needs a lock:
+	// an unsynchronised append is a data race in the test, not in the runner.
+	var (
+		mu  sync.Mutex
+		got []string
+	)
 	inv := func(ctx context.Context, taskID, selector, prompt string) (Outcome, error) {
+		mu.Lock()
 		got = append(got, selector)
+		mu.Unlock()
 		return Outcome{ResourceID: selector, Text: "out:" + selector}, nil
 	}
 	r := NewRunner(store, nil, inv, 4)
