@@ -1,12 +1,15 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"agenthub/internal/registry"
+	"agenthub/internal/sandbox"
 )
 
 // TestVersionIsStampable pins the contract the Makefile and Dockerfile rely on:
@@ -219,8 +222,11 @@ func TestValidateRejectsBadInput(t *testing.T) {
 		name string
 		mut  func(*Config)
 	}{
+		{"empty port", func(c *Config) { c.HTTPPort = "" }},
 		{"bad port", func(c *Config) { c.HTTPPort = "not-a-port" }},
+		{"out of range port", func(c *Config) { c.HTTPPort = "70000" }},
 		{"bad env", func(c *Config) { c.Env = "whatever" }},
+		{"zero event buffer", func(c *Config) { c.EventBuffer = 0 }},
 		{"zero parallel", func(c *Config) { c.MaxParallel = 0 }},
 		{"negative timeout", func(c *Config) { c.CLITimeout = -time.Second }},
 		{"zero output cap", func(c *Config) { c.MaxOutputBytes = 0 }},
@@ -239,6 +245,20 @@ func TestValidateRejectsBadInput(t *testing.T) {
 			c.RegistrySyncInterval = -time.Minute
 		}},
 		{"unknown model router mode", func(c *Config) { c.ModelRouterMode = "anthropic" }},
+		{"unknown speech mode", func(c *Config) { c.SpeechMode = "elevenlabs" }},
+		{"audio cap below one mebibyte", func(c *Config) { c.AudioMaxBytes = 1024 }},
+		{"short push secret", func(c *Config) { c.PushSecret = "too-short" }},
+		{"prod with a weak encryption key", func(c *Config) {
+			c.Env = "prod"
+			c.BootstrapAdminEmail = "admin@example.com"
+			c.EncryptionKey = "short"
+		}},
+		{"prod with demo resources", func(c *Config) {
+			c.Env = "prod"
+			c.BootstrapAdminEmail = "admin@example.com"
+			c.EncryptionKey = strings.Repeat("k", 32)
+			c.SeedDemo = true
+		}},
 		{"backup on with an invalid schedule", func(c *Config) {
 			c.BackupDir = "/var/lib/agenthub/backups"
 			c.BackupMode = "whenever"
@@ -250,32 +270,32 @@ func TestValidateRejectsBadInput(t *testing.T) {
 			c.RouterInterval = 0
 		}},
 		{"router with an absurd batch", func(c *Config) {
-			c.RouterEnabled = true
-			c.RouterInterval = time.Second
+			enableRouter(c)
 			c.RouterBatchMax = 1000
 		}},
 		{"router with no ticket slots", func(c *Config) {
-			c.RouterEnabled = true
-			c.RouterInterval = time.Second
+			enableRouter(c)
 			c.RouterMaxTickets = 0
 		}},
+		{"router with absurd retries", func(c *Config) {
+			enableRouter(c)
+			c.RouterMaxAttempts = 11
+		}},
+		{"router with no retention window", func(c *Config) {
+			enableRouter(c)
+			c.RouterTriggerTTL = 0
+		}},
+		{"router with no prune cadence", func(c *Config) {
+			enableRouter(c)
+			c.RouterPruneInterval = 0
+		}},
 		{"router with an unknown assess mode", func(c *Config) {
-			c.RouterEnabled = true
-			c.RouterInterval = time.Second
+			enableRouter(c)
 			c.RouterAssessMode = "oracle"
 		}},
 	}
 	for _, c := range cases {
-		cfg := &Config{
-			HTTPPort:        "3500",
-			Env:             "dev",
-			MaxParallel:     8,
-			CLITimeout:      time.Second,
-			MaxOutputBytes:  1024,
-			EventBuffer:     64,
-			DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub",
-			PushRecordLimit: 100,
-		}
+		cfg := validBaseConfig()
 		c.mut(cfg)
 		if err := cfg.Validate(); err == nil {
 			t.Fatalf("%s: expected validation error", c.name)
@@ -410,5 +430,234 @@ func TestLoadDotEnvDoesNotOverride(t *testing.T) {
 	}
 	if got := os.Getenv("AGENTHUB_TEST_KEY"); got != "already-set" {
 		t.Fatalf("existing env was overwritten: %q", got)
+	}
+}
+
+// unsetEnv blanks a variable and clears it afterwards so the case cannot leak
+// into a sibling test through the shared process environment.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unsetenv %s: %v", key, err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv(key) })
+}
+
+func TestEnvHelpersReadRealValues(t *testing.T) {
+	unsetEnv(t, "AGENTHUB_MAX_PARALLEL")
+	if got := envInt("AGENTHUB_MAX_PARALLEL", 4); got != 4 {
+		t.Fatalf("envInt with an unset variable = %d, want the default 4", got)
+	}
+	t.Setenv("AGENTHUB_MAX_PARALLEL", "12")
+	if got := envInt("AGENTHUB_MAX_PARALLEL", 4); got != 12 {
+		t.Fatalf("envInt = %d, want 12", got)
+	}
+	// A list made only of separators trims down to nothing and must fall back
+	// instead of yielding an empty slice that would silently deny everything.
+	t.Setenv("AGENTHUB_CLI_ALLOWLIST", ", ,")
+	if got := envList("AGENTHUB_CLI_ALLOWLIST", []string{"default"}); len(got) != 1 || got[0] != "default" {
+		t.Fatalf("separator-only list should fall back, got %v", got)
+	}
+	unsetEnv(t, "AGENTHUB_CLI_ALLOWLIST")
+	if got := envList("AGENTHUB_CLI_ALLOWLIST", []string{"default"}); len(got) != 1 || got[0] != "default" {
+		t.Fatalf("unset list should fall back, got %v", got)
+	}
+}
+
+func sandboxSpecsJSON(t *testing.T, specs []sandbox.DeclarativeSpec) string {
+	t.Helper()
+	b, err := json.Marshal(specs)
+	if err != nil {
+		t.Fatalf("marshal specs: %v", err)
+	}
+	return string(b)
+}
+
+// A declarative template is the only way an operator adds a sandbox tool, so the
+// loader pins the minimum shape before the provider itself validates the argv.
+func TestParseSandboxProvidersAcceptsTemplate(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "sbx")
+	raw := sandboxSpecsJSON(t, []sandbox.DeclarativeSpec{{
+		Name:     "sbx",
+		Layer:    "process",
+		Binary:   bin,
+		ExecArgs: [][]string{{"run"}},
+	}})
+	specs, err := ParseSandboxProviders(raw)
+	if err != nil {
+		t.Fatalf("ParseSandboxProviders: %v", err)
+	}
+	if len(specs) != 1 || specs[0].Name != "sbx" || specs[0].Binary != bin {
+		t.Fatalf("specs = %+v", specs)
+	}
+}
+
+func TestParseSandboxProvidersEmptyIsOff(t *testing.T) {
+	for _, raw := range []string{"", "   ", "\n\t "} {
+		specs, err := ParseSandboxProviders(raw)
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", raw, err)
+		}
+		if specs != nil {
+			t.Fatalf("%q: specs = %v, want nil", raw, specs)
+		}
+	}
+}
+
+func TestParseSandboxProvidersRejects(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "sbx")
+	valid := func() sandbox.DeclarativeSpec {
+		return sandbox.DeclarativeSpec{Name: "sbx", Binary: abs, ExecArgs: [][]string{{"run"}}}
+	}
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"broken json", "{"},
+		{"object instead of array", `{"name":"sbx"}`},
+		{"missing name", sandboxSpecsJSON(t, []sandbox.DeclarativeSpec{func() sandbox.DeclarativeSpec {
+			s := valid()
+			s.Name = "  "
+			return s
+		}()})},
+		{"relative binary", sandboxSpecsJSON(t, []sandbox.DeclarativeSpec{func() sandbox.DeclarativeSpec {
+			s := valid()
+			s.Binary = "sbx"
+			return s
+		}()})},
+		{"no exec args", sandboxSpecsJSON(t, []sandbox.DeclarativeSpec{func() sandbox.DeclarativeSpec {
+			s := valid()
+			s.ExecArgs = nil
+			return s
+		}()})},
+		{"three exec args", sandboxSpecsJSON(t, []sandbox.DeclarativeSpec{func() sandbox.DeclarativeSpec {
+			s := valid()
+			s.ExecArgs = [][]string{{"a"}, {"b"}, {"c"}}
+			return s
+		}()})},
+	}
+	for _, c := range cases {
+		if _, err := ParseSandboxProviders(c.raw); err == nil {
+			t.Fatalf("%s: expected an error", c.name)
+		}
+	}
+}
+
+// validBaseConfig is the smallest configuration that passes Validate. Tests that
+// pin one specific rejection have to start from something valid, otherwise the
+// first check fires and the case under test never runs.
+func validBaseConfig() *Config {
+	return &Config{
+		HTTPPort:        "3500",
+		Env:             "dev",
+		MaxParallel:     8,
+		CLITimeout:      time.Second,
+		MaxOutputBytes:  1024,
+		EventBuffer:     64,
+		DatabaseURL:     "postgres://agenthub:agenthub@localhost:5434/agenthub",
+		PushRecordLimit: 100,
+		SessionTTL:      time.Hour,
+	}
+}
+
+// enableRouter fills every knob the scheduler's block checks, so a case can then
+// break exactly one of them and be sure that is the check that fires.
+func enableRouter(c *Config) {
+	c.RouterEnabled = true
+	c.RouterInterval = time.Second
+	c.RouterBatchMax = 20
+	c.RouterMaxTickets = 8
+	c.RouterMaxAttempts = 3
+	c.RouterTriggerTTL = time.Hour
+	c.RouterPruneInterval = time.Minute
+}
+
+// A malformed template is a startup failure named after the variable, not a
+// config that silently runs without the provider the operator asked for.
+func TestLoadRejectsBadSandboxProviders(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub")
+	t.Setenv("AGENTHUB_SANDBOX_PROVIDERS", `{"name":"sbx"}`)
+	if _, err := Load(); err == nil {
+		t.Fatal("Load must reject a malformed AGENTHUB_SANDBOX_PROVIDERS")
+	}
+}
+
+// The sandbox block is only enforced when the control plane is switched on, and
+// every bound it checks maps to a real failure mode: a lease that outlives its
+// sweep, a ceiling below the per-owner cap, a poll window that hangs a node.
+func TestValidateSandboxBlock(t *testing.T) {
+	sandboxConfig := func() *Config {
+		c := validBaseConfig()
+		c.SandboxEnabled = true
+		c.SandboxProvider = sandbox.ProviderDocker
+		c.SandboxIdleTTL = time.Minute
+		c.SandboxMaxTTL = 10 * time.Minute
+		c.SandboxMaxPerOwner = 4
+		c.SandboxMaxTotal = 16
+		c.SandboxNodePollTimeout = 30 * time.Second
+		c.SandboxSweepInterval = time.Minute
+		return c
+	}
+
+	if err := sandboxConfig().Validate(); err != nil {
+		t.Fatalf("valid sandbox config rejected: %v", err)
+	}
+
+	// An unset provider defaults to docker instead of being rejected.
+	c := sandboxConfig()
+	c.SandboxProvider = ""
+	if err := c.Validate(); err != nil {
+		t.Fatalf("unset provider must default: %v", err)
+	}
+	if c.SandboxProvider != sandbox.ProviderDocker {
+		t.Fatalf("provider = %q, want the docker default", c.SandboxProvider)
+	}
+
+	cases := []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"zero idle ttl", func(c *Config) { c.SandboxIdleTTL = 0 }},
+		{"zero max ttl", func(c *Config) { c.SandboxMaxTTL = 0 }},
+		{"max ttl below idle ttl", func(c *Config) { c.SandboxMaxTTL = 30 * time.Second }},
+		{"zero per owner", func(c *Config) { c.SandboxMaxPerOwner = 0 }},
+		{"per owner above the cap", func(c *Config) { c.SandboxMaxPerOwner = 65 }},
+		{"total below per owner", func(c *Config) { c.SandboxMaxTotal = 3 }},
+		{"total above the cap", func(c *Config) { c.SandboxMaxTotal = 300 }},
+		{"zero node poll timeout", func(c *Config) { c.SandboxNodePollTimeout = 0 }},
+		{"node poll timeout above a minute", func(c *Config) { c.SandboxNodePollTimeout = 90 * time.Second }},
+		{"zero sweep interval", func(c *Config) { c.SandboxSweepInterval = 0 }},
+		{"sweep interval above ten minutes", func(c *Config) { c.SandboxSweepInterval = 11 * time.Minute }},
+		{"sandbox ceiling below the router ticket bound", func(c *Config) {
+			c.RouterEnabled = true
+			c.RouterInterval = time.Second
+			c.RouterBatchMax = 10
+			c.RouterMaxTickets = 32
+			c.RouterMaxAttempts = 3
+			c.RouterTriggerTTL = time.Hour
+			c.RouterPruneInterval = time.Minute
+			c.SandboxMaxTotal = 16
+		}},
+	}
+	for _, tc := range cases {
+		cfg := sandboxConfig()
+		tc.mut(cfg)
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("%s: expected a validation error", tc.name)
+		}
+	}
+}
+
+// The same sandbox block must be ignored while the feature is off: an instance
+// that never leases a sandbox is not misconfigured by zeroed knobs.
+func TestValidateIgnoresSandboxWhenDisabled(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.SandboxEnabled = false
+	cfg.SandboxIdleTTL = 0
+	cfg.SandboxMaxTTL = 0
+	cfg.SandboxMaxPerOwner = 0
+	cfg.SandboxMaxTotal = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("sandbox off must stay valid: %v", err)
 	}
 }
