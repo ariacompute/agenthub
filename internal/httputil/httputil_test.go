@@ -3,8 +3,12 @@ package httputil
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,24 +67,164 @@ func TestWriteJSONAndError(t *testing.T) {
 	}
 }
 
+// declaredCodes parses json.go so the table below cannot fall behind the Code
+// constants. A code that is declared but never pinned here would silently map to
+// 500, and the console would have no stable identifier to localise.
+func declaredCodes(t *testing.T) []Code {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "json.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse json.go: %v", err)
+	}
+	var out []Code
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range value.Names {
+				if !strings.HasPrefix(name.Name, "Code") || i >= len(value.Values) {
+					continue
+				}
+				lit, ok := value.Values[i].(*ast.BasicLit)
+				if !ok {
+					continue
+				}
+				raw, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					t.Fatalf("unquote %s: %v", name.Name, err)
+				}
+				out = append(out, Code(raw))
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no Code constants found: the exhaustiveness guard is no longer reading json.go")
+	}
+	return out
+}
+
 func TestWriteErrMapsCodesToStatus(t *testing.T) {
 	cases := []struct {
 		code   Code
 		status int
 	}{
+		// 400: the caller sent something unusable.
 		{CodeBadRequest, http.StatusBadRequest},
+		{CodeWeakPassword, http.StatusBadRequest},
+		{CodeInvalidEmail, http.StatusBadRequest},
+		{CodeInvalidGrant, http.StatusBadRequest},
+		{CodeUnknownPermission, http.StatusBadRequest},
+		{CodePasswordRequired, http.StatusBadRequest},
+		{CodeBackupScheduleInvalid, http.StatusBadRequest},
+		{CodeRestoreConfirm, http.StatusBadRequest},
+		{CodeAPIKeyNameRequired, http.StatusBadRequest},
+		{CodeAPIKeyInvalidScope, http.StatusBadRequest},
+		{CodeScheduleInvalid, http.StatusBadRequest},
+		{CodeRouterPolicyInvalid, http.StatusBadRequest},
+		// 401: authenticate again, not "you may not".
 		{CodeUnauthorized, http.StatusUnauthorized},
+		{CodeUnauthenticated, http.StatusUnauthorized},
+		{CodeSessionExpired, http.StatusUnauthorized},
+		{CodeInvalidCredentials, http.StatusUnauthorized},
+		{CodeChannelSignatureMissing, http.StatusUnauthorized},
+		{CodeChannelSignatureInvalid, http.StatusUnauthorized},
+		{CodeChannelTimestampExpired, http.StatusUnauthorized},
+		{CodeAPIKeyExpired, http.StatusUnauthorized},
+		{CodeAPIKeyRevoked, http.StatusUnauthorized},
+		// 403: known caller, refused action.
+		{CodeForbidden, http.StatusForbidden},
+		{CodeUserDisabled, http.StatusForbidden},
+		{CodeBuiltinRole, http.StatusForbidden},
+		{CodeSkillDistillDisabled, http.StatusForbidden},
+		// 404.
 		{CodeNotFound, http.StatusNotFound},
-		{CodeMethodNotAllowed, http.StatusMethodNotAllowed},
-		{CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
-		// Agent capabilities (F10-F16).
+		{CodeBackupNotFound, http.StatusNotFound},
+		{CodeAPIKeyNotFound, http.StatusNotFound},
 		{CodeComputerNotFound, http.StatusNotFound},
 		{CodeScheduleNotFound, http.StatusNotFound},
-		{CodeSkillDistillDisabled, http.StatusForbidden},
-		{CodeScheduleInvalid, http.StatusBadRequest},
+		{CodeRouterTicketNotFound, http.StatusNotFound},
+		{CodeRouterTriggerNotFound, http.StatusNotFound},
+		{CodeRouterThreadNotFound, http.StatusNotFound},
+		// 409: well formed, refused by state.
+		{CodeEmailTaken, http.StatusConflict},
+		{CodeRoleExists, http.StatusConflict},
+		{CodeGroupExists, http.StatusConflict},
+		{CodeBackupsDisabled, http.StatusConflict},
+		{CodeBackupInProgress, http.StatusConflict},
+		{CodeBackupChecksum, http.StatusConflict},
+		{CodeBackupSchemaMismatch, http.StatusConflict},
+		{CodeBackupInvalidArchive, http.StatusConflict},
+		{CodeRouterTicketClosed, http.StatusConflict},
+		{CodeRouterHandbackExhausted, http.StatusConflict},
+		{CodeRouterResourceUnset, http.StatusConflict},
+		// 502: an upstream we do not control failed.
+		{CodeOAuthNotConfigured, http.StatusBadGateway},
+		{CodeOAuthStateMismatch, http.StatusBadGateway},
+		{CodeOAuthFailed, http.StatusBadGateway},
+		{CodeOAuthNoEmail, http.StatusBadGateway},
+		// 503: this instance cannot serve, a retry may help.
+		{CodeBackupEngineUnavail, http.StatusServiceUnavailable},
+		{CodeRestoreBusy, http.StatusServiceUnavailable},
+		{CodeRestoreInProgress, http.StatusServiceUnavailable},
 		{CodeFeatureUnavailable, http.StatusServiceUnavailable},
-		{Code("resource_not_found"), http.StatusInternalServerError},
+		// 429.
+		{CodeAccountLocked, http.StatusTooManyRequests},
+		// 405 / 413.
+		{CodeMethodNotAllowed, http.StatusMethodNotAllowed},
+		{CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
+		// 500: the server broke, including the codes WriteErr does not name.
+		{CodeInternal, http.StatusInternalServerError},
+		{CodeBackupEngineFailed, http.StatusInternalServerError},
+		{CodeBackupFailed, http.StatusInternalServerError},
+		{CodeBackupInterrupted, http.StatusInternalServerError},
+		{CodeRestoreFailed, http.StatusInternalServerError},
+
+		// These eleven are written straight to the wire by their handlers
+		// (httputil.WriteError with an explicit status), so WriteErr never
+		// produces them in practice. Pinning 500 documents the fallback: if one
+		// ever escapes a service layer as an *Error, that is a programming error
+		// and a 500 is the honest answer. Give any of them a case in WriteErr and
+		// move the row up into the matching group.
+		{CodeChannelDisabled, http.StatusInternalServerError},
+		{CodeChannelNotFound, http.StatusInternalServerError},
+		{CodeChannelPayloadInvalid, http.StatusInternalServerError},
+		{CodeDeliveryFailed, http.StatusInternalServerError},
+		{CodeConnectorNotFound, http.StatusInternalServerError},
+		{CodeConnectorDenied, http.StatusInternalServerError},
+		{CodeConnectorPolicyOff, http.StatusInternalServerError},
+		{CodeAudioTooLarge, http.StatusInternalServerError},
+		{CodeAudioUnsupported, http.StatusInternalServerError},
+		{CodeAudioTranscribeFailed, http.StatusInternalServerError},
+		{CodeSpeechDisabled, http.StatusInternalServerError},
 	}
+
+	declared := declaredCodes(t)
+	seen := make(map[Code]bool, len(declared))
+	for _, code := range declared {
+		seen[code] = true
+	}
+	pinned := make(map[Code]bool, len(cases))
+	for _, c := range cases {
+		if pinned[c.code] {
+			t.Fatalf("%s is pinned twice", c.code)
+		}
+		pinned[c.code] = true
+		if !seen[c.code] {
+			t.Fatalf("%q is pinned here but json.go no longer declares it", c.code)
+		}
+	}
+	for _, code := range declared {
+		if !pinned[code] {
+			t.Fatalf("%q has no pinned status: add a row above so WriteErr cannot silently degrade it to 500", code)
+		}
+	}
+
 	for _, c := range cases {
 		w := httptest.NewRecorder()
 		WriteErr(w, &Error{Code: c.code})
@@ -132,6 +276,13 @@ func TestDecode(t *testing.T) {
 	}
 	if got.Name != "aria" {
 		t.Fatalf("payload = %+v", got)
+	}
+
+	// A zero limit means "use the 1 MiB default", not "reject everything".
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"aria"}`))
+	if err := Decode(w, r, &payload{}, 0); err != nil {
+		t.Fatalf("default limit: %v", err)
 	}
 
 	// Empty body, malformed body and unknown fields all surface as codes.

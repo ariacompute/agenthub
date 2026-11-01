@@ -8,7 +8,6 @@ package httputil
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 )
@@ -237,9 +236,8 @@ func Decode(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) err
 		if errors.As(err, &tooLarge) {
 			return &Error{Code: CodePayloadTooLarge}
 		}
-		if errors.Is(err, io.EOF) {
-			return &Error{Code: CodeBadRequest}
-		}
+		// Everything else (empty body, malformed JSON, unknown field) is the
+		// caller's fault in exactly the same way: one code says it.
 		return &Error{Code: CodeBadRequest}
 	}
 	return nil

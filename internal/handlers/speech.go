@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/base64"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -58,6 +59,12 @@ func (d Deps) handleThreadAudio(w http.ResponseWriter, r *http.Request) {
 	mr := multipart.NewReader(r.Body, boundary)
 	audio, err := readFirstFile(mr, d.Cfg.AudioMaxBytes)
 	if err != nil {
+		// A clip over the cap is not "unsupported": the console retries with a
+		// shorter recording only if it can tell the two apart.
+		if errors.Is(err, errClipTooLarge) {
+			httputil.WriteError(w, http.StatusRequestEntityTooLarge, httputil.CodeAudioTooLarge)
+			return
+		}
 		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeAudioUnsupported)
 		return
 	}
@@ -134,12 +141,23 @@ func isMultipart(ct string) bool {
 	return len(ct) >= 19 && ct[:19] == "multipart/form-data"
 }
 
+// errClipTooLarge separates "the upload was bigger than the cap" from "the
+// upload held no usable file part", because they answer with different statuses.
+var errClipTooLarge = errors.New("audio clip exceeds the configured limit")
+
 // readFirstFile reads at most max bytes from the first file part of a multipart
-// stream, ignoring the rest. Returns an error when no file part is present.
+// stream, ignoring the rest. Returns an error when no file part is present, and
+// errClipTooLarge when the clip (or the enclosing body) outgrows max.
 func readFirstFile(mr *multipart.Reader, max int) ([]byte, error) {
 	for {
 		part, err := mr.NextPart()
 		if err != nil {
+			// The body cap is enforced by http.MaxBytesReader, which trips while
+			// the multipart reader is still filling its buffer, i.e. here rather
+			// than in the ReadAll below.
+			if isBodyTooLarge(err) {
+				return nil, errClipTooLarge
+			}
 			return nil, err
 		}
 		if part.FileName() == "" {
@@ -147,16 +165,26 @@ func readFirstFile(mr *multipart.Reader, max int) ([]byte, error) {
 			continue
 		}
 		defer part.Close()
+		// One byte over the cap is enough to tell "at the limit" from "over it".
 		limited := io.LimitReader(part, int64(max)+1)
 		data, err := io.ReadAll(limited)
 		if err != nil {
+			if isBodyTooLarge(err) {
+				return nil, errClipTooLarge
+			}
 			return nil, err
 		}
 		if len(data) > max {
-			return nil, io.ErrUnexpectedEOF
+			return nil, errClipTooLarge
 		}
 		return data, nil
 	}
+}
+
+// isBodyTooLarge reports whether err came from http.MaxBytesReader tripping.
+func isBodyTooLarge(err error) bool {
+	var tooLarge *http.MaxBytesError
+	return errors.As(err, &tooLarge)
 }
 
 // lastAgentText returns the text of the most recent agent message in a task history.

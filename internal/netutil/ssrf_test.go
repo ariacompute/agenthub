@@ -1,6 +1,7 @@
 package netutil
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -53,5 +54,73 @@ func TestSafeClientRefusesLoopback(t *testing.T) {
 	_, err := c.Get(srv.URL)
 	if err == nil {
 		t.Fatal("expected SSRF refusal for loopback destination")
+	}
+}
+
+func TestSafeClientReachesATrustedPrivateDestination(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("internal"))
+	}))
+	defer srv.Close()
+
+	// allowPrivate is for destinations an operator configured themselves, such as
+	// an upstream registry on the local network.
+	c := SafeClient(0, 0, true)
+	resp, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("an explicitly trusted private destination must work: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestSafeClientDoesNotFollowRedirects(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the redirect target must never be reached")
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	c := SafeClient(0, 0, true)
+	resp, err := c.Get(redirector.URL)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	// The 3xx is surfaced instead: a redirect is the easiest SSRF bypass.
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want the 302 itself", resp.StatusCode)
+	}
+}
+
+func TestSafeClientDefaultsAndDialGuards(t *testing.T) {
+	// Zero values must not produce a client that hangs forever or reads unbounded.
+	c := SafeClient(0, 0, false)
+	if c.Timeout != DefaultSafeTimeout {
+		t.Fatalf("timeout = %v, want %v", c.Timeout, DefaultSafeTimeout)
+	}
+	transport, ok := c.Transport.(*http.Transport)
+	if !ok || transport.DialContext == nil {
+		t.Fatal("the client must dial through the guarding transport")
+	}
+
+	// A non-TCP network (unix sockets, packet sockets) is refused before any
+	// address resolution happens.
+	if _, err := transport.DialContext(context.Background(), "unix", "/tmp/sock"); err == nil {
+		t.Fatal("unsupported networks must be refused")
+	}
+	// An address without a port is a programming error, not a dial.
+	if _, err := transport.DialContext(context.Background(), "tcp", "example.com"); err == nil {
+		t.Fatal("an address without a port must be refused")
+	}
+	// An unresolvable host fails at resolution, never at connect.
+	if _, err := transport.DialContext(context.Background(), "tcp", "no-such-host.invalid:80"); err == nil {
+		t.Fatal("an unresolvable host must fail")
 	}
 }

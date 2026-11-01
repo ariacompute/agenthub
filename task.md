@@ -431,6 +431,33 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - [x] `AGENTS.md`：`internal/router`、`internal/schedules`、`handlers/router.go`、`020_router.sql`、持久化表与错误码映射。
 - [x] `requirements.md`：§1.5 范围、§4.2 端点、§5.1 错误码、§10 调度器契约（数据模型/行为/安全/配置/验收）。
 
+## M7 — 收敛项（错误码映射守卫与语音体积上限，已落地）
+
+背景：审查 `internal/httputil` 覆盖率（76.0%）时发现两处隐患——`WriteErr` 的状态映射表没有任何兜底测试，
+语音端点又把「超限」与「格式不支持」混答成 400。行为变更仅一处：超限上传由 400 `audio_unsupported`
+改为 413 `audio_too_large`。不新增错误码，不新增依赖。
+
+### 1. `WriteErr` 映射穷举守卫
+- [x] `internal/httputil/httputil_test.go`：新增 `declaredCodes`，用 `go/parser` 解析 `json.go` 收集全部
+  `Code*` 常量；`TestWriteErrMapsCodesToStatus` 的期望表必须与常量集**双向**一致——新增码未登记、
+  表格残留已删码、重复登记、期望状态不符，四种情况均失败（已用临时常量验证守卫确实会红）。
+- [x] 期望表按 400/401/403/404/405/413/429/500/502/503 分组，并显式把 11 个「由 handler 直接
+  `WriteError` 写出、`WriteErr` 不产出」的码钉成 500，将这一降级行为写成文档而非隐患。
+- [x] `internal/httputil/json.go`：`Decode` 删除与尾随 `return` 完全相同的 `io.EOF` 分支（连带去掉 `io` 导入）。
+
+### 2. 语音体积上限语义
+- [x] `internal/handlers/speech.go`：新增哨兵 `errClipTooLarge` 与 `isBodyTooLarge`；`readFirstFile`
+  在 `NextPart` 与 `ReadAll` 两处把 `*http.MaxBytesError` 归一化为超限（`MaxBytesReader` 常在
+  multipart 填缓冲时就触发，只判 `ReadAll` 会漏掉整类请求），handler 回 413 `audio_too_large`。
+- [x] `internal/handlers/speech_test.go`：拆成 `TestThreadAudioRejectsAnEmptyClip`（400）与
+  `TestThreadAudioRejectsAnOversizedClip`（413 + 机器码断言）；上限取 `4<<10`、片段 `8<<10`，
+  避免旧用例的 `8` 字节上限把任何 multipart 信封都算作超限。
+
+### 3. 验证
+- [x] `go build ./...`、`go vet ./...`、`go test ./...` 全绿。
+- [x] `internal/httputil` 覆盖率 76.0% → 91.5%；余下未覆盖仅 `WriteJSON` 的编码失败分支与
+  `sse.go` 的 KeepAlive 写错误分支，两者都需构造失败 writer 才能触发。
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`
