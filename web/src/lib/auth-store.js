@@ -257,6 +257,17 @@ export const useAuthStore = defineStore('auth', {
         return false
       }
     },
+    async updateGroup(id, payload) {
+      try {
+        await api.updateGroup(id, payload)
+        await this.loadGroups()
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = code(error)
+        return false
+      }
+    },
     async deleteGroup(id) {
       try {
         await api.deleteGroup(id)

@@ -7,7 +7,7 @@ import { errorMessage } from '../lib/errors.js'
 import { userFieldErrors } from '../lib/user-form.js'
 import { isDirty, snapshot, useEscape } from '../lib/use-dismiss.js'
 import UnsavedPrompt from '../components/UnsavedPrompt.vue'
-import { KeyRound, Plus, Shield, Trash2, UserPlus, Users, DatabaseBackup } from 'lucide-vue-next'
+import { KeyRound, Plus, Shield, Trash2, UserPlus, Users, UsersRound, DatabaseBackup } from 'lucide-vue-next'
 import BackupsPanel from './admin/BackupsPanel.vue'
 import ApiKeysPanel from './admin/ApiKeysPanel.vue'
 
@@ -37,6 +37,16 @@ const form = reactive({
 })
 
 const grantForm = reactive({ resourceId: '', principalKind: 'user', principalId: '', level: 'read' })
+
+// A group is the only membership a brand-new install cannot produce through the
+// API, so the console owns its entry point. Without it the drawer's picker has
+// nothing to choose from and every user ends up group-less. An empty id means
+// "create", a set one means "rename / re-bundle".
+const groupForm = reactive({ id: '', name: '', roles: [] })
+const groupDrawerOpen = ref(false)
+const groupBaseline = ref(null)
+const askGroupSave = ref(false)
+const confirmGroup = ref(null)
 
 // Field level problems the drawer can name itself. The values are machine codes
 // - the same ones the server returns - so both paths render identical copy from
@@ -78,6 +88,10 @@ const tabs = computed(() => {
   const items = []
   if (auth.can('users:manage')) items.push({ key: 'users', label: t('tabUsers'), icon: Users })
   if (auth.can('roles:manage')) items.push({ key: 'roles', label: t('tabRoles'), icon: Shield })
+  // Groups are their own screen even though they need the same permission: a
+  // group is a membership, not a permission set, and it is the principal the
+  // grants screen points at.
+  if (auth.can('roles:manage')) items.push({ key: 'groups', label: t('tabGroups'), icon: UsersRound })
   if (auth.can('grants:manage')) items.push({ key: 'grants', label: t('tabGrants'), icon: KeyRound })
   if (auth.can('backups:manage')) items.push({ key: 'backups', label: backup.t('tabBackups'), icon: DatabaseBackup })
   items.push({ key: 'apikeys', label: t('tabApiKeys'), icon: KeyRound })
@@ -189,6 +203,7 @@ function requestClose() {
 }
 
 useEscape(() => drawerOpen.value, requestClose)
+useEscape(() => groupDrawerOpen.value, requestGroupClose)
 
 // The delete confirmation holds no editable state, so Escape simply dismisses
 // it — asking before closing a box that only has Confirm and Cancel would be
@@ -197,6 +212,13 @@ useEscape(
   () => confirmDelete.value !== null,
   () => {
     confirmDelete.value = null
+  },
+)
+
+useEscape(
+  () => confirmGroup.value !== null,
+  () => {
+    confirmGroup.value = null
   },
 )
 
@@ -238,6 +260,67 @@ async function submitUser() {
 async function remove(user) {
   confirmDelete.value = null
   await auth.deleteUser(user.id)
+}
+
+function openGroupCreate() {
+  auth.clearError()
+  groupForm.id = ''
+  groupForm.name = ''
+  groupForm.roles = []
+  groupBaseline.value = snapshot(groupForm)
+  groupDrawerOpen.value = true
+}
+
+function openGroupEdit(group) {
+  auth.clearError()
+  groupForm.id = group.id
+  groupForm.name = group.name ?? ''
+  // Copy: the checkbox list must not write into the cached catalogue entry.
+  groupForm.roles = [...(group.roles ?? [])]
+  groupBaseline.value = snapshot(groupForm)
+  groupDrawerOpen.value = true
+}
+
+function closeGroupDrawer() {
+  groupDrawerOpen.value = false
+  askGroupSave.value = false
+  groupBaseline.value = null
+}
+
+// Same three-way gesture as the user drawer: Escape, the backdrop and Cancel all
+// land here, and only a form that actually changed gets a question.
+function requestGroupClose() {
+  if (isDirty(groupBaseline.value, groupForm)) {
+    askGroupSave.value = true
+    return
+  }
+  closeGroupDrawer()
+}
+
+// Saving from the prompt is the same save; the prompt steps aside so a failure
+// is reported by the drawer's own banner.
+async function saveGroupAndClose() {
+  askGroupSave.value = false
+  await submitGroup()
+}
+
+async function submitGroup() {
+  const name = groupForm.name.trim()
+  if (!name) return
+  auth.clearError()
+  const payload = { name, roles: groupForm.roles }
+  // Both calls reload the catalogue, which is also what the user drawer reads,
+  // so the result is pickable the moment this returns.
+  const ok = groupForm.id ? await auth.updateGroup(groupForm.id, payload) : await auth.createGroup(payload)
+  if (ok) closeGroupDrawer()
+  // A failure (name already in use, role deleted meanwhile) stays in the drawer
+  // banner, next to the button that failed.
+}
+
+async function removeGroup() {
+  const group = confirmGroup.value
+  confirmGroup.value = null
+  if (group) await auth.deleteGroup(group.id)
 }
 
 async function submitGrant() {
@@ -413,14 +496,36 @@ watch(query, (value) => {
         </button>
       </div>
 
-      <div class="admin-head admin-head-sub">
+    </section>
+
+    <!-- ---------- groups ---------- -->
+    <section v-if="tab === 'groups'" class="card panel">
+      <div class="admin-head">
         <h2>{{ t('groupsTitle') }}</h2>
+        <button class="btn btn-primary" type="button" @click="openGroupCreate">
+          <Plus :size="15" />
+          <span>{{ t('actionNewGroup') }}</span>
+        </button>
       </div>
-      <div class="admin-tags">
-        <span v-for="group in auth.groupsCatalogue" :key="group.id" class="chip">
-          {{ group.name }}
-        </span>
-        <span v-if="!auth.groupsCatalogue.length" class="muted">—</span>
+      <p class="page-sub">{{ t('groupsHint') }}</p>
+
+      <div class="group-list">
+        <div v-for="group in auth.groupsCatalogue" :key="group.id" class="group-row">
+          <div class="group-main">
+            <span class="group-name">{{ group.name }}</span>
+            <span v-for="role in group.roles ?? []" :key="role" class="chip">{{ roleName(role) }}</span>
+            <span v-if="!(group.roles ?? []).length" class="muted">—</span>
+          </div>
+          <div class="group-actions">
+            <button class="btn btn-ghost" type="button" @click="openGroupEdit(group)">
+              {{ t('actionEdit') }}
+            </button>
+            <button class="btn btn-ghost" type="button" @click="confirmGroup = group">
+              {{ t('actionDelete') }}
+            </button>
+          </div>
+        </div>
+        <p v-if="!auth.groupsCatalogue.length" class="muted">—</p>
       </div>
     </section>
 
@@ -632,6 +737,54 @@ watch(query, (value) => {
       @cancel="askSave = false"
     />
 
+    <!-- ---------- group drawer ---------- -->
+    <div v-if="groupDrawerOpen" class="drawer-backdrop" @click.self="requestGroupClose">
+      <form class="drawer card" novalidate @submit.prevent="submitGroup">
+        <div class="page-head">
+          <h2>{{ t('groupsTitle') }}</h2>
+        </div>
+
+        <div class="field">
+          <label for="group-name">{{ t('fieldGroupName') }}</label>
+          <input id="group-name" v-model="groupForm.name" type="text" :aria-label="t('fieldGroupName')" />
+        </div>
+        <div class="field">
+          <span class="field-label">{{ t('fieldRoles') }}</span>
+          <div class="chip-picker" role="group" :aria-label="t('fieldRoles')">
+            <label
+              v-for="role in auth.rolesCatalogue"
+              :key="role.id"
+              class="chip chip-pick"
+              :class="{ 'chip-pick-on': groupForm.roles.includes(role.id) }"
+            >
+              <input v-model="groupForm.roles" type="checkbox" :value="role.id" />
+              <span>{{ role.name }}</span>
+            </label>
+          </div>
+        </div>
+
+        <p v-if="auth.errorCode" class="error-line">{{ errorText }}</p>
+
+        <div class="drawer-actions">
+          <button class="btn btn-primary" type="submit" :disabled="!groupForm.name.trim()">
+            {{ shell.t('actionSave') }}
+          </button>
+          <button class="btn btn-ghost" type="button" @click="requestGroupClose">
+            {{ shell.t('actionCancel') }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <UnsavedPrompt
+      v-if="askGroupSave"
+      :title="shell.t('unsavedTitle')"
+      :body="shell.t('unsavedBody')"
+      @save="saveGroupAndClose"
+      @discard="closeGroupDrawer"
+      @cancel="askGroupSave = false"
+    />
+
     <!-- ---------- confirm ---------- -->
     <div v-if="confirmDelete" class="drawer-backdrop" @click.self="confirmDelete = null">
       <div class="drawer card">
@@ -644,6 +797,23 @@ watch(query, (value) => {
             {{ shell.t('actionConfirm') }}
           </button>
           <button class="btn btn-ghost" type="button" @click="confirmDelete = null">
+            {{ shell.t('actionCancel') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="confirmGroup" class="drawer-backdrop" @click.self="confirmGroup = null">
+      <div class="drawer card">
+        <div class="page-head">
+          <h2>{{ t('confirmDeleteGroup') }}</h2>
+          <p class="page-sub">{{ confirmGroup.name }}</p>
+        </div>
+        <div class="drawer-actions">
+          <button class="btn btn-primary" type="button" @click="removeGroup">
+            {{ shell.t('actionConfirm') }}
+          </button>
+          <button class="btn btn-ghost" type="button" @click="confirmGroup = null">
             {{ shell.t('actionCancel') }}
           </button>
         </div>
@@ -801,6 +971,43 @@ watch(query, (value) => {
   gap: 12px;
   align-items: end;
   margin-block: 14px;
+}
+
+/* One line per group: the name and its role bundle carry the row, the buttons
+   sit at the far end so nothing destructive is the first thing a stray click
+   meets. */
+.group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-block-start: 12px;
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.group-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-name {
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+.group-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* Narrow-screen admin table rules moved to style.css alongside the rest. */

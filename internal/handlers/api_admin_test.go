@@ -23,6 +23,7 @@ type recordingAuthz struct {
 	createdRole   *authz.Role
 	updatedRole   *authz.Role
 	createdGroup  *authz.Group
+	updatedGroup  *authz.Group
 	deletedRole   string
 	deletedGroup  string
 	deletedGrant  string
@@ -73,7 +74,7 @@ func (s *recordingAuthz) UpdateGroup(_ context.Context, g *authz.Group) error {
 		return s.groupErr
 	}
 	cp := *g
-	s.createdGroup = &cp
+	s.updatedGroup = &cp
 	return nil
 }
 
@@ -229,6 +230,47 @@ func TestGroupFailuresCarryTheCodeTheConsoleLocalises(t *testing.T) {
 	}
 	if got := errCode(t, w); got != "group_already_exists" {
 		t.Fatalf("code = %q, want group_already_exists", got)
+	}
+}
+
+// TestGroupRoleBundleAndRenameReachTheStore pins the two fields the console's
+// group drawer edits. They are easy to lose silently - a rename that only
+// travels one way, or an empty bundle read as "leave alone" - and both change
+// what every member of the group may do.
+func TestGroupRoleBundleAndRenameReachTheStore(t *testing.T) {
+	d, az := adminTestDeps(t)
+	h := Register(d)
+	owner := backupOwner(t, h)
+
+	w := do(t, h, http.MethodPost, "/api/groups",
+		`{"name":"ops","roles":["role-viewer","role-operator"]}`, authHeader(owner))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create group: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if az.createdGroup == nil || az.createdGroup.Name != "ops" || len(az.createdGroup.Roles) != 2 {
+		t.Fatalf("group reached the store as %+v", az.createdGroup)
+	}
+
+	// Renaming and re-bundling is one request: the drawer edits both fields.
+	w = do(t, h, http.MethodPut, "/api/groups/group-1",
+		`{"name":"ops-eu","roles":["role-viewer"]}`, authHeader(owner))
+	if w.Code != http.StatusOK {
+		t.Fatalf("update group: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if az.updatedGroup == nil || az.updatedGroup.ID != "group-1" ||
+		az.updatedGroup.Name != "ops-eu" || len(az.updatedGroup.Roles) != 1 {
+		t.Fatalf("update reached the store as %+v", az.updatedGroup)
+	}
+
+	// Clearing every role is an explicit request, not "leave alone": an empty
+	// array has to arrive as a non-nil, empty bundle or the old roles survive.
+	w = do(t, h, http.MethodPut, "/api/groups/group-1",
+		`{"name":"ops-eu","roles":[]}`, authHeader(owner))
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear roles: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if az.updatedGroup == nil || az.updatedGroup.Roles == nil || len(az.updatedGroup.Roles) != 0 {
+		t.Fatalf("cleared bundle reached the store as %+v", az.updatedGroup)
 	}
 }
 
