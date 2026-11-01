@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -168,6 +169,9 @@ func TestMCPProbeSkipsStdio(t *testing.T) {
 }
 
 func TestCLIProbeLooksUpTheCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a /bin/sh script that exec.LookPath cannot resolve on Windows")
+	}
 	// A real executable on disk: the probe only has to find it, never run it.
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "aria-probe-tool")
