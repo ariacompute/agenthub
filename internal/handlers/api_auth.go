@@ -114,25 +114,26 @@ func (d Deps) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeAuthErr(w, err)
 		return
 	}
-	if d.grantSelfRegistrationRole(r.Context(), u) {
+	if d.grantDefaultRole(r.Context(), u) {
 		u.Roles = []string{authz.RoleViewer}
 	}
 	d.Log.Info("handler: user registered", "user", u.ID)
 	httputil.WriteJSON(w, http.StatusCreated, map[string]any{"user": userView(u)})
 }
 
-// grantSelfRegistrationRole gives a brand-new self-service account the read-only
-// role. Registration is open to anyone who can reach the login page, so the
-// account must start with the smallest useful permission set — read the
-// catalogue and the tasks it can see, write nothing — and an administrator
-// widens it afterwards. Accounts an administrator creates through POST
-// /api/users are untouched: they get exactly the roles that were asked for.
+// grantDefaultRole gives an account created by self-service — a password
+// sign-up, or the first login through an external provider — the read-only
+// role. Signing up is open to anyone who can reach the login page, so the
+// account must start on the smallest useful permission set: read the catalogue
+// and the tasks it can see, write nothing. An administrator widens it
+// afterwards. Accounts an administrator creates through POST /api/users are
+// untouched: they get exactly the roles that were asked for.
 //
 // The account already exists by the time this runs, so a failure is reported
 // and reported only: failing the request would leave the address taken and the
 // caller unable to retry, while the admin screen can always set the membership
 // by hand.
-func (d Deps) grantSelfRegistrationRole(ctx context.Context, u *auth.User) bool {
+func (d Deps) grantDefaultRole(ctx context.Context, u *auth.User) bool {
 	if u == nil || u.IsOwner {
 		// The owner holds every permission implicitly; a viewer row would only
 		// misdescribe it.
@@ -314,15 +315,20 @@ func (d Deps) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		redirectWithCode(w, r, string(httputil.CodeOAuthFailed))
 		return
 	}
-	u, token, sess, err := d.Auth.CompleteOAuth(r.Context(), provider, code, verifierCookie.Value,
+	login, err := d.Auth.CompleteOAuth(r.Context(), provider, code, verifierCookie.Value,
 		d.oauthRedirect(r, provider), r.UserAgent(), clientIP(r))
 	if err != nil {
 		d.Log.Error("handler: oauth callback", "provider", provider, "error", err)
 		redirectWithCode(w, r, authCodeOf(err))
 		return
 	}
-	d.Auth.SetCookie(w, r, token, sess.ExpiresAt)
-	d.Log.Info("handler: oauth login", "user", u.ID, "provider", provider)
+	// A first login provisions the account, so it starts on the read-only role;
+	// a returning one keeps whatever an administrator has since assigned.
+	if login.Created {
+		d.grantDefaultRole(r.Context(), login.User)
+	}
+	d.Auth.SetCookie(w, r, login.Token, login.Session.ExpiresAt)
+	d.Log.Info("handler: oauth login", "user", login.User.ID, "provider", provider, "created", login.Created)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

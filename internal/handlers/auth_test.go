@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -351,6 +352,14 @@ func (s *memAuthz) grant(userID, resourceID, level string) {
 // closest a unit test gets to a running agenthub.
 func authTestDeps(t *testing.T, staticDir string, entries ...*registry.Entry) (Deps, *memAuthz) {
 	t.Helper()
+	return authTestDepsWith(t, staticDir, nil, entries...)
+}
+
+// authTestDepsWith is authTestDeps with a hook on the identity options, which is
+// how a test points an OAuth provider at an httptest server instead of the real
+// one.
+func authTestDepsWith(t *testing.T, staticDir string, tweak func(*auth.Options), entries ...*registry.Entry) (Deps, *memAuthz) {
+	t.Helper()
 	cfg := openConfig(staticDir)
 	cfg.SessionTTL = time.Hour
 	cfg.CookieSecure = false
@@ -368,10 +377,11 @@ func authTestDeps(t *testing.T, staticDir string, entries ...*registry.Entry) (D
 		MaxOutputBytes: 1024,
 	}, &hub.MockNotifier{}, hub.Persistence{})
 	az := newMemAuthz()
-	svc := auth.New(newMemUsers(), newMemSessions(), nil, nil, authz.New(az), auth.Options{
-		CookieName: "agenthub_session",
-		TTL:        cfg.SessionTTL,
-	})
+	opts := auth.Options{CookieName: "agenthub_session", TTL: cfg.SessionTTL}
+	if tweak != nil {
+		tweak(&opts)
+	}
+	svc := auth.New(newMemUsers(), newMemSessions(), &memOAuthBindings{}, nil, authz.New(az), opts)
 	return Deps{
 		Cfg:   cfg,
 		Hub:   h,
@@ -380,6 +390,35 @@ func authTestDeps(t *testing.T, staticDir string, entries ...*registry.Entry) (D
 		Auth:  svc,
 		Authz: authz.New(az),
 	}, az
+}
+
+// memOAuthBindings is the (provider, subject) → user index the identity layer
+// needs to recognise a returning OAuth login.
+type memOAuthBindings struct{ rows []auth.OAuthAccount }
+
+func (s *memOAuthBindings) Find(_ context.Context, provider, subject string) (*auth.OAuthAccount, error) {
+	for i := range s.rows {
+		if s.rows[i].Provider == provider && s.rows[i].Subject == subject {
+			cp := s.rows[i]
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *memOAuthBindings) Link(_ context.Context, a *auth.OAuthAccount) error {
+	s.rows = append(s.rows, *a)
+	return nil
+}
+
+func (s *memOAuthBindings) ListForUser(_ context.Context, userID string) ([]auth.OAuthAccount, error) {
+	out := []auth.OAuthAccount{}
+	for _, a := range s.rows {
+		if a.UserID == userID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 // sessionOf logs in over HTTP and returns the session cookie, so the tests
@@ -534,6 +573,79 @@ func TestSelfRegistrationStartsWithViewer(t *testing.T) {
 	decodeJSON(t, me, &who)
 	if len(who.User.Roles) != 0 {
 		t.Fatalf("admin-created roles = %v, want none", who.User.Roles)
+	}
+}
+
+// TestOAuthFirstLoginStartsWithViewer covers the other way into the console: a
+// first login through an external provider provisions the account, so it is
+// handed the same read-only role a password sign-up gets. A returning login must
+// not re-grant it, or an administrator could never take the role away.
+func TestOAuthFirstLoginStartsWithViewer(t *testing.T) {
+	var issuer *httptest.Server
+	issuer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			fmt.Fprintf(w, `{"authorization_endpoint":%q,"token_endpoint":%q,"userinfo_endpoint":%q}`,
+				issuer.URL+"/authorize", issuer.URL+"/token", issuer.URL+"/userinfo")
+		case "/token":
+			io.WriteString(w, `{"access_token":"T"}`)
+		case "/userinfo":
+			io.WriteString(w, `{"sub":"SUB-1","email":"oauth@example.com","name":"OAuth User"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer issuer.Close()
+
+	d, az := authTestDepsWith(t, "", func(o *auth.Options) {
+		o.OAuth = auth.OAuthConfig{Enabled: true, OIDC: auth.ProviderConfig{
+			ClientID: "id", ClientSecret: "secret", Issuer: issuer.URL,
+		}}
+	})
+	h := Register(d)
+
+	// The owner has to exist first, or the OAuth account would be the first one
+	// and become the owner itself (which is never handed a role).
+	do(t, h, http.MethodPost, "/api/auth/register", `{"email":"owner@example.com","password":"correct horse"}`, nil)
+
+	// login walks the provider callback (state + PKCE cookies included) and
+	// returns the session it opened.
+	login := func() string {
+		t.Helper()
+		w := do(t, h, http.MethodGet, "/api/auth/oauth/oidc/callback?state=st-1&code=cd", "",
+			map[string]string{"Cookie": "agenthub_oauth_state=st-1; agenthub_oauth_verifier=vf-1"})
+		if w.Code != http.StatusFound || w.Header().Get("Location") != "/" {
+			t.Fatalf("callback: status = %d, location = %q, body = %s",
+				w.Code, w.Header().Get("Location"), w.Body.String())
+		}
+		for _, c := range w.Result().Cookies() {
+			if c.Name == "agenthub_session" && c.Value != "" {
+				return c.Value
+			}
+		}
+		t.Fatalf("callback set no session cookie: %v", w.Header())
+		return ""
+	}
+
+	var who struct {
+		User struct {
+			ID    string   `json:"id"`
+			Roles []string `json:"roles"`
+		} `json:"user"`
+	}
+	decodeJSON(t, do(t, h, http.MethodGet, "/api/auth/me", "", authHeader(login())), &who)
+	if len(who.User.Roles) != 1 || who.User.Roles[0] != authz.RoleViewer {
+		t.Fatalf("oauth account roles = %v, want [%s]", who.User.Roles, authz.RoleViewer)
+	}
+
+	// A returning login is not a provisioning one: taking the role away has to
+	// stick, otherwise the admin screen could never demote an OAuth account.
+	az.mu.Lock()
+	delete(az.roles, who.User.ID)
+	az.mu.Unlock()
+	decodeJSON(t, do(t, h, http.MethodGet, "/api/auth/me", "", authHeader(login())), &who)
+	if len(who.User.Roles) != 0 {
+		t.Fatalf("returning login re-granted roles: %v", who.User.Roles)
 	}
 }
 

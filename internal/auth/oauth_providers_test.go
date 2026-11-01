@@ -569,30 +569,41 @@ func TestCompleteOAuthGoogleCreatesUser(t *testing.T) {
 	})
 	svc, _, _ := newOAuthTestService(OAuthConfig{Enabled: true, Google: ProviderConfig{ClientID: "a", ClientSecret: "b"}})
 
-	user, token, sess, err := svc.CompleteOAuth(context.Background(), "google", "code", "vrf", "https://cb", "curl", "10.0.0.1")
+	login, err := svc.CompleteOAuth(context.Background(), "google", "code", "vrf", "https://cb", "curl", "10.0.0.1")
 	if err != nil {
 		t.Fatalf("complete oauth: %v", err)
 	}
+	user, token, sess := login.User, login.Token, login.Session
 	if user.Email != "googleuser@example.com" {
 		t.Fatalf("email = %q, want the Google email", user.Email)
 	}
 	if user.Name != "G User" || token == "" || sess == nil {
 		t.Fatalf("unexpected result: name=%q token=%q sess=%v", user.Name, token, sess)
 	}
+	// The first login provisions the account; the caller uses this to hand it a
+	// default role.
+	if !login.Created {
+		t.Fatal("the first login must report that it created the account")
+	}
 
 	// A repeat login with the same Google subject must resolve the existing user.
-	again, _, _, err := svc.CompleteOAuth(context.Background(), "google", "code", "vrf", "https://cb", "curl", "10.0.0.1")
+	again, err := svc.CompleteOAuth(context.Background(), "google", "code", "vrf", "https://cb", "curl", "10.0.0.1")
 	if err != nil {
 		t.Fatalf("complete oauth (repeat): %v", err)
 	}
-	if again.ID != user.ID {
+	if again.User.ID != user.ID {
 		t.Fatal("repeating the login must return the same user")
+	}
+	// A returning login must not look like a provisioning one: that is what
+	// keeps it from being re-granted a default role behind the admin's back.
+	if again.Created {
+		t.Fatal("a repeat login must not report a new account")
 	}
 }
 
 func TestCompleteOAuthUnconfiguredProvider(t *testing.T) {
 	svc, _, _ := newOAuthTestService(OAuthConfig{Enabled: true})
-	if _, _, _, err := svc.CompleteOAuth(context.Background(), "wechat", "code", "vrf", "https://cb", "curl", "10.0.0.1"); err != ErrOAuthNotConfigured {
+	if _, err := svc.CompleteOAuth(context.Background(), "wechat", "code", "vrf", "https://cb", "curl", "10.0.0.1"); err != ErrOAuthNotConfigured {
 		t.Fatalf("want ErrOAuthNotConfigured, got %v", err)
 	}
 }

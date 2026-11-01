@@ -142,10 +142,11 @@ func TestCompleteOAuthWeChatCreatesEmailLessUser(t *testing.T) {
 		}
 	})
 
-	user, token, sess, err := svc.CompleteOAuth(context.Background(), "wechat", "code", "verifier", "https://hub.example.com/callback", "curl", "10.0.0.1")
+	login, err := svc.CompleteOAuth(context.Background(), "wechat", "code", "verifier", "https://hub.example.com/callback", "curl", "10.0.0.1")
 	if err != nil {
 		t.Fatalf("complete oauth: %v", err)
 	}
+	user, token, sess := login.User, login.Token, login.Session
 	if user.Email != "" {
 		t.Fatalf("wechat user email = %q, want empty", user.Email)
 	}
@@ -155,14 +156,20 @@ func TestCompleteOAuthWeChatCreatesEmailLessUser(t *testing.T) {
 	if token == "" || sess == nil {
 		t.Fatal("a session must be opened for the new wechat user")
 	}
+	if !login.Created {
+		t.Fatal("the first wechat login must report that it created the account")
+	}
 
 	// A second login with the same WeChat identity must resolve the existing
 	// account instead of creating another one.
-	again, _, _, err := svc.CompleteOAuth(context.Background(), "wechat", "code", "verifier", "https://hub.example.com/callback", "curl", "10.0.0.1")
+	again, err := svc.CompleteOAuth(context.Background(), "wechat", "code", "verifier", "https://hub.example.com/callback", "curl", "10.0.0.1")
 	if err != nil {
 		t.Fatalf("complete oauth (repeat): %v", err)
 	}
-	if again.ID != user.ID {
+	if again.User.ID != user.ID {
 		t.Fatal("repeating the wechat login must return the same user")
+	}
+	if again.Created {
+		t.Fatal("a repeat wechat login must not report a new account")
 	}
 }

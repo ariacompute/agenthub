@@ -192,12 +192,14 @@ persistence ← internal/store（GORM 实现）
   真实恢复的集成用例与 `scripts/test-api.sh` 段落都以 `AGENTHUB_TEST_BACKUP_RESTORE=true` 门控。
 - **新错误码必须登记**：`internal/httputil` 的 `Code*` 常量 + `WriteErr` 状态码映射，
   否则一律退化为 500；前端同步登记 `errors.js` 的 `CODE_KEYS` 与 `errors-copy.js` 的 13 语。
-- **自助注册默认只读**：`POST /api/auth/register` 成功后由 handler 调
-  `Authz.Store().SetUserRoles` 写入 `authz.RoleViewer`（`role-viewer`），因此任何能打开登录页的人
-  注册到的账号只读、可解释；首个账号是 owner（隐式全权）不再叠加 viewer 行，管理员用
-  `POST /api/users` 建号则完全按请求里的 `roles` 落库（未给就是无角色）。授予发生在建号之后，
-  失败只 `slog.Error` 不返回错误——账号已存在且邮箱已占用，让请求失败只会把用户卡死，
-  管理员在控制台补一次成员关系即可。角色 id 走 `authz.Role*` 常量，不复制迁移里的字符串。
+- **自助注册默认只读**：自助注册成功的账号由 handler 调 `Authz.Store().SetUserRoles` 写入
+  `authz.RoleViewer`（`role-viewer`），因此任何能打开登录页的人注册到的账号只读、可解释。
+  两条入口都算：`POST /api/auth/register`（密码注册）与 OAuth **首次**登录（
+  `CompleteOAuth` 返回 `OAuthLogin.Created` 为真时才授予，回访登录绝不重新授予，否则管理员
+  无法降权）。首个账号是 owner（隐式全权）不再叠加 viewer 行，管理员用 `POST /api/users`
+  建号则完全按请求里的 `roles` 落库（未给就是无角色）。授予发生在建号之后，失败只
+  `slog.Error` 不返回错误——账号已存在且邮箱已占用，让请求失败只会把用户卡死，管理员在控制台
+  补一次成员关系即可。角色 id 走 `authz.Role*` 常量，不复制迁移里的字符串。
 - **新权限需同步四处**：`authz.Perm*` 常量 → `AllPermissions` → 迁移里的权限种子与 admin 角色关联 →
   前端 `auth-store.js` 的 `PERMISSIONS` 与 `enums-copy.js` 的 `permission` 分组（13 语）。
 - **API 密钥**：`api_keys` 只存 `sha256(token)`（`token_hash` 唯一索引）与展示 `prefix`，**绝不存明文**；

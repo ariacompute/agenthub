@@ -560,29 +560,40 @@ func (s *Service) BeginOAuth(provider, redirectURL string) (authURL, state, veri
 	return url, state, verifier, nil
 }
 
+// OAuthLogin is the outcome of CompleteOAuth. Created tells a first login, which
+// provisions the local account, from a returning one: only the former is handed
+// a default role, so the distinction has to survive the call.
+type OAuthLogin struct {
+	User    *User
+	Token   string
+	Session *Session
+	Created bool
+}
+
 // CompleteOAuth finishes a login: exchange the code, find or create the local
 // account, bind the provider identity and open a session.
-func (s *Service) CompleteOAuth(ctx context.Context, provider, code, verifier, redirectURL, userAgent, ip string) (*User, string, *Session, error) {
+func (s *Service) CompleteOAuth(ctx context.Context, provider, code, verifier, redirectURL, userAgent, ip string) (*OAuthLogin, error) {
 	p, ok := s.oauthCfg.Find(provider)
 	if !ok {
-		return nil, "", nil, ErrOAuthNotConfigured
+		return nil, ErrOAuthNotConfigured
 	}
 	identity, err := p.Exchange(ctx, code, verifier, redirectURL)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, err
 	}
 	if identity.Subject == "" {
-		return nil, "", nil, ErrOAuthFailed
+		return nil, ErrOAuthFailed
 	}
 	if s.users == nil || s.oauth == nil {
-		return nil, "", nil, errors.New("auth: stores not configured")
+		return nil, errors.New("auth: stores not configured")
 	}
 
 	var user *User
+	created := false
 	if acc, err := s.oauth.Find(ctx, identity.Provider, identity.Subject); err == nil && acc != nil {
 		user, err = s.users.Get(ctx, acc.UserID)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
 	}
 	if user == nil && identity.Email != "" {
@@ -597,11 +608,11 @@ func (s *Service) CompleteOAuth(ctx context.Context, provider, code, verifier, r
 		// to create an email-less account keyed only by its (provider, subject)
 		// binding. Every other provider must supply one.
 		if identity.Email == "" && identity.Provider != "wechat" {
-			return nil, "", nil, ErrOAuthNoEmail
+			return nil, ErrOAuthNoEmail
 		}
 		count, err := s.users.Count(ctx)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
 		email := ""
 		if identity.Email != "" {
@@ -626,11 +637,12 @@ func (s *Service) CompleteOAuth(ctx context.Context, provider, code, verifier, r
 			IsOwner:      count == 0,
 		}
 		if err := s.users.Create(ctx, user); err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
+		created = true
 	}
 	if user.Status != StatusActive {
-		return nil, "", nil, ErrUserDisabled
+		return nil, ErrUserDisabled
 	}
 	if err := s.oauth.Link(ctx, &OAuthAccount{
 		ID:       NewID("oauth"),
@@ -639,11 +651,11 @@ func (s *Service) CompleteOAuth(ctx context.Context, provider, code, verifier, r
 		Subject:  identity.Subject,
 		Email:    identity.Email,
 	}); err != nil {
-		return nil, "", nil, err
+		return nil, err
 	}
 	sess, token, err := s.openSession(ctx, user.ID, userAgent, ip)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, err
 	}
-	return user, token, sess, nil
+	return &OAuthLogin{User: user, Token: token, Session: sess, Created: created}, nil
 }
