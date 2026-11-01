@@ -434,6 +434,81 @@ fire.
 | Durable effects queue / transactional outbox | **not built, by choice** — a committed intent is driven synchronously after the transaction, and single writer + idempotent replay cover the failure window |
 | Persona voice, reply composition, long-term memory | **not in scope** — a worker answers through the ordinary task and thread surface |
 
+## Execution sandboxes
+
+The platform does not execute anything as the host process. `internal/sandbox` is a control plane:
+it leases an environment per `(owner, resource, scope)`, runs work inside it, audits every run and
+reclaims it when it goes idle. `hub`, `router` and the adapters never learn what a container is —
+they ask `sandbox.Service` for an execution, and only the `Manager` knows where it happens.
+
+The shape is the scheduler's, deliberately: consumer-defined ports (`store.go`), one writer
+(`Manager`), a single-flight beat (`Sweeper`), a replayable event bus, and the same
+"memory or PostgreSQL" pair behind one interface.
+
+| | |
+| --- | --- |
+| Default backend | `docker` (`AGENTHUB_SANDBOX_PROVIDER`) |
+| Refusal | a missing runtime answers `sandbox_unsupported`, never a quiet fallback to the host |
+| Layers | container · user-space kernel (gVisor) · microVM (Kata/Firecracker) · process (bubblewrap / nsjail / isolate) · platform (E2B / Daytona / CubeSandbox / OpenHands) · remote node · off |
+| Lease key | `(owner, resource, scope)`; the scope resolves `metadata.ticket` → `metadata.contextId` → `default`, so one ticket's steps share one environment |
+| Reuse | renewed on every hit, reclaimed after `AGENTHUB_SANDBOX_IDLE_TTL`; anonymous callers never reuse |
+| Ceiling | `AGENTHUB_SANDBOX_MAX_PER_OWNER` / `_MAX_TOTAL`, cross-checked against `AGENTHUB_ROUTER_MAX_TICKETS`; a refused lease is a **retryable** `sandbox_limit_reached`, consumed by the scheduler's back-off |
+| Audit | command digest, exit code, duration and the output's sha256 — never the output itself |
+| Console | `/api/sandboxes`, `/api/sandboxes/{id}`, `/api/sandboxes/stats`, `/api/sandbox-providers`, `/api/sandbox-nodes`, `/api/sandboxes/events` (SSE with `since`) |
+
+A backend is a catalogue entry, not a code path. Three ways to add one without touching the control
+plane:
+
+1. **Compile-time** — implement `sandbox.Provider` and register it (`docker`, `podman`, `runsc`,
+   `bwrap`, `mock`, `remote`).
+2. **Declarative** — hand the operator a template through `AGENTHUB_SANDBOX_PROVIDERS`. Argv is
+   expanded element by element, never through a shell; an unknown placeholder, an empty argv or a
+   relative binary refuses to load at startup.
+3. **Node protocol** — enroll a machine and it pulls jobs over a long poll.
+
+`off` refuses everything; `mock` is deterministic and offline, and stays an explicit choice so an
+offline demo can never become the default posture.
+
+### What runs inside a sandbox
+
+Four execution surfaces go through the same `Manager`:
+
+- **CLI** — the command is the one registered on the resource; arguments are checked against
+  `args_policy` (`none | prefix | passthrough`), and a prompt can at most become standard input.
+  The "first word of the prompt is the command" path is gone.
+- **MCP stdio** — the server starts inside the lease, so the tool allow list is enforced where the
+  process actually runs.
+- **Computers** — `shell / browser / screen` sessions reference a real lease and can be probed once
+  from the console (`dry_run` in the audit).
+- **Remote agents** — egress goes through the server; credentials are injected from
+  `credential_env` and never enter the model context or an artifact.
+
+### Default is Docker, and a missing Docker is an answer
+
+`AGENTHUB_SANDBOX_PROVIDER` defaults to `docker`. When the socket is unreachable — no daemon, no
+`/var/run/docker.sock` inside the container, a socket proxy that is not running — the catalogue
+reports `available: false` with the reason, `/healthz` says so, and execution is refused. The
+console shows the same sentence. An instance that cannot isolate does not execute on the host
+instead.
+
+Deploying inside a container: mount nothing by default, or point `AGENTHUB_SANDBOX_DOCKER_HOST` at
+a socket-proxy sidecar with only `CONTAINERS`, `IMAGES` and `POST` enabled. Mounting
+`/var/run/docker.sock` directly is equivalent to host root; `docker-compose.yml` ships the proxy as
+an optional profile for exactly that reason.
+
+### Compared with the hosted runtimes
+
+Full comparison, licences included: [`docs/sandbox-landscape.md`](docs/sandbox-landscape.md).
+
+| | agenthub |
+| --- | --- |
+| Boundary | container by default, upgradable per resource to a user-space kernel, a microVM or a node you enrolled |
+| Vendor SDK | none — a hosted runtime is a declarative template |
+| Credentials for remote agents | injected server-side; the model only ever sees the variable name |
+| Lifetime tied to the task? | no — a cancelled task keeps its environment, and a vanished environment rebuilds on the next call |
+| Audit | digests, exit codes and durations in `sandbox_execs` |
+| Offline mode | explicit `mock`, never a hidden fallback |
+
 ## Error contract
 
 The backend returns **machine readable codes only**, never prose; the console maps each code to

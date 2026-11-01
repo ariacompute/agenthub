@@ -22,6 +22,7 @@ import {
   httpEndpoints,
   recordStatuses,
   resourceKinds,
+  sandboxLayers,
   taskStates,
 } from '../web/src/lib/docs-content.js'
 import { docsCopy } from '../web/src/lib/copy/docs-copy.js'
@@ -219,6 +220,18 @@ function render(lang) {
     t(dict, 'authApiKeyBody'),
     '',
     t(dict, 'authApiKeyScopeNote'),
+    '',
+  )
+
+  // --- Execution sandboxes ---
+  // The layer identifier stays verbatim: it is the token the API returns, so
+  // translating the first column would make the table harder to act on.
+  out.push(`## ${t(dict, 'sectionSandbox')}`, '', t(dict, 'sandboxBody'), '')
+  out.push(
+    table(
+      [t(dict, 'colSandboxLayer'), t(dict, 'colSandboxBoundary')],
+      sandboxLayers.map((entry) => [`\`${entry.layer}\``, t(dict, entry.descKey)]),
+    ),
     '',
   )
 

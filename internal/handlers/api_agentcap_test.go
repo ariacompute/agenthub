@@ -55,6 +55,31 @@ func (m *memComputers) Create(_ context.Context, c *computers.Computer) (*comput
 	return c, nil
 }
 
+func (m *memComputers) Update(_ context.Context, c *computers.Computer) (*computers.Computer, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, existing := range m.items {
+		if existing.ID == c.ID {
+			m.items[i] = c
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *memComputers) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.items[:0]
+	for _, existing := range m.items {
+		if existing.ID != id {
+			kept = append(kept, existing)
+		}
+	}
+	m.items = kept
+	return nil
+}
+
 type memSchedules struct {
 	mu    sync.Mutex
 	items []*schedules.Schedule

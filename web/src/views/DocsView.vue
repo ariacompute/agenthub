@@ -19,6 +19,7 @@ import {
   httpEndpoints,
   recordStatuses,
   resourceKinds,
+  sandboxLayers,
   taskStates,
 } from '../lib/docs-content.js'
 
@@ -263,6 +264,29 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           <h4>{{ t('authApiKeyTitle') }}</h4>
           <p>{{ t('authApiKeyBody') }}</p>
           <p class="note">{{ t('authApiKeyScopeNote') }}</p>
+        </section>
+
+        <!-- Execution sandboxes -->
+        <section :id="`sec-sandbox`" class="card panel">
+          <h3>{{ t('sectionSandbox') }}</h3>
+          <p class="lede">{{ t('sandboxBody') }}</p>
+
+          <div class="table-scroll">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>{{ t('colSandboxLayer') }}</th>
+                  <th>{{ t('colSandboxBoundary') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="entry in sandboxLayers" :key="entry.layer">
+                  <td class="mono">{{ entry.layer }}</td>
+                  <td>{{ t(entry.descKey) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <!-- Errors -->

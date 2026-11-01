@@ -185,6 +185,20 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeBackupInterrupted, http.StatusInternalServerError},
 		{CodeRestoreFailed, http.StatusInternalServerError},
 
+		// Sandbox: the migration of execution into a leased environment.
+		// "unsupported" and "lease_lost" are conflicts (the state refuses, the
+		// request was well formed), "disabled" and "policy_denied" are refusals,
+		// "limit_reached" is retryable, "node_offline" is a 503.
+		{CodeSandboxDisabled, http.StatusForbidden},
+		{CodeSandboxPolicyDenied, http.StatusForbidden},
+		{CodeSandboxUnsupported, http.StatusConflict},
+		{CodeSandboxLeaseLost, http.StatusConflict},
+		{CodeSandboxUnknownProvider, http.StatusBadRequest},
+		{CodeSandboxNotFound, http.StatusNotFound},
+		{CodeSandboxLimitReached, http.StatusTooManyRequests},
+		{CodeSandboxNodeOffline, http.StatusServiceUnavailable},
+		{CodeSandboxTimeout, http.StatusGatewayTimeout},
+
 		// These eleven are written straight to the wire by their handlers
 		// (httputil.WriteError with an explicit status), so WriteErr never
 		// produces them in practice. Pinning 500 documents the fallback: if one

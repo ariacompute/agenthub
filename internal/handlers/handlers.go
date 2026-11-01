@@ -23,6 +23,7 @@ import (
 	"agenthub/internal/knowledge"
 	"agenthub/internal/registry"
 	"agenthub/internal/router"
+	"agenthub/internal/sandbox"
 	"agenthub/internal/schedules"
 	"agenthub/internal/store"
 	"agenthub/internal/threads"
@@ -75,6 +76,15 @@ type Deps struct {
 	// case its endpoints answer 503 rather than 404 and the thread / channel
 	// ingress keeps its previous direct-to-hub behaviour.
 	Router *router.Service
+	// Sandboxes is the execution-environment control plane: leases, the provider
+	// catalogue and the node queue. Nil when the feature is off, in which case
+	// its endpoints answer 503 feature_unavailable and the adapters fall back to
+	// their pre-sandbox behaviour.
+	//
+	// The distinction matters to an operator: 503 here means "not wired in",
+	// while sandbox_unsupported means "wired in, but this host cannot run the
+	// configured provider".
+	Sandboxes *sandbox.Service
 }
 
 // Register builds the router.
@@ -174,6 +184,10 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/computers", d.requirePermission(authz.PermResourcesRead, d.handleListComputers))
 	mux.HandleFunc("POST /api/computers", d.requirePermission(authz.PermResourcesWrite, d.handleCreateComputer))
 	mux.HandleFunc("GET /api/computers/{id}", d.requirePermission(authz.PermResourcesRead, d.handleGetComputer))
+	// Deleting a computer terminates the lease behind it first: the row is the
+	// console's card, the lease is the environment, and the environment is what
+	// must not be left running.
+	mux.HandleFunc("DELETE /api/computers/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleDeleteComputer))
 
 	// F13: proactive goals / schedules. Read/write hang off tasks permissions.
 	mux.HandleFunc("GET /api/schedules", d.requirePermission(authz.PermTasksRead, d.handleListSchedules))
@@ -201,6 +215,37 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("PUT /api/router/policies/{source}", d.requirePermission(authz.PermTasksWrite, d.handleSaveRouterPolicy))
 	mux.HandleFunc("POST /api/router/passes", d.requirePermission(authz.PermTasksWrite, d.handleKickRouterPass))
 	mux.HandleFunc("GET /api/router/events", d.requirePermission(authz.PermTasksRead, d.handleRouterEvents))
+
+	// Execution environments (sandboxes). A lease is the unit an operator looks
+	// at: which environment exists, who owns it, when it expires and what ran
+	// inside it. Read/write hang off resources permissions, the same pair the
+	// computers surface uses, because a sandbox is where a resource runs.
+	mux.HandleFunc("GET /api/sandboxes", d.requirePermission(authz.PermResourcesRead, d.handleListSandboxes))
+	mux.HandleFunc("GET /api/sandboxes/stats", d.requirePermission(authz.PermResourcesRead, d.handleSandboxStats))
+	mux.HandleFunc("GET /api/sandboxes/events", d.requirePermission(authz.PermResourcesRead, d.handleSandboxEvents))
+	mux.HandleFunc("GET /api/sandboxes/{id}", d.requirePermission(authz.PermResourcesRead, d.handleGetSandbox))
+	// The try-it path is a direct execution, not a routed task: opening a ticket
+	// for a manual probe would pollute the scheduler's statistics.
+	mux.HandleFunc("POST /api/sandboxes/{id}/exec", d.requirePermission(authz.PermResourcesWrite, d.handleExecSandbox))
+	mux.HandleFunc("POST /api/sandboxes/{id}/renew", d.requirePermission(authz.PermResourcesWrite, d.handleRenewSandbox))
+	mux.HandleFunc("DELETE /api/sandboxes/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleTerminateSandbox))
+
+	// The provider catalogue: which isolation layers this instance knows about,
+	// and which of them can actually run here.
+	mux.HandleFunc("GET /api/sandbox-providers", d.requirePermission(authz.PermResourcesRead, d.handleListSandboxProviders))
+	mux.HandleFunc("POST /api/sandbox-providers/refresh", d.requirePermission(authz.PermResourcesWrite, d.handleRefreshSandboxProviders))
+
+	// Execution nodes: a desktop (agentbuddy) that runs commands on its own
+	// machine on this instance's behalf. Enrollment and revocation are an
+	// operator act; polling and reporting are the node's own credentials.
+	mux.HandleFunc("GET /api/sandbox-nodes", d.requirePermission(authz.PermResourcesRead, d.handleListSandboxNodes))
+	mux.HandleFunc("POST /api/sandbox-nodes", d.requirePermission(authz.PermResourcesWrite, d.handleRegisterSandboxNode))
+	mux.HandleFunc("DELETE /api/sandbox-nodes/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleRemoveSandboxNode))
+	mux.HandleFunc("POST /api/sandbox-nodes/{id}/heartbeat", d.requirePermission(authz.PermTasksWrite, d.handleNodeHeartbeat))
+	// The long poll and the result report are the node protocol itself: one
+	// parked GET, one POST per job, no session state on either side.
+	mux.HandleFunc("GET /api/sandbox-nodes/{id}/jobs", d.requirePermission(authz.PermTasksWrite, d.handleClaimNodeJob))
+	mux.HandleFunc("POST /api/sandbox-nodes/{id}/jobs/{job}", d.requirePermission(authz.PermTasksWrite, d.handleReportNodeJob))
 
 	// F14: knowledge — mock RAG retrieval over stored chunks.
 	mux.HandleFunc("GET /api/knowledge", d.requirePermission(authz.PermResourcesRead, d.handleListKnowledge))

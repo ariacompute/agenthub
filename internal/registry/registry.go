@@ -273,7 +273,16 @@ type Registry struct {
 	// not name a provider mode themselves (AGENTHUB_MODEL_ROUTER_MODE). It is
 	// set at wiring time and never mutated afterwards, so reads need no lock.
 	modelProviderMode string
+	// sandboxCheck answers "is this execution provider usable here?", so a
+	// resource cannot be saved pointing at a backend this host does not have.
+	// Nil means the check is not wired in (no control plane), and registration
+	// then accepts any syntactically valid name.
+	sandboxCheck SandboxChecker
 }
+
+// SandboxChecker reports whether an execution provider is registered and can run
+// on this host. It is a port so the registry never imports the control plane.
+type SandboxChecker func(name string) error
 
 // New builds an empty, in-memory registry.
 func New() *Registry {
@@ -323,6 +332,37 @@ func (r *Registry) WithModelRouterMode(mode string) *Registry {
 	return r
 }
 
+// WithSandboxChecker attaches the execution-provider check. Same shape as
+// WithModelRouterMode: the control plane is assembled before this is wired in, and
+// an instance without one leaves it nil.
+func (r *Registry) WithSandboxChecker(check SandboxChecker) *Registry {
+	r.mu.Lock()
+	r.sandboxCheck = check
+	r.mu.Unlock()
+	return r
+}
+
+// checkSandboxProvider refuses a resource that names an execution provider which
+// is unknown, or known but unusable on this host. An unnamed provider inherits the
+// instance default and is not checked: the lease reports that failure at execution
+// time, with the provider's own reason.
+func (r *Registry) checkSandboxProvider(e *Entry) error {
+	if e == nil || e.KindConfig == nil || e.KindConfig.Sandbox == nil {
+		return nil
+	}
+	name := strings.TrimSpace(e.KindConfig.Sandbox.Provider)
+	if name == "" {
+		return nil
+	}
+	r.mu.RLock()
+	check := r.sandboxCheck
+	r.mu.RUnlock()
+	if check == nil {
+		return nil
+	}
+	return check(name)
+}
+
 // effectiveModelProviderMode is the value Upsert validates against. An unset or
 // unknown mode degrades to DefaultModelProviderMode, so a misconfigured
 // environment can never turn every model entry into a gateway call.
@@ -361,6 +401,12 @@ func (r *Registry) Upsert(in *Entry) (*Entry, error) {
 		return nil, &httputil.Error{Code: CodeInvalidEntry}
 	}
 	if err := ValidateKindWithMode(in, r.effectiveModelProviderMode()); err != nil {
+		return nil, err
+	}
+	// A resource may name a provider, and naming one is a claim this host can run
+	// it: refusing at registration is what stops the first execution from being
+	// the moment an operator learns the backend is missing.
+	if err := r.checkSandboxProvider(in); err != nil {
 		return nil, err
 	}
 	ns, err := ParseNamespaceID(in.Namespace)

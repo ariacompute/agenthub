@@ -17,6 +17,14 @@ type TaskRunner interface {
 	Cancel(id string) (*a2a.Task, error)
 }
 
+// ownedRunner is the optional half: a runner that can attribute a task to an
+// actor. It is asserted rather than required so the interface above stays the
+// minimum a caller must implement, and a stub in a test does not have to grow a
+// method it does not care about.
+type ownedRunner interface {
+	SendAs(ctx context.Context, ownerID string, params a2a.MessageSendParams) (*a2a.Task, error)
+}
+
 // HubExecutor is the Worker layer. It turns a ticket into an ordinary hub task:
 // the run then inherits the state machine, spans, artifacts, events and push
 // notifications of every other task, and a human approval works through the same
@@ -55,7 +63,20 @@ func (x *HubExecutor) Launch(ctx context.Context, t *Ticket, a *Assignment) (*As
 	}
 	msg := a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart(Brief(ctx, t, trig, x.history)))
 	msg.Metadata = map[string]any{"ticket": t.ID, "router": true}
-	task, err := x.hub.Send(ctx, a2a.MessageSendParams{Message: msg})
+	// Attribute the run to the ticket's actor when the hub can take an owner. The
+	// assertion keeps TaskRunner as small as it was — a test stub does not have to
+	// grow a method it does not care about — while production gets lease reuse:
+	// without an owner every ticket step lands in the anonymous path and opens its
+	// own container.
+	var (
+		task *a2a.Task
+		err  error
+	)
+	if owned, ok := x.hub.(ownedRunner); ok && t.OwnerID != "" {
+		task, err = owned.SendAs(ctx, t.OwnerID, a2a.MessageSendParams{Message: msg})
+	} else {
+		task, err = x.hub.Send(ctx, a2a.MessageSendParams{Message: msg})
+	}
 	if err == nil && task != nil && x.link != nil && t.Focus != "" {
 		if lerr := x.link(ctx, t.Focus, task.ID, t.Resource); lerr != nil {
 			// A missing link costs the console a cross-reference; it must not

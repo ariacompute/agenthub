@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
+	"agenthub/internal/sandbox"
 )
 
 // agentConnector talks to an autonomous agent.
@@ -29,6 +32,16 @@ type agentConnector struct {
 	cardURL string
 	client  *http.Client
 	timeout time.Duration
+	// credentialEnv names the environment variable holding the credential. The
+	// value is read here, in the process that makes the call, and never leaves
+	// it: it is not put in the task metadata, the artifacts or the model's
+	// context. That is the whole point — an agent that never sees the secret
+	// cannot be talked into leaking it.
+	credentialEnv string
+	// egress is the allowlist a call must match. Empty means "the operator has
+	// not declared one", and the connector keeps the pre-existing behaviour
+	// rather than guessing a policy on their behalf.
+	egress []string
 }
 
 func (c *agentConnector) Kind() registry.Kind { return registry.KindAgent }
@@ -91,6 +104,7 @@ func (c *agentConnector) fetchCard(ctx context.Context) (*agentCard, error) {
 	if err != nil {
 		return nil, &httputil.Error{Code: CodeResourceUnreachable}
 	}
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, &httputil.Error{Code: CodeResourceUnreachable}
@@ -131,7 +145,11 @@ func (c *agentConnector) invokeA2A(ctx context.Context, req InvokeRequest) (Invo
 	if err != nil {
 		return InvokeResult{}, err
 	}
-	text, state, err := c.sendMessage(ctx, endpointFor(card, c.cardURL), req.Prompt)
+	endpoint := endpointFor(card, c.cardURL)
+	if err := c.allowedTarget(endpoint); err != nil {
+		return InvokeResult{}, err
+	}
+	text, state, err := c.sendMessage(ctx, endpoint, req.Prompt)
 	if err != nil {
 		return InvokeResult{}, err
 	}
@@ -194,6 +212,7 @@ func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt strin
 		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
@@ -348,6 +367,46 @@ func (c *agentConnector) Health(ctx context.Context, e *registry.Entry) (registr
 		return registry.HealthDegraded, nil
 	}
 	return registry.HealthHealthy, nil
+}
+
+// authorize attaches the credential when one is configured. Building the header
+// here rather than in the caller is what keeps the secret out of every structure
+// that gets logged or persisted.
+func (c *agentConnector) authorize(req *http.Request) {
+	if c.credentialEnv == "" {
+		return
+	}
+	token := strings.TrimSpace(os.Getenv(c.credentialEnv))
+	if token == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+}
+
+// allowedTarget enforces the declared egress allowlist against the endpoint the
+// card points at. The card comes from a remote party, so a card that names an
+// internal address would otherwise turn message/send into an SSRF primitive.
+func (c *agentConnector) allowedTarget(raw string) error {
+	if len(c.egress) == 0 {
+		// No allowlist declared: keep the pre-existing behaviour instead of
+		// inventing a policy. An operator who wants egress control declares it.
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return &httputil.Error{Code: sandbox.CodePolicyDenied}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	for _, allow := range c.egress {
+		allow = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(allow, "*.")))
+		if allow == "" {
+			continue
+		}
+		if host == allow || strings.HasSuffix(host, "."+allow) {
+			return nil
+		}
+	}
+	return &httputil.Error{Code: sandbox.CodePolicyDenied}
 }
 
 // isHTTP is the adapter-local half of registry's URL check: the Agent Card's url

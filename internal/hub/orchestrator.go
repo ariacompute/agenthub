@@ -191,8 +191,8 @@ func (h *Hub) startPushPrune() {
 
 // runner builds a per-request flow runner: the hub itself stays immutable so
 // concurrent requests never share mutable state.
-func (h *Hub) runner(emit Emit) *Runner {
-	return NewRunner(h.store, h.broker, h.invoker(emit), h.cfg.MaxParallel)
+func (h *Hub) runner(emit Emit, origin Origin) *Runner {
+	return NewRunner(h.store, h.broker, h.invoker(emit, origin), h.cfg.MaxParallel)
 }
 
 // Registry exposes the catalogue for the control plane.
@@ -219,14 +219,49 @@ func (h *Hub) Events(taskID string, since uint64, limit int) []Event {
 	return events
 }
 
+// Origin is who the work is attributed to and which scope its execution
+// environment is reused within.
+//
+// It exists because of a specific wiring mistake: the router launches hub tasks
+// on behalf of an actor, and without an owner every such task fell into the
+// anonymous path, which never reuses a sandbox lease. One container per step is
+// both slow and expensive, and it looks like a leak rather than a design choice.
+type Origin struct {
+	OwnerID string
+	Scope   string
+}
+
 // Send runs a task to completion (or to input-required) and returns it.
 func (h *Hub) Send(ctx context.Context, params a2a.MessageSendParams) (*a2a.Task, error) {
-	return h.run(ctx, params, nil)
+	return h.run(ctx, params, nil, Origin{})
+}
+
+// SendAs runs a task attributed to an owner, reusing its execution environment
+// within the scope the message carries (the router's ticket, else the context).
+func (h *Hub) SendAs(ctx context.Context, ownerID string, params a2a.MessageSendParams) (*a2a.Task, error) {
+	return h.run(ctx, params, nil, Origin{OwnerID: ownerID, Scope: scopeOf(params)})
 }
 
 // Stream runs a task while pushing every frame to emit.
 func (h *Hub) Stream(ctx context.Context, params a2a.MessageSendParams, emit Emit) (*a2a.Task, error) {
-	return h.run(ctx, params, emit)
+	return h.run(ctx, params, emit, Origin{})
+}
+
+// StreamAs is Stream with an owner, for the same reason SendAs exists.
+func (h *Hub) StreamAs(ctx context.Context, ownerID string, params a2a.MessageSendParams, emit Emit) (*a2a.Task, error) {
+	return h.run(ctx, params, emit, Origin{OwnerID: ownerID, Scope: scopeOf(params)})
+}
+
+// scopeOf mirrors sandbox.ScopeFor without importing the sandbox package here:
+// the hub must keep working when no execution control plane is wired in.
+func scopeOf(params a2a.MessageSendParams) string {
+	if v, ok := params.Message.Metadata["ticket"].(string); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	if strings.TrimSpace(params.Message.ContextID) != "" {
+		return strings.TrimSpace(params.Message.ContextID)
+	}
+	return "default"
 }
 
 // Get returns a task, optionally trimming its history.
@@ -293,7 +328,11 @@ func (h *Hub) Resume(ctx context.Context, params a2a.TaskResumeParams) (*a2a.Tas
 	// Resuming feeds the caller's answer back into the flow as the new input.
 	prompt := answer.Text()
 	steps := DefaultSteps(task.ResourceID)
-	res, err := h.runner(nil).Run(ctx, params.ID, steps, FlowContext{Text: prompt})
+	// A resumed task has no caller identity to inherit, but its own id is a stable
+	// scope: the steps of one task keep sharing the environment they created.
+	res, err := h.runner(nil, Origin{Scope: params.ID}).Run(ctx, params.ID, steps, FlowContext{
+		Text: prompt, Scope: params.ID,
+	})
 	if err != nil {
 		return h.fail(params.ID, err, nil)
 	}
@@ -365,7 +404,7 @@ func (h *Hub) GetPush(taskID string) (*a2a.PushNotificationConfig, error) {
 }
 
 // run is the shared implementation of message/send and message/stream.
-func (h *Hub) run(ctx context.Context, params a2a.MessageSendParams, emit Emit) (*a2a.Task, error) {
+func (h *Hub) run(ctx context.Context, params a2a.MessageSendParams, emit Emit, origin Origin) (*a2a.Task, error) {
 	// The gate is checked before anything is created: a restore must not find a
 	// half-created task in a table it is about to truncate.
 	if !h.enterTask() {
@@ -401,7 +440,9 @@ func (h *Hub) run(ctx context.Context, params a2a.MessageSendParams, emit Emit) 
 	if err != nil {
 		return h.fail(task.ID, err, emit)
 	}
-	res, err := h.runner(emit).Run(ctx, task.ID, steps, FlowContext{Text: msg.Text(), Kind: string(entry.Kind)})
+	res, err := h.runner(emit, origin).Run(ctx, task.ID, steps, FlowContext{
+		Text: msg.Text(), Kind: string(entry.Kind), OwnerID: origin.OwnerID, Scope: origin.Scope,
+	})
 	if err != nil {
 		return h.fail(task.ID, err, emit)
 	}
@@ -456,7 +497,7 @@ func (h *Hub) fail(taskID string, cause error, emit Emit) (*a2a.Task, error) {
 	return h.store.Get(taskID), adapterError(cause)
 }
 
-func (h *Hub) invoker(emit Emit) Invoker {
+func (h *Hub) invoker(emit Emit, origin Origin) Invoker {
 	return func(ctx context.Context, taskID string, selector string, prompt string) (Outcome, error) {
 		entry, err := h.selectBy(selector)
 		if err != nil {
@@ -471,6 +512,8 @@ func (h *Hub) invoker(emit Emit) Invoker {
 			Entry:      *entry,
 			Prompt:     prompt,
 			Metadata:   entry.Metadata,
+			OwnerID:    origin.OwnerID,
+			Scope:      origin.Scope,
 		}
 		res, err := conn.Invoke(ctx, req)
 		if err != nil {

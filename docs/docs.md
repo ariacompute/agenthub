@@ -316,6 +316,20 @@ A key is a long-lived bearer credential that authenticates as its owner but only
 
 Scope a key to the least permission it needs; a key can never be granted more than its owner holds. Treat the token as a secret — it is shown once and only its hash is stored.
 
+## Execution sandboxes
+
+Every agent action that touches the outside world runs inside a leased environment. The brain decides; the hands are a container, a user-space kernel, a microVM, a process sandbox or a node you enrolled — the control plane never runs anything as the host process.
+
+| Layer | Boundary |
+| --- | --- |
+| `container` | Docker or rootless podman: one namespace-isolated container per lease, read-only root, tmpfs scratch, and no network unless the resource asked for it. The default. |
+| `usermode-kernel` | runsc (gVisor) interposes a user-space kernel, so a container escape lands in Go rather than in the host kernel. |
+| `microvm` | Kata or Firecracker: a real boundary per lease, at the cost of a boot on creation. |
+| `process` | bubblewrap, nsjail, isolate: namespaces and seccomp without a container runtime. Cheaper, and only as strong as the host kernel. |
+| `platform` | A hosted runtime (E2B, Daytona, CubeSandbox, OpenHands) reached through a declarative template: no vendor SDK is compiled in. |
+| `remote` | A node you enrolled — agentbuddy on your own machine. The server queues a job and the node runs it inside its own root and allowlist. |
+| `none` | off refuses every execution. Nothing runs, and the console says so instead of falling back. |
+
 ## Errors
 
 Failures answer with a machine-readable code. Grouped here by the HTTP status they map to.
@@ -348,4 +362,4 @@ The body is always {"code": "..."}. Log the code rather than any prose that came
 
 ---
 
-Sections: Concepts · A2A methods · HTTP API · Authentication and permissions · Errors
+Sections: Concepts · A2A methods · HTTP API · Authentication and permissions · Execution sandboxes · Errors

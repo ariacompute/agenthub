@@ -118,6 +118,21 @@ const (
 	CodeRouterHandbackExhausted Code = "router_handback_exhausted"
 	CodeRouterPolicyInvalid     Code = "router_policy_invalid"
 	CodeRouterResourceUnset     Code = "router_resource_unset"
+
+	// Sandbox: execution environments. Two of these deliberately look alike and
+	// are not: FeatureUnavailable means the control plane is not wired in,
+	// SandboxUnsupported means it is wired in but the provider cannot run here
+	// (no docker socket, no bwrap binary). The first is an operator decision,
+	// the second is an environment problem, and the console says so.
+	CodeSandboxDisabled        Code = "sandbox_disabled"
+	CodeSandboxUnsupported     Code = "sandbox_unsupported"
+	CodeSandboxUnknownProvider Code = "sandbox_unknown_provider"
+	CodeSandboxPolicyDenied    Code = "sandbox_policy_denied"
+	CodeSandboxTimeout         Code = "sandbox_timeout"
+	CodeSandboxLeaseLost       Code = "sandbox_lease_lost"
+	CodeSandboxLimitReached    Code = "sandbox_limit_reached"
+	CodeSandboxNodeOffline     Code = "sandbox_node_offline"
+	CodeSandboxNotFound        Code = "sandbox_not_found"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -215,6 +230,23 @@ func WriteErr(w http.ResponseWriter, err error) {
 	// the command, the command itself was well formed.
 	case CodeRouterTicketClosed, CodeRouterHandbackExhausted, CodeRouterResourceUnset:
 		WriteError(w, http.StatusConflict, e.Code)
+	// Sandbox. "unsupported" is a conflict rather than a 500: retrying the same
+	// request against the same host will fail the same way until an operator
+	// installs the runtime or points the provider elsewhere.
+	case CodeSandboxDisabled, CodeSandboxPolicyDenied:
+		WriteError(w, http.StatusForbidden, e.Code)
+	case CodeSandboxUnsupported, CodeSandboxLeaseLost:
+		WriteError(w, http.StatusConflict, e.Code)
+	case CodeSandboxUnknownProvider:
+		WriteError(w, http.StatusBadRequest, e.Code)
+	case CodeSandboxNotFound:
+		WriteError(w, http.StatusNotFound, e.Code)
+	case CodeSandboxLimitReached:
+		WriteError(w, http.StatusTooManyRequests, e.Code)
+	case CodeSandboxNodeOffline:
+		WriteError(w, http.StatusServiceUnavailable, e.Code)
+	case CodeSandboxTimeout:
+		WriteError(w, http.StatusGatewayTimeout, e.Code)
 	case CodeFeatureUnavailable:
 		WriteError(w, http.StatusServiceUnavailable, e.Code)
 	default:

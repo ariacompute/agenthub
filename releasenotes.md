@@ -717,3 +717,72 @@ implementation log in `task-security.md`).
 - **Backup encryption**: when `AGENTHUB_ENCRYPTION_KEY` is set, checkpoint archives are
   encrypted at rest (AES-256-GCM) to `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest;
   verify recoverability with `scripts/backup-restore-drill.sh`.
+
+---
+
+## 14. Execution Sandboxes
+
+The brain and the hands are now separate. `internal/sandbox` is a control plane that leases an
+execution environment per `(owner, resource, scope)`; nothing the platform does on behalf of an
+agent runs as the host process any more.
+
+### Kernel
+
+- **Catalogue, not branches**: `sandbox.Registry` maps a name to a `Provider` plus a `Descriptor`
+  (layer, isolation strength, required binaries, source). Availability is probed, cached for 30s
+  and single-flighted — never spawned on a request path.
+- **One writer**: `Manager` resolves a key, reuses or creates, executes, records the audit row and
+  reclaims on TTL. `Service` is the facade and owns the only goroutine (a single-flight sweep with a
+  merge-one kick), the same shape `internal/router` already uses.
+- **Four layers plus platform**: container (`docker`, `podman`), user-space kernel (`runsc`),
+  microVM (`kata`), process (`bwrap`, plus declarative `nsjail` / `isolate` / `systemd-run` /
+  `local`), and hosted runtimes (`e2b`, `microsandbox`, `daytona`, `cubesandbox`, `openhands`) as
+  configuration templates. `mock` is deterministic and offline; `off` refuses everything.
+- **Three extension paths**: compile-time provider, declarative argv template, node protocol. Adding
+  a backend changes no Go code above the registry.
+
+### Guarantees
+
+- **Docker by default, refusal by design**: `AGENTHUB_SANDBOX_PROVIDER=docker`. An unreachable
+  socket yields `sandbox_unsupported` with the reason shown in the catalogue and `/healthz`; there
+  is no fallback to host execution.
+- **Leases outlive tasks**: cancelling a task does not destroy its environment, and a vanished
+  environment does not fail a task — the next call rebuilds one transparently.
+- **Ticket-scoped reuse**: the scope resolves `metadata.ticket` → `metadata.contextId` → `default`,
+  so the steps of one router ticket share an environment. `Hub.SendAs` carries the owner through
+  so those leases are attributed instead of being treated as anonymous.
+- **Concurrency is coordinated**: `SANDBOX_MAX_TOTAL ≥ ROUTER_MAX_TICKETS` is checked at startup,
+  and a refused lease is a retryable `sandbox_limit_reached` for the scheduler's back-off.
+- **Credentials stay out of the model**: remote agent calls inject `credential_env` server-side;
+  task metadata and artifacts keep only the variable name.
+
+### Closed execution surfaces
+
+- CLI no longer derives a command from the prompt's first word: the command must equal the
+  registered one, arguments are checked against `args_policy`, and a prompt can at most become
+  stdin. The receipt is real (`exitCode`, `durationMs`, `truncated`, `provider`).
+- MCP stdio starts inside the lease, so the tool allow list is enforced where the process runs.
+- Computers resolve to real leases (`provider` / `lease_id` / `node_id` / `expires_at`) and can be
+  probed once from the console.
+- Remote agents egress through the server, with an allow list.
+
+### Persistence, API and console
+
+- `021_sandboxes.sql` adds `sandbox_leases` / `sandbox_execs` / `sandbox_nodes` / `sandbox_jobs` /
+  `sandbox_events` plus the new `computers` columns; the audit table stores digests, never output.
+- `/api/sandboxes`, `/{id}`, `/stats`, `/events` (SSE with `since`), `/api/sandbox-providers` (grouped
+  by layer, with reasons) and `/api/sandbox-nodes` (enroll, heartbeat, long-poll, report).
+- An instance without the control plane answers `503 feature_unavailable`; a wired instance whose
+  backend cannot run answers `sandbox_unsupported`. The two are deliberately different, because one
+  is "configure it" and the other is "install it".
+
+### Tests
+
+- `internal/sandbox/sandbox_test.go`: reuse, scope isolation, anonymous non-reuse, owner ceiling,
+  audit rows, terminate, renewal ceiling, sweep, catalogue reasons, duplicate registration, stats,
+  event replay, and the job queue (single claim, capability match, unknown completion).
+- `tests/sandbox_e2e_test.go`: the console endpoints over real HTTP, an empty command refused, an
+  unknown lease 404, another owner's lease invisible, `503` when not wired, node enroll → claim →
+  report (and a second node refused), and the SSE replay.
+- agenthub web: `docs-content.spec.js` pins the sandbox docs group across all 13 languages, and the
+  monochrome guard still runs over the new copy.

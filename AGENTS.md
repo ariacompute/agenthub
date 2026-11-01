@@ -126,6 +126,17 @@ persistence ← internal/store（GORM 实现）
   `input-required → waitsForPerson` + 退避重试）、`bus.go`（有界事件扇出 + `since` 回放）、
   `service.go`（对外门面 `Run`/`Stop`/`Stats`/`ListTriggers`/`ListTickets`/`Cancel`/`Handback`/
   `Unsubscribe`/`Kick`/`Policies`/`Inject`/`Subscribe`）
+- `internal/sandbox`：**执行控制面**（大脑与双手解耦；端口在此定义、GORM 实现在 `store`，零新依赖）。
+  `types.go`（`Layer`/`State`/`Descriptor`/`Profile`/`Spec`/`Handle`/`ExecRequest`/`ExecResult`/`Lease`/
+  `ExecRecord`/`Node`/`Job`/`Stats`/`Event` + `Code*` 错误码）、`provider.go`（`Provider` 端口）、
+  `registry.go`（类型目录：builtin/declarative/node 三源 + 30s 探测缓存单飞）、`presets.go`（进程沙盒与
+  平台层声明式预设）、`declarative.go`（逐 argv 元素展开 + 占位符白名单 + 加载期校验，**绝不拼 shell**）、
+  `policy.go`（`Defaults` 与资源策略合并出 `Profile` + `ValidateProfile`/`ArgsAllowed`）、
+  `manager.go`（**单写者**：`Acquire` 键复用 + 单飞、`Exec`/`Attach`、`Renew`、`Sweep`、审计写入）、
+  `sweeper.go`（节拍单飞 + `kick` 合并）、`bus.go`（事件扇出 + `since` 回放）、`service.go`（门面：
+  `Run`/`Stop`/`Kick`/`Stats`/`Catalog`/`Execs`/`EventsSince`/节点与队列）、`memory.go`（内存双实现）、
+  `mock.go`（离线确定性）、`docker.go`（docker/podman，含 `runtime` 收口 runsc/kata）、`gvisor.go`、
+  `bwrap.go`、`remote.go`（节点协议：`JobQueue` 长轮询 + 认领/回传 + `RemoteProvider`）
 - `internal/schedules`：`cron.go`（`NextRun`/`ValidateCron`/`Advance`，复用 `backup.ParseCron` 的五段解析器，
   保存即算出下次到期、触发后再算一次）
 - `internal/handlers`：`handlers.go`（路由注册中心 + 静态回退 + `/healthz` 的 `database` 字段）、
@@ -304,6 +315,31 @@ make web-install / make web-dev / make web-build / make web-test
   脚本在 `/api/resources` 里找不到 `demo-mcp` / `demo-agent` 时直接 exit 2 并给出同一条命令。
 - 关闭开关**不会**清理已存在的行（`store.Seed` 只做 insert，不做 purge）；要回到干净状态手动
   `DELETE FROM resources WHERE id LIKE 'demo-%'`（compose 环境用 `make db-psql`）。
+
+## 执行沙盒（硬约定）
+
+- **默认 `docker`，失败即拒绝**：`AGENTHUB_SANDBOX_PROVIDER` 默认 `docker`；探测不到守护进程就是
+  `sandbox_unsupported`（目录端点与 `/healthz` 写原因），**禁止**回落到宿主进程执行。离线走显式
+  `AGENTHUB_SANDBOX_PROVIDER=mock`，`off` 表示全部拒绝。
+- **新增后端只动三处**：实现 `sandbox.Provider` 并 `Register`、或写一条 `AGENTHUB_SANDBOX_PROVIDERS`
+  声明式模板、或登记执行节点。`manager`/`hub`/`adapter`/`handlers` **不得**出现 provider 名字的
+  `switch` 分支。
+- **声明式模板是安全边界**：argv 逐元素展开，**绝不拼 shell、绝不经 `/bin/sh`**；占位符只能在白名单内；
+  未知占位符/空 argv/相对路径二进制在启动期拒绝。模板只来自运营者配置，永不来自请求。
+- **命令来源**：CLI 命令必须等于资源登记命令，参数按 `args_policy`（`none|prefix|passthrough`）校验；
+  **禁止**再从提示词推导命令（首词回退已删除），提示词最多作 stdin。
+- **租约与任务解耦**：任务取消/失败/重启不销毁租约；租约丢失不使任务失败（`Manager.Exec` 标 failed，
+  下次 `Acquire` 重建）。作用域解析 `metadata.ticket` → `metadata.contextId` → `default`。
+- **owner 必须贯穿**：经 router 发起的执行走 `Hub.SendAs(ticket.ActorID)`，否则租约落进「匿名不复用」。
+- **上限交叉校验**：`config.Validate()` 要求 `SANDBOX_MAX_TOTAL ≥ ROUTER_MAX_TICKETS`；取不到租约返回
+  **可重试**的 `sandbox_limit_reached`（与 `sandbox_policy_denied` 区分：前者会重试，后者不会）。
+- **审计只存摘要**：`sandbox_execs` 存命令摘要、退出码、耗时与 stdout/stderr 的 sha256，**不得**落全量输出。
+- **两种不可用语义**：未接线 → `503 feature_unavailable`；已接线但后端跑不了 → `sandbox_unsupported`。
+  控制台据此显示「沙盒已关闭」而不是空数据。
+- **新增 `/api/sandbox*` 路由**须同时登记 `handlers/listen.go` 的 `Listeners()` 与 `listen_test.go`
+  的 `probes`；迁移新增走 `022_*` 及以后，并同步 `store_test.go` 的 `want`。
+- **控制台试跑绕开 router**（`POST /api/sandboxes/{id}/exec`，审计标 `dry_run`）：手工探测不得凭空
+  开 ticket、污染统计或触发人工审批。
 
 ## 端口清单
 

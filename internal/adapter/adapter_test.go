@@ -41,6 +41,9 @@ func TestForResolvesEveryKind(t *testing.T) {
 func TestMockAdaptersAreDeterministic(t *testing.T) {
 	for _, kind := range registry.Kinds {
 		e := entryFor(kind)
+		// The command is registered on the entry, never taken from the prompt:
+		// that is the rule the CLI connector now enforces.
+		e.Metadata["command"] = "git"
 		conn, _ := For(&e, options())
 		req := InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: "leave request", Metadata: map[string]string{"command": "git"}}
 		first, err := conn.Invoke(context.Background(), req)
@@ -84,21 +87,37 @@ func TestAgentParksForApproval(t *testing.T) {
 }
 
 func TestCLIAllowlistAndTruncation(t *testing.T) {
-	e := entryFor(registry.KindCLI)
-	conn, _ := For(&e, options())
-
-	if _, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: "rm -rf /"}); httputil.AsError(err).Code != CodeCommandNotAllowed {
+	// A command that is registered but not allowlisted is refused.
+	blocked := entryFor(registry.KindCLI)
+	blocked.Metadata["command"] = "rm"
+	conn, _ := For(&blocked, options())
+	if _, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: blocked.ID, Entry: blocked, Prompt: "rm -rf /"}); httputil.AsError(err).Code != CodeCommandNotAllowed {
 		t.Fatalf("blocked command = %v", err)
 	}
-	if _, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: ""}); httputil.AsError(err).Code != CodeCommandNotAllowed {
+
+	// An entry with no registered command cannot be invoked at all, whatever the
+	// prompt says.
+	empty := entryFor(registry.KindCLI)
+	conn, _ = For(&empty, options())
+	if _, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: empty.ID, Entry: empty, Prompt: "git status"}); httputil.AsError(err).Code != CodeCommandNotAllowed {
 		t.Fatalf("empty command = %v", err)
 	}
+
+	// The allowlisted command runs, and the prompt is not turned into arguments:
+	// the default args policy allows none.
+	e := entryFor(registry.KindCLI)
+	e.Metadata["command"] = "git"
+	conn, _ = For(&e, options())
 	res, err := conn.Invoke(context.Background(), InvokeRequest{ResourceID: e.ID, Entry: e, Prompt: "git status --short"})
 	if err != nil {
 		t.Fatalf("allowed command: %v", err)
 	}
 	if !strings.Contains(res.Text, "cli=git") {
 		t.Fatalf("text = %q", res.Text)
+	}
+	// The prompt is offered to the command as stdin, never parsed as arguments.
+	if args, _ := res.Parts[1].Data["args"].([]string); len(args) != 0 {
+		t.Fatalf("prompt became arguments: %v", args)
 	}
 
 	tight := Options{CLITimeout: time.Second, CLIAllowlist: []string{"git"}, MaxOutputBytes: 8}

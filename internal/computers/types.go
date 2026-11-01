@@ -30,14 +30,22 @@ func NormalizeKind(s string) Kind {
 	return Kind("")
 }
 
-// Computer is one agent sandbox the console may attach to. In the first release the
-// console renders a mock view; session_ref is where a real driver would attach.
+// Computer is one agent sandbox the console may attach to.
+//
+// It used to carry a session_ref nobody could attach to. It now names the lease
+// that actually backs it, which is the difference between a card in a console
+// and an execution environment: the lease is what expires, what can be
+// terminated, and what the audit trail points at.
 type Computer struct {
 	ID         string `json:"id"`
 	OwnerID    string `json:"ownerId"`
 	AgentID    string `json:"agentId"`
 	Kind       Kind   `json:"kind"`
 	SessionRef string `json:"sessionRef"`
+	Provider   string `json:"provider,omitempty"`
+	LeaseID    string `json:"leaseId,omitempty"`
+	NodeID     string `json:"nodeId,omitempty"`
+	ExpiresAt  string `json:"expiresAt,omitempty"`
 	Status     string `json:"status"`
 	LastAction string `json:"lastAction"`
 	CreatedAt  string `json:"createdAt"`
@@ -48,4 +56,8 @@ type Store interface {
 	List(ctx context.Context, ownerID string) ([]*Computer, error)
 	Get(ctx context.Context, id string) (*Computer, error)
 	Create(ctx context.Context, c *Computer) (*Computer, error)
+	// Update writes back the fields a lease changes (status, last action, expiry).
+	Update(ctx context.Context, c *Computer) (*Computer, error)
+	// Delete removes the row; the caller terminates the lease first.
+	Delete(ctx context.Context, id string) error
 }

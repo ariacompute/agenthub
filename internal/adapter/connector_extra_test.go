@@ -6,28 +6,73 @@ import (
 	"testing"
 
 	"agenthub/internal/registry"
+	"agenthub/internal/sandbox"
 )
 
-func TestCommandFor(t *testing.T) {
-	// An explicit command wins over everything else.
-	cmd, args := commandFor(InvokeRequest{Command: "git", Args: []string{"status", "--short"}})
-	if cmd != "git" || len(args) != 2 || args[0] != "status" {
-		t.Fatalf("explicit command = %q %v", cmd, args)
+func TestCommandNeverComesFromThePrompt(t *testing.T) {
+	// The regression this pins: the first release read the prompt's first word as
+	// the command and the rest as arguments, so an allowlisted `gh` became
+	// arbitrary code execution. The prompt must not be able to name a command.
+	e := entryFor(registry.KindCLI)
+	e.KindConfig = &registry.KindConfig{CLI: &registry.CLIConfig{Command: "git"}}
+	conn, err := For(&e, options())
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A command carried in metadata is the next fallback.
-	cmd, _ = commandFor(InvokeRequest{Metadata: map[string]string{"command": "ls"}})
-	if cmd != "ls" {
-		t.Fatalf("metadata command = %q, want ls", cmd)
+	res, err := conn.Invoke(context.Background(), InvokeRequest{
+		ResourceID: e.ID,
+		Entry:      e,
+		Prompt:     "rm -rf / --no-preserve-root",
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
 	}
-	// Otherwise the prompt's first token is the command and the rest are args.
-	cmd, args = commandFor(InvokeRequest{Prompt: "echo hello world"})
-	if cmd != "echo" || len(args) != 2 || args[1] != "world" {
-		t.Fatalf("prompt command = %q %v", cmd, args)
+	if strings.Contains(res.Text, "cli=rm") {
+		t.Fatalf("prompt leaked into the command: %q", res.Text)
 	}
-	// No command anywhere yields an empty command (and a nil-ish args slice).
-	cmd, args = commandFor(InvokeRequest{})
-	if cmd != "" || len(args) != 0 {
-		t.Fatalf("empty request = %q %v", cmd, args)
+	if !strings.Contains(res.Text, "cli=git") {
+		t.Fatalf("registered command was not used: %q", res.Text)
+	}
+
+	// An entry with no registered command is refused outright rather than being
+	// filled in from the prompt.
+	empty := entryFor(registry.KindCLI)
+	conn2, err := For(&empty, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn2.Invoke(context.Background(), InvokeRequest{Entry: empty, Prompt: "echo hi"}); err == nil {
+		t.Fatal("a prompt-only CLI invocation must be refused")
+	}
+}
+
+func TestCLIArgsFollowThePolicy(t *testing.T) {
+	mk := func(policy string, allow []string) registry.Entry {
+		e := entryFor(registry.KindCLI)
+		e.KindConfig = &registry.KindConfig{
+			CLI:     &registry.CLIConfig{Command: "git"},
+			Sandbox: &registry.SandboxConfig{ArgsPolicy: policy, ArgsAllowlist: allow},
+		}
+		return e
+	}
+
+	// Default: no arguments from the caller at all.
+	def := mk("", nil)
+	if sandbox.ArgsAllowed(policyProfile(&def), []string{"status"}) {
+		t.Fatal("the default policy must refuse caller supplied arguments")
+	}
+	// Prefix policy: only the declared prefixes pass.
+	prefixed := mk(sandbox.ArgsPrefix, []string{"--short"})
+	if !sandbox.ArgsAllowed(policyProfile(&prefixed), []string{"--short"}) {
+		t.Fatal("a declared prefix must be allowed")
+	}
+	if sandbox.ArgsAllowed(policyProfile(&prefixed), []string{"--exec=evil"}) {
+		t.Fatal("an undeclared prefix must be refused")
+	}
+	// Passthrough is the explicit opt-out.
+	passthrough := mk(sandbox.ArgsPassthrough, nil)
+	if !sandbox.ArgsAllowed(policyProfile(&passthrough), []string{"anything"}) {
+		t.Fatal("passthrough must allow arguments")
 	}
 }
 

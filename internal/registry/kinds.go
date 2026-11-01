@@ -77,6 +77,12 @@ type KindConfig struct {
 	Skill  *SkillConfig  `json:"skill,omitempty"`
 	CLI    *CLIConfig    `json:"cli,omitempty"`
 	Custom *CustomConfig `json:"custom,omitempty"`
+	// Sandbox is the execution policy for this resource: which provider runs it,
+	// with what limits. It applies to every kind that executes something (cli,
+	// mcp over stdio, agent calls made on its behalf) and is validated when the
+	// resource is saved, so a typo is an error at registration rather than a
+	// surprise at run time.
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
 	// ConnectorPolicy gates external applications invoking this resource as a
 	// connector: Allowed runs immediately, AskFirst parks for a human approval
 	// (HITL), Off refuses. It defaults to Off so a freshly registered resource
@@ -121,6 +127,16 @@ type AgentConfig struct {
 	Capabilities    []string `json:"capabilities,omitempty"`
 	Skills          []string `json:"skills,omitempty"`
 	AuthScheme      string   `json:"auth_scheme,omitempty"`
+	// CredentialEnv names the environment variable holding the credential for
+	// this agent. The value is injected by the server when it calls out, and it
+	// never enters the model's context, the task metadata or the artifacts: the
+	// number one way credentials leak is by being handed to the thing being
+	// prompt-injected.
+	CredentialEnv string `json:"credential_env,omitempty"`
+	// EgressAllowlist bounds where the call may go. Empty means "no egress", not
+	// "anywhere": an agent resource that does not declare its destinations is
+	// refused rather than trusted.
+	EgressAllowlist []string `json:"egress_allowlist,omitempty"`
 }
 
 // MCPConfig is the MCP server descriptor: transport decides whether the server
@@ -156,6 +172,13 @@ type CLIConfig struct {
 	MaxOutputBytes int               `json:"max_output_bytes,omitempty"`
 	WorkDir        string            `json:"work_dir,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
+	// ArgsPolicy decides what an argument may be. "none" (the default) allows no
+	// caller supplied argument at all: an allowlisted command plus free arguments
+	// is the escalation chain the security review found, because gh, hf and
+	// modelscope can all execute arbitrary code from a flag.
+	ArgsPolicy string `json:"args_policy,omitempty"`
+	// ArgsAllowlist is the prefix vocabulary used when ArgsPolicy is "prefix".
+	ArgsAllowlist []string `json:"args_allowlist,omitempty"`
 }
 
 // CustomConfig holds an arbitrary, caller defined JSON schema. It is the
@@ -277,6 +300,12 @@ func ValidateKindWithMode(e *Entry, instanceDefault string) error {
 	}
 	if e.KindConfig == nil {
 		return nil
+	}
+	// The sandbox policy is kind independent, so it is checked once, before the
+	// per-kind block: a cli entry with a bad timeout should not have to also have
+	// a valid command to hear about it.
+	if err := validateSandbox(e.KindConfig.Sandbox); err != nil {
+		return err
 	}
 	switch e.Kind {
 	case KindModel:

@@ -2,23 +2,29 @@ package adapter
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
+	"agenthub/internal/sandbox"
 )
 
 // cliConnector is the "walkie-talkie" of the platform: a command in, a
-// structured receipt out. Safety is enforced here, in one place:
+// structured receipt out.
 //
-//  1. allowlist check before anything runs,
-//  2. a single invocation timeout,
-//  3. output truncation with the fact reported in the artifact metadata.
+// Two rules, and they are the whole security story for this kind:
 //
-// TODO(real): exec.CommandContext with the same allowlist, timeout and
-// truncation; the mock keeps the contract testable without a subprocess.
+//  1. The command comes from the resource record, never from the prompt. The
+//     first release read the prompt's first word as the command and the rest as
+//     arguments, which turned an allowlisted `gh` into an arbitrary code
+//     execution primitive.
+//  2. The arguments come from the caller, but only as far as the resource's
+//     args_policy allows. The default policy allows none.
+//
+// Execution itself goes through sandbox.Manager. When no sandbox control plane is
+// wired in, the connector keeps the original deterministic receipt: the two
+// behaviours share one signature so the pre-sandbox tests still mean something.
 type cliConnector struct {
 	opts Options
 }
@@ -26,26 +32,111 @@ type cliConnector struct {
 func (c *cliConnector) Kind() registry.Kind { return registry.KindCLI }
 
 func (c *cliConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeResult, error) {
-	command, args := commandFor(req)
+	command := entryCommand(&req.Entry)
 	if command == "" {
 		return InvokeResult{}, &httputil.Error{Code: CodeCommandNotAllowed}
 	}
 	if !c.allowed(command) {
 		return InvokeResult{}, &httputil.Error{Code: CodeCommandNotAllowed}
 	}
-
-	ctx, cancel := boundedContext(ctx, c.opts.CLITimeout)
-	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return InvokeResult{}, &httputil.Error{Code: CodeAdapterTimeout}
+	profile := policyProfile(&req.Entry)
+	if !sandbox.ArgsAllowed(profile, req.Args) {
+		return InvokeResult{}, &httputil.Error{Code: sandbox.CodePolicyDenied}
 	}
 
+	if c.opts.Sandbox == nil {
+		return c.mockInvoke(command, req.Args, profile)
+	}
+	return c.sandboxedInvoke(ctx, command, req, profile)
+}
+
+// sandboxedInvoke runs the registered command inside a leased environment.
+func (c *cliConnector) sandboxedInvoke(ctx context.Context, command string, req InvokeRequest, profile sandbox.Profile) (InvokeResult, error) {
+	timeoutMS := profile.TimeoutMS
+	if timeoutMS <= 0 {
+		timeoutMS = int(c.opts.CLITimeout.Milliseconds())
+	}
+	execReq := sandbox.ExecRequest{
+		Command:        command,
+		Args:           req.Args,
+		Stdin:          req.Prompt,
+		Dir:            profile.WorkDir,
+		TimeoutMS:      timeoutMS,
+		MaxOutputBytes: profile.MaxOutputBytes,
+	}
+	leaseReq := sandbox.LeaseRequest{
+		OwnerID:    req.OwnerID,
+		ResourceID: req.ResourceID,
+		Scope:      req.Scope,
+		Profile:    profile,
+	}
+	res, lease, err := c.opts.Sandbox.ExecOn(ctx, leaseReq, execReq)
+	if err != nil {
+		return InvokeResult{}, err
+	}
+	return receiptResult(req, command, req.Args, res, lease), nil
+}
+
+// receiptResult turns a real execution into the artifact the A2A layer returns.
+// The stdout becomes a text part; the receipt carries the identifiers an operator
+// needs to find the audit row.
+func receiptResult(req InvokeRequest, command string, args []string, res sandbox.ExecResult, lease *sandbox.Lease) InvokeResult {
+	text := strings.TrimSpace(res.Stdout)
+	if text == "" {
+		text = strings.TrimSpace(res.Stderr)
+	}
+	out := "cli=" + command + " exit=" + itoa(res.ExitCode) + " truncated=" + boolString(res.Truncated)
+	data := map[string]any{
+		"kind":       string(registry.KindCLI),
+		"resource":   req.Entry.Name,
+		"provider":   res.Provider,
+		"command":    command,
+		"args":       args,
+		"exit_code":  res.ExitCode,
+		"stdout":     res.Stdout,
+		"stderr":     res.Stderr,
+		"truncated":  res.Truncated,
+		"durationMs": res.DurationMS,
+		"receipt":    res.Receipt,
+	}
+	if lease != nil {
+		data["lease_id"] = lease.ID
+		data["scope"] = lease.Scope
+		data["expiresAt"] = lease.ExpiresAt
+	}
+	parts := []a2a.Part{a2a.NewDataPart(data)}
+	if text != "" {
+		parts = append([]a2a.Part{a2a.NewTextPart(text)}, parts...)
+	}
+	artifactMeta := []string{
+		"command", command,
+		"truncated", boolString(res.Truncated),
+		"provider", res.Provider,
+		"exit", itoa(res.ExitCode),
+	}
+	if lease != nil {
+		artifactMeta = append(artifactMeta, "lease", lease.ID)
+	}
+	return InvokeResult{
+		Text:      out,
+		Parts:     parts,
+		Artifacts: []a2a.Artifact{artifact("cli.receipt", 0, []a2a.Part{a2a.NewDataPart(data)}, artifactMeta...)},
+	}
+}
+
+// mockInvoke is the pre-sandbox behaviour, kept for tests and for an instance
+// that runs without a control plane.
+func (c *cliConnector) mockInvoke(command string, args []string, profile sandbox.Profile) (InvokeResult, error) {
 	stdout := "{\"command\":\"" + command + "\",\"args\":" + quoteArgs(args) + ",\"exit_code\":0,\"digest\":\"" + digest(command + " " + strings.Join(args, " "))[:16] + "\"}"
-	stdout, truncated := truncate(stdout, c.opts.MaxOutputBytes)
+	cap := profile.MaxOutputBytes
+	if cap <= 0 {
+		cap = c.opts.MaxOutputBytes
+	}
+	stdout, truncated := truncate(stdout, cap)
 	out := "cli=" + command + " exit=0 truncated=" + boolString(truncated)
 	data := map[string]any{
 		"kind":      string(registry.KindCLI),
-		"resource":  req.Entry.Name,
+		"resource":  "",
 		"provider":  MockProviderName,
 		"command":   command,
 		"args":      args,
@@ -60,18 +151,30 @@ func (c *cliConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeRes
 	}, nil
 }
 
-// Health measures the two things that decide whether a CLI can run, without
-// running it: is the command on PATH, and would the allowlist let it through?
-// Both are facts about this machine, so a missing command is unhealthy and a
-// command the server will refuse is degraded — the binary is there, it just is
-// not usable.
+// Health answers two different questions depending on how the instance is wired.
+//
+// With a sandbox, the binary lives inside the environment, so the only honest
+// measurement is whether the provider can run here. Without one, the original
+// probe still applies: is the command on PATH, and would the allowlist let it
+// through?
 func (c *cliConnector) Health(ctx context.Context, e *registry.Entry) (registry.Health, error) {
-	command := strings.TrimSpace(entryCommand(e))
+	command := entryCommand(e)
 	if command == "" {
-		// Without a command there is nothing to look for.
 		return nothingMeasured, nil
 	}
-	if _, err := exec.LookPath(command); err != nil {
+	if c.opts.Sandbox != nil {
+		profile := policyProfile(e)
+		provider := strings.TrimSpace(profile.Provider)
+		if provider == "" {
+			provider = c.opts.Sandbox.Registry().Default()
+		}
+		info, err := c.opts.Sandbox.Registry().Info(ctx, provider)
+		if err != nil || !info.Available {
+			return registry.HealthUnhealthy, nil
+		}
+		return registry.HealthHealthy, nil
+	}
+	if _, err := lookPath(command); err != nil {
 		return registry.HealthUnhealthy, nil
 	}
 	if !c.allowed(command) {
@@ -81,8 +184,8 @@ func (c *cliConnector) Health(ctx context.Context, e *registry.Entry) (registry.
 }
 
 // entryCommand is the command a record declares: kind_config.cli first, then the
-// metadata the examples use. It deliberately does not fall back to the prompt,
-// which is what an invocation may do, because a probe has no prompt to read.
+// metadata the examples use. It never reads the prompt — that fallback was the
+// escalation chain.
 func entryCommand(e *registry.Entry) string {
 	if e == nil {
 		return ""
@@ -102,28 +205,6 @@ func (c *cliConnector) allowed(command string) bool {
 		}
 	}
 	return false
-}
-
-// commandFor resolves the command line: explicit request fields win, otherwise
-// the prompt's first token is the command and the rest are arguments.
-func commandFor(req InvokeRequest) (string, []string) {
-	command := strings.TrimSpace(req.Command)
-	if command == "" {
-		command = strings.TrimSpace(metaString(req.Metadata, "command"))
-	}
-	args := req.Args
-	if command == "" {
-		fields := strings.Fields(req.Prompt)
-		if len(fields) == 0 {
-			return "", nil
-		}
-		command = fields[0]
-		args = fields[1:]
-	}
-	if args == nil {
-		args = []string{}
-	}
-	return command, args
 }
 
 func quoteArgs(args []string) string {

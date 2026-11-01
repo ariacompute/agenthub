@@ -367,6 +367,68 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | 持久 Effects 队列 / 事务 Outbox | **明确不做**——提交后同步驱动意图，靠「单写者 + 幂等重放」覆盖失败窗口 |
 | 人格化回复 / 长期记忆 | **不在范围**——执行者通过既有任务与会话表面发声 |
 
+## 执行沙盒
+
+平台不再以宿主进程身份执行任何东西。`internal/sandbox` 是控制面：按 `(归属人, 资源, 作用域)`
+租用执行环境、在其中执行、把每次执行落审计、空闲后回收。`hub`、`router` 与各适配器都不认识
+「容器」，它们向 `sandbox.Service` 要一次执行，只有 `Manager` 知道执行发生在哪里。
+
+结构与调度器刻意保持一致：消费方定义端口（`store.go`）、单写者（`Manager`）、单飞节拍
+（`Sweeper`）、可回放事件总线，以及同一套接口背后的「内存 / PostgreSQL」双实现。
+
+| | |
+| --- | --- |
+| 默认后端 | `docker`（`AGENTHUB_SANDBOX_PROVIDER`） |
+| 拒绝语义 | 运行时缺失返回 `sandbox_unsupported`，绝不静默回落到宿主执行 |
+| 隔离层 | 容器 · 用户态内核（gVisor）· microVM（Kata/Firecracker）· 进程沙盒（bubblewrap / nsjail / isolate）· 平台层（E2B / Daytona / CubeSandbox / OpenHands）· 远端节点 · off |
+| 租约键 | `(归属人, 资源, 作用域)`；作用域解析顺序 `metadata.ticket` → `metadata.contextId` → `default`，因此一个 ticket 的多步执行共享同一环境 |
+| 复用 | 命中即续租，超过 `AGENTHUB_SANDBOX_IDLE_TTL` 回收；匿名调用不复用 |
+| 上限 | `AGENTHUB_SANDBOX_MAX_PER_OWNER` / `_MAX_TOTAL`，与 `AGENTHUB_ROUTER_MAX_TICKETS` 交叉校验；取不到租约返回**可重试**的 `sandbox_limit_reached`，交由调度器退避消化 |
+| 审计 | 命令摘要、退出码、耗时与输出的 sha256——从不落全量输出 |
+| 控制台 | `/api/sandboxes`、`/api/sandboxes/{id}`、`/api/sandboxes/stats`、`/api/sandbox-providers`、`/api/sandbox-nodes`、`/api/sandboxes/events`（SSE，支持 `since`） |
+
+一类后端是**目录条目**，不是代码分支。不改控制面即可新增：
+
+1. **编译期**——实现 `sandbox.Provider` 并注册（`docker`、`podman`、`runsc`、`bwrap`、`mock`、`remote`）。
+2. **声明式**——通过 `AGENTHUB_SANDBOX_PROVIDERS` 交给运营者一份模板。argv 逐元素展开，
+   绝不经过 shell；未知占位符、空 argv 或相对路径二进制在**启动时即拒绝加载**。
+3. **节点协议**——登记一台机器，它用长轮询领取任务。
+
+`off` 拒绝一切执行；`mock` 是确定性的离线实现，且必须显式选择，离线演示不会变成默认姿态。
+
+### 哪些执行面进了沙盒
+
+四个执行面共用同一个 `Manager`：
+
+- **CLI**——命令必须等于资源登记的命令；参数按 `args_policy`（`none | prefix | passthrough`）
+  校验，提示词最多成为标准输入。「提示词首词即命令」的路径已删除。
+- **MCP stdio**——服务在租约内启动，工具白名单在进程真正运行的地方生效。
+- **计算机**——`shell / browser / screen` 会话引用真实租约，可在控制台一次性试跑（审计标 `dry_run`）。
+- **远端 Agent**——出网经服务端代理，密钥从 `credential_env` 注入，永不进入模型上下文或任务产物。
+
+### 默认 Docker，缺 Docker 也是一种答案
+
+`AGENTHUB_SANDBOX_PROVIDER` 默认 `docker`。套接字不可达时——没有守护进程、容器内没有
+`/var/run/docker.sock`、socket 代理未运行——目录端点如实报告 `available: false` 与原因，
+`/healthz` 同步反映，执行一律拒绝，控制台显示同一句话。不能隔离的实例不会改为在宿主上跑。
+
+在容器里部署：默认不挂载任何东西，或用 `AGENTHUB_SANDBOX_DOCKER_HOST` 指向只开
+`CONTAINERS`、`IMAGES`、`POST` 的 socket-proxy sidecar。直接挂 `/var/run/docker.sock`
+等价于把宿主 root 交给容器，`docker-compose.yml` 因此把该代理做成可选 profile。
+
+### 与托管运行时对比
+
+完整对比（含许可证）：[`docs/sandbox-landscape_cn.md`](docs/sandbox-landscape_cn.md)。
+
+| | agenthub |
+| --- | --- |
+| 边界 | 默认容器，可按资源升级到用户态内核、microVM 或你接入的节点 |
+| 厂商 SDK | 无——托管运行时用声明式模板接入 |
+| 远端 Agent 凭据 | 服务端注入，模型只看到变量名 |
+| 生命周期绑任务？ | 不绑——任务取消保留环境，环境消失则下次调用重建 |
+| 审计 | `sandbox_execs` 里只有摘要、退出码与耗时 |
+| 离线模式 | 显式 `mock`，绝不隐藏回落 |
+
 ## 错误约定
 
 后端**只返回机器可读 code**，绝不含自然语言；控制台在前端把 code 映射为本地化文案。

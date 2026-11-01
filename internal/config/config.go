@@ -6,8 +6,10 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"agenthub/internal/auth"
 	"agenthub/internal/backup"
 	"agenthub/internal/registry"
+	"agenthub/internal/sandbox"
 )
 
 // RouterAssessRule and RouterAssessModel are the two semantic layer modes of the
@@ -196,6 +199,53 @@ type Config struct {
 	// of what was done.
 	RouterTriggerTTL    time.Duration
 	RouterPruneInterval time.Duration
+
+	// The execution-environment control plane (sandboxes). It is on by default
+	// and its default provider is docker: execution is sandboxed unless an
+	// operator explicitly says otherwise. A host where docker cannot run refuses
+	// to execute rather than falling back to a bare process, which is the whole
+	// point of the change — the old behaviour (host-process execution) is no
+	// longer a silent default, it is an explicit AGENTHUB_SANDBOX_PROVIDER=local.
+	SandboxEnabled bool
+	// SandboxProvider is the provider name leases fall back to. "docker" is the
+	// default; "mock" is the deterministic offline backend tests and demos set
+	// explicitly; "off" refuses every execution.
+	SandboxProvider string
+	// SandboxProviders are operator-supplied declarative providers (nsjail,
+	// isolate, an internal wrapper...). Adding a backend crate-free is the point:
+	// the templates are data, validated at startup and expanded argv-by-argv.
+	SandboxProviders []sandbox.DeclarativeSpec
+	// SandboxProvidersJSON is the raw AGENTHUB_SANDBOX_PROVIDERS value, kept so
+	// Validate and the startup log can quote what the operator actually wrote.
+	SandboxProvidersJSON string
+	// SandboxDefaultImage is the container image container providers run when a
+	// resource names none.
+	SandboxDefaultImage string
+	// SandboxDockerHost is the daemon endpoint. Empty means "the CLI's own
+	// default" (/var/run/docker.sock, or DOCKER_HOST); a docker-socket-proxy
+	// sidecar is set here so agenthub never needs the raw host socket.
+	SandboxDockerHost string
+	// SandboxRuntime is the container runtime ("" | runsc | kata) the default
+	// container provider passes to the daemon.
+	SandboxRuntime string
+	// SandboxIdleTTL is how long a lease survives without an exec, and
+	// SandboxMaxTTL the hard ceiling a renewal cannot pass.
+	SandboxIdleTTL time.Duration
+	SandboxMaxTTL  time.Duration
+	// SandboxMaxPerOwner and SandboxMaxTotal are the lease ceilings. Total must be
+	// at least the router's concurrent tickets, otherwise a full router could not
+	// get an environment for every ticket it launched.
+	SandboxMaxPerOwner int
+	SandboxMaxTotal    int
+	// SandboxEgressAllowlist is the host allowlist a profile may reference when it
+	// asks for egress_allowlist networking. Empty means "no egress".
+	SandboxEgressAllowlist []string
+	// SandboxNodePollTimeout bounds a node's long poll. It has to stay under the
+	// idle timeout of whatever proxy sits in front of agenthub.
+	SandboxNodePollTimeout time.Duration
+	// SandboxSweepInterval is the reclaim beat: how often expired leases are
+	// destroyed and counters refreshed.
+	SandboxSweepInterval time.Duration
 }
 
 // BackupEnabled reports whether checkpointing is configured at all. Everything
@@ -307,11 +357,63 @@ func Load() (*Config, error) {
 				Scopes:       envList("AGENTHUB_OAUTH_OIDC_SCOPES", nil),
 			},
 		},
+		// Execution environments. On by default with docker as the provider: an
+		// instance that has not decided where commands run must not run them on
+		// the host. mock and off are explicit settings, never fallbacks.
+		SandboxEnabled:         envBool("AGENTHUB_SANDBOX_ENABLED", true),
+		SandboxProvider:        envStr("AGENTHUB_SANDBOX_PROVIDER", sandbox.ProviderDocker),
+		SandboxDefaultImage:    envStr("AGENTHUB_SANDBOX_DEFAULT_IMAGE", sandbox.DefaultImage),
+		SandboxDockerHost:      envStr("AGENTHUB_SANDBOX_DOCKER_HOST", ""),
+		SandboxRuntime:         envStr("AGENTHUB_SANDBOX_RUNTIME", ""),
+		SandboxIdleTTL:         envDur("AGENTHUB_SANDBOX_IDLE_TTL", 30*time.Minute),
+		SandboxMaxTTL:          envDur("AGENTHUB_SANDBOX_MAX_TTL", 2*time.Hour),
+		SandboxMaxPerOwner:     envInt("AGENTHUB_SANDBOX_MAX_PER_OWNER", 4),
+		SandboxMaxTotal:        envInt("AGENTHUB_SANDBOX_MAX_TOTAL", 16),
+		SandboxEgressAllowlist: envList("AGENTHUB_SANDBOX_EGRESS_ALLOWLIST", nil),
+		SandboxNodePollTimeout: envDur("AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT", 25*time.Second),
+		SandboxSweepInterval:   envDur("AGENTHUB_SANDBOX_SWEEP_INTERVAL", 30*time.Second),
+		SandboxProvidersJSON:   os.Getenv("AGENTHUB_SANDBOX_PROVIDERS"),
 	}
+	// Declarative providers are parsed here rather than in main so a malformed
+	// template is a startup failure with the variable's name in the message.
+	specs, err := ParseSandboxProviders(c.SandboxProvidersJSON)
+	if err != nil {
+		return nil, err
+	}
+	c.SandboxProviders = specs
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return c, nil
+}
+
+// ParseSandboxProviders reads AGENTHUB_SANDBOX_PROVIDERS: a JSON array of
+// declarative templates. It only checks the shape a template must have to be
+// loadable; the deeper argv validation lives in sandbox.NewDeclarativeProvider,
+// which main calls so the failure happens before the listener opens.
+func ParseSandboxProviders(raw string) ([]sandbox.DeclarativeSpec, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var specs []sandbox.DeclarativeSpec
+	if err := json.Unmarshal([]byte(raw), &specs); err != nil {
+		return nil, fmt.Errorf("AGENTHUB_SANDBOX_PROVIDERS must be a JSON array of provider templates: %w", err)
+	}
+	for i, spec := range specs {
+		if strings.TrimSpace(spec.Name) == "" {
+			return nil, fmt.Errorf("AGENTHUB_SANDBOX_PROVIDERS[%d]: name is required", i)
+		}
+		if !filepath.IsAbs(strings.TrimSpace(spec.Binary)) {
+			return nil, fmt.Errorf("AGENTHUB_SANDBOX_PROVIDERS[%d] (%s): binary must be an absolute path, got %q",
+				i, spec.Name, spec.Binary)
+		}
+		if len(spec.ExecArgs) == 0 || len(spec.ExecArgs) > 2 {
+			return nil, fmt.Errorf("AGENTHUB_SANDBOX_PROVIDERS[%d] (%s): execArgs must have one or two argv segments",
+				i, spec.Name)
+		}
+	}
+	return specs, nil
 }
 
 // Validate rejects impossible combinations instead of silently falling back.
@@ -447,6 +549,43 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("AGENTHUB_ROUTER_ASSESS_MODE must be %q or %q, got %q",
 			RouterAssessRule, RouterAssessModel, c.RouterAssessMode)
+	}
+	// The sandbox control plane's tuning is only checked when it is switched on,
+	// for the same reason: a hand-built struct that leaves the block zeroed must
+	// stay valid, and an instance with the feature off must not be rejected for
+	// values it never reads.
+	if c.SandboxEnabled {
+		if strings.TrimSpace(c.SandboxProvider) == "" {
+			c.SandboxProvider = sandbox.ProviderDocker
+		}
+		if c.SandboxIdleTTL <= 0 || c.SandboxMaxTTL <= 0 {
+			return fmt.Errorf("AGENTHUB_SANDBOX_IDLE_TTL and AGENTHUB_SANDBOX_MAX_TTL must be positive")
+		}
+		if c.SandboxMaxTTL < c.SandboxIdleTTL {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_TTL (%s) must be at least AGENTHUB_SANDBOX_IDLE_TTL (%s)",
+				c.SandboxMaxTTL, c.SandboxIdleTTL)
+		}
+		if c.SandboxMaxPerOwner < 1 || c.SandboxMaxPerOwner > 64 {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_PER_OWNER must be 1..64, got %d", c.SandboxMaxPerOwner)
+		}
+		if c.SandboxMaxTotal < c.SandboxMaxPerOwner || c.SandboxMaxTotal > 256 {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_TOTAL must be %d..256, got %d",
+				c.SandboxMaxPerOwner, c.SandboxMaxTotal)
+		}
+		// The cross-check the scheduler needs: a router that has launched
+		// MaxTickets concurrent tickets must be able to lease an environment for
+		// every one of them. Below that, the sandbox ceiling silently serialises
+		// the router and every ticket past the bound looks like a retry loop.
+		if c.RouterEnabled && c.SandboxMaxTotal < c.RouterMaxTickets {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_TOTAL (%d) must be at least AGENTHUB_ROUTER_MAX_TICKETS (%d) when both features are enabled",
+				c.SandboxMaxTotal, c.RouterMaxTickets)
+		}
+		if c.SandboxNodePollTimeout <= 0 || c.SandboxNodePollTimeout > 60*time.Second {
+			return fmt.Errorf("AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT must be 1s..60s, got %s", c.SandboxNodePollTimeout)
+		}
+		if c.SandboxSweepInterval <= 0 || c.SandboxSweepInterval > 10*time.Minute {
+			return fmt.Errorf("AGENTHUB_SANDBOX_SWEEP_INTERVAL must be 1s..10m, got %s", c.SandboxSweepInterval)
+		}
 	}
 	return nil
 }

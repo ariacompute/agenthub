@@ -15,6 +15,7 @@ import (
 	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
+	"agenthub/internal/sandbox"
 )
 
 // Machine readable error codes produced by adapters.
@@ -35,6 +36,10 @@ type Options struct {
 	ModelRouterMode string
 	// AgentTimeout bounds one Agent Card fetch plus one message/send.
 	AgentTimeout time.Duration
+	// Sandbox is the execution environment control plane. When it is nil the
+	// adapters keep their original offline behaviour, which is what keeps the
+	// pre-sandbox unit tests meaningful: two behaviours, one signature.
+	Sandbox *sandbox.Service
 }
 
 // DefaultAgentTimeout applies when no timeout is configured, so a card fetch can
@@ -53,6 +58,12 @@ type InvokeRequest struct {
 	Metadata   map[string]string
 	Command    string
 	Args       []string
+	// OwnerID is who the execution is billed to and who may see the resulting
+	// lease. Empty means anonymous, which deliberately never reuses a lease.
+	OwnerID string
+	// Scope is the lease reuse key: the router's ticket id when the call came
+	// through a ticket, otherwise the conversation id.
+	Scope string
 }
 
 // InvokeResult is the structured outcome of one call.
@@ -89,13 +100,22 @@ func For(e *registry.Entry, opts Options) (Connector, error) {
 		if timeout <= 0 {
 			timeout = DefaultAgentTimeout
 		}
-		cardURL := ""
+		cardURL, credentialEnv := "", ""
+		var egress []string
 		if e.KindConfig != nil && e.KindConfig.Agent != nil {
 			cardURL = strings.TrimSpace(e.KindConfig.Agent.CardURL)
+			credentialEnv = strings.TrimSpace(e.KindConfig.Agent.CredentialEnv)
+			egress = e.KindConfig.Agent.EgressAllowlist
 		}
-		return &agentConnector{cardURL: cardURL, client: &http.Client{Timeout: timeout}, timeout: timeout}, nil
+		return &agentConnector{
+			cardURL:       cardURL,
+			client:        &http.Client{Timeout: timeout},
+			timeout:       timeout,
+			credentialEnv: credentialEnv,
+			egress:        egress,
+		}, nil
 	case registry.KindMCP:
-		return &mcpConnector{}, nil
+		return &mcpConnector{sandbox: opts.Sandbox}, nil
 	case registry.KindSkill:
 		return &skillConnector{}, nil
 	case registry.KindCLI:

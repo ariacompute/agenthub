@@ -21,16 +21,23 @@ func NewComputersStore(db *gorm.DB) computers.Store {
 }
 
 func toDomainComputer(r *model.Computer) *computers.Computer {
-	return &computers.Computer{
+	out := &computers.Computer{
 		ID:         r.ID,
 		OwnerID:    r.OwnerID,
 		AgentID:    r.AgentID,
 		Kind:       computers.Kind(r.Kind),
 		SessionRef: r.SessionRef,
+		Provider:   r.Provider,
+		LeaseID:    r.LeaseID,
+		NodeID:     r.NodeID,
 		Status:     r.Status,
 		LastAction: r.LastAction,
 		CreatedAt:  r.CreatedAt.UTC().Format(time.RFC3339),
 	}
+	if r.ExpiresAt != nil {
+		out.ExpiresAt = r.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 func (s *computersStore) List(ctx context.Context, ownerID string) ([]*computers.Computer, error) {
@@ -73,6 +80,10 @@ func (s *computersStore) Create(ctx context.Context, c *computers.Computer) (*co
 		AgentID:    c.AgentID,
 		Kind:       string(c.Kind),
 		SessionRef: c.SessionRef,
+		Provider:   c.Provider,
+		LeaseID:    c.LeaseID,
+		NodeID:     c.NodeID,
+		ExpiresAt:  parseTimePtr(c.ExpiresAt),
 		Status:     c.Status,
 		LastAction: c.LastAction,
 		CreatedAt:  time.Now().UTC(),
@@ -81,4 +92,37 @@ func (s *computersStore) Create(ctx context.Context, c *computers.Computer) (*co
 		return nil, err
 	}
 	return toDomainComputer(&row), nil
+}
+
+func (s *computersStore) Update(ctx context.Context, c *computers.Computer) (*computers.Computer, error) {
+	updates := map[string]any{
+		"session_ref": c.SessionRef,
+		"provider":    c.Provider,
+		"lease_id":    c.LeaseID,
+		"node_id":     c.NodeID,
+		"expires_at":  parseTimePtr(c.ExpiresAt),
+		"status":      c.Status,
+		"last_action": c.LastAction,
+	}
+	if err := s.db.WithContext(ctx).Model(&model.Computer{}).Where("id = ?", c.ID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, c.ID)
+}
+
+func (s *computersStore) Delete(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Computer{}).Error
+}
+
+// parseTimePtr keeps an empty string meaning "no expiry" instead of the zero
+// time, which would render as 0001-01-01 in the console.
+func parseTimePtr(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return nil
+	}
+	return &t
 }

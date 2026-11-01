@@ -76,6 +76,7 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /api/computers":         {http.MethodGet, "/api/computers", ""},
 		"POST /api/computers":        {http.MethodPost, "/api/computers", `{"kind":"browser"}`},
 		"GET /api/computers/{id}":    {http.MethodGet, "/api/computers/comp1", ""},
+		"DELETE /api/computers/{id}": {http.MethodDelete, "/api/computers/comp1", ""},
 		"GET /api/schedules":         {http.MethodGet, "/api/schedules", ""},
 		"POST /api/schedules":        {http.MethodPost, "/api/schedules", `{"goal":"demo"}`},
 		"GET /api/schedules/{id}":    {http.MethodGet, "/api/schedules/sched1", ""},
@@ -96,8 +97,26 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"PUT /api/router/policies/{source}":            {http.MethodPut, "/api/router/policies/thread", `{"mode":"candidate"}`},
 		"POST /api/router/passes":                      {http.MethodPost, "/api/router/passes", ""},
 		"GET /api/router/events":                       {http.MethodGet, "/api/router/events?since=0", ""},
-		"GET /api/knowledge":                           {http.MethodGet, "/api/knowledge", ""},
-		"GET /healthz":                                 {http.MethodGet, "/healthz", ""},
+		// The sandbox endpoints answer 503 without a control plane wired in, not
+		// 404. The job poll carries wait=0 so the probe cannot park: an idle node
+		// is supposed to get an immediate 204.
+		"GET /api/sandboxes":                      {http.MethodGet, "/api/sandboxes", ""},
+		"GET /api/sandboxes/stats":                {http.MethodGet, "/api/sandboxes/stats", ""},
+		"GET /api/sandboxes/events":               {http.MethodGet, "/api/sandboxes/events?since=0", ""},
+		"GET /api/sandboxes/{id}":                 {http.MethodGet, "/api/sandboxes/sbx1", ""},
+		"POST /api/sandboxes/{id}/exec":           {http.MethodPost, "/api/sandboxes/sbx1/exec", `{"command":"echo","args":["hi"]}`},
+		"POST /api/sandboxes/{id}/renew":          {http.MethodPost, "/api/sandboxes/sbx1/renew", ""},
+		"DELETE /api/sandboxes/{id}":              {http.MethodDelete, "/api/sandboxes/sbx1", ""},
+		"GET /api/sandbox-providers":              {http.MethodGet, "/api/sandbox-providers", ""},
+		"POST /api/sandbox-providers/refresh":     {http.MethodPost, "/api/sandbox-providers/refresh", ""},
+		"GET /api/sandbox-nodes":                  {http.MethodGet, "/api/sandbox-nodes", ""},
+		"POST /api/sandbox-nodes":                 {http.MethodPost, "/api/sandbox-nodes", `{"id":"node-1","name":"laptop"}`},
+		"DELETE /api/sandbox-nodes/{id}":          {http.MethodDelete, "/api/sandbox-nodes/node-1", ""},
+		"POST /api/sandbox-nodes/{id}/heartbeat":  {http.MethodPost, "/api/sandbox-nodes/node-1/heartbeat", ""},
+		"GET /api/sandbox-nodes/{id}/jobs":        {http.MethodGet, "/api/sandbox-nodes/node-1/jobs?wait=0", ""},
+		"POST /api/sandbox-nodes/{id}/jobs/{job}": {http.MethodPost, "/api/sandbox-nodes/node-1/jobs/job-1", `{"exitCode":0}`},
+		"GET /api/knowledge":                      {http.MethodGet, "/api/knowledge", ""},
+		"GET /healthz":                            {http.MethodGet, "/healthz", ""},
 	}
 
 	listeners := Listeners()

@@ -9,13 +9,29 @@
 // The endpoint list mirrors internal/handlers/handlers.go. When a route moves
 // there it moves here too: this file is the user-facing half of that table.
 
-/** The five top-level sections, in reading order. */
+/** The six top-level sections, in reading order. */
 export const docsSections = [
   { id: 'concepts', titleKey: 'sectionConcepts', bodyKey: 'conceptsBody' },
   { id: 'a2a', titleKey: 'sectionA2a', bodyKey: 'a2aBody' },
   { id: 'http', titleKey: 'sectionHttp', bodyKey: 'httpBody' },
   { id: 'auth', titleKey: 'sectionAuth', bodyKey: 'authBody' },
+  { id: 'sandbox', titleKey: 'sectionSandbox', bodyKey: 'sandboxBody' },
   { id: 'errors', titleKey: 'sectionErrors', bodyKey: 'errorsBody' },
+]
+
+/**
+ * The execution layers, strongest boundary first. The layer identifier renders
+ * verbatim in every locale — it is the same token the API returns — and only the
+ * description crosses into docs-copy.js.
+ */
+export const sandboxLayers = [
+  { layer: 'container', descKey: 'sandboxLayerContainerDesc' },
+  { layer: 'usermode-kernel', descKey: 'sandboxLayerUserKernelDesc' },
+  { layer: 'microvm', descKey: 'sandboxLayerMicrovmDesc' },
+  { layer: 'process', descKey: 'sandboxLayerProcessDesc' },
+  { layer: 'platform', descKey: 'sandboxLayerPlatformDesc' },
+  { layer: 'remote', descKey: 'sandboxLayerRemoteDesc' },
+  { layer: 'none', descKey: 'sandboxLayerNoneDesc' },
 ]
 
 /** Six resource lanes. `kind` renders through enumLabel, never translated here. */

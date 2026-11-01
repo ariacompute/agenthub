@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"agenthub/internal/computers"
 	"agenthub/internal/httputil"
+	"agenthub/internal/sandbox"
 )
 
 // computersReady short-circuits computer endpoints when the store is absent (the
@@ -23,6 +25,13 @@ type computerRequest struct {
 	SessionRef string `json:"sessionRef"`
 	Status     string `json:"status"`
 	LastAction string `json:"lastAction"`
+	// Provider overrides the instance default for this one computer, so an
+	// operator can give a shell computer microVM isolation while the rest of the
+	// instance runs plain containers.
+	Provider string `json:"provider"`
+	// Scope overrides the lease reuse key. Empty means "one environment per
+	// computer", which is what the console's cards represent.
+	Scope string `json:"scope"`
 }
 
 func (d Deps) handleListComputers(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +62,11 @@ func (d Deps) handleGetComputer(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, c)
 }
 
+// handleCreateComputer records the card and leases the environment behind it. The
+// two happen together on purpose: a computer row with no lease would be a console
+// card that cannot run anything, which is exactly the placeholder this change
+// removes. If the environment cannot be created the row is rolled back and the
+// coded error is returned — no silent degradation to "mock".
 func (d Deps) handleCreateComputer(w http.ResponseWriter, r *http.Request) {
 	if !d.computersReady(w) {
 		return
@@ -70,20 +84,90 @@ func (d Deps) handleCreateComputer(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "idle"
 	}
+	ownerID := PrincipalFrom(r).UserID
 	c := &computers.Computer{
-		OwnerID:    PrincipalFrom(r).UserID,
+		OwnerID:    ownerID,
 		AgentID:    req.AgentID,
 		Kind:       kind,
 		SessionRef: req.SessionRef,
 		Status:     status,
 		LastAction: req.LastAction,
 	}
-	// TODO(real): attach a real sandboxed driver (browser / shell / screen) here
-	// instead of recording a placeholder session. The first release is mock only.
 	created, err := d.Computers.Create(r.Context(), c)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
 	}
-	httputil.WriteJSON(w, http.StatusCreated, created)
+	if d.Sandboxes == nil {
+		// No control plane: the row is the whole feature, as it was before.
+		httputil.WriteJSON(w, http.StatusCreated, created)
+		return
+	}
+
+	scope := req.Scope
+	if scope == "" {
+		scope = "computer:" + created.ID
+	}
+	lease, err := d.Sandboxes.Acquire(r.Context(), sandbox.LeaseRequest{
+		OwnerID:    ownerID,
+		ResourceID: created.AgentID,
+		Scope:      scope,
+		Provider:   req.Provider,
+	})
+	if err != nil {
+		// Roll back: leaving a card behind would tell the operator an environment
+		// exists when the lease was refused (no docker socket, limit reached...).
+		if derr := d.Computers.Delete(r.Context(), created.ID); derr != nil && d.Log != nil {
+			d.Log.Warn("computers: rollback failed", "computer", created.ID, "error", derr)
+		}
+		httputil.WriteErr(w, err)
+		return
+	}
+	created.Provider = lease.Provider
+	created.LeaseID = lease.ID
+	created.NodeID = lease.NodeID
+	created.Status = lease.State
+	if !lease.ExpiresAt.IsZero() {
+		created.ExpiresAt = lease.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	updated, err := d.Computers.Update(r.Context(), created)
+	if err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusCreated, updated)
+}
+
+// handleDeleteComputer terminates the environment and drops the card. The lease is
+// terminated first so the container is not left running behind a row nobody can
+// see; a lease that is already gone is not an error, because the sweep may have
+// reclaimed it.
+func (d Deps) handleDeleteComputer(w http.ResponseWriter, r *http.Request) {
+	if !d.computersReady(w) {
+		return
+	}
+	c, err := d.Computers.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	if c == nil {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeComputerNotFound)
+		return
+	}
+	caller := PrincipalFrom(r).UserID
+	if caller != "" && c.OwnerID != "" && c.OwnerID != caller {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeComputerNotFound)
+		return
+	}
+	if c.LeaseID != "" && d.Sandboxes != nil {
+		if terr := d.Sandboxes.Terminate(r.Context(), c.LeaseID); terr != nil && d.Log != nil {
+			d.Log.Warn("computers: lease termination failed", "computer", c.ID, "lease", c.LeaseID, "error", terr)
+		}
+	}
+	if err := d.Computers.Delete(r.Context(), c.ID); err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

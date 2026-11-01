@@ -6,10 +6,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
 	"agenthub/internal/router"
+	"agenthub/internal/sandbox"
 	"agenthub/internal/secure"
 	"agenthub/internal/store"
 	"agenthub/internal/threads"
@@ -121,12 +124,43 @@ func main() {
 			"hint", "AGENTHUB_REGISTRY_SYNC_FIXTURE is on, no source will reach the network")
 	}
 
+	// Execution environments. The stack is built before the adapters because the
+	// adapters are what run commands: assembling them first would mean one code
+	// path where a CLI resource still executes on the host.
+	sandboxSvc, err := newSandboxStack(cfg, db)
+	if err != nil {
+		slog.Error("sandbox", "error", err)
+		os.Exit(1)
+	}
+	if sandboxSvc != nil {
+		// A resource may name an execution provider; naming one is a claim this
+		// host can run it. Resolve through the catalogue (and its 30s probe cache)
+		// so an unknown or unusable backend is refused while it is being written,
+		// not on the first execution.
+		reg.WithSandboxChecker(func(name string) error {
+			_, _, err := sandboxSvc.Registry().RequireAvailable(context.Background(), name)
+			return err
+		})
+		sandboxCtx, stopSandbox := context.WithCancel(context.Background())
+		// Registered before the router's defer, so shutdown runs it *after* the
+		// router stopped: no new task can arrive while the sweep is still up,
+		// and the sweep only reclaims, it never destroys a live lease.
+		defer sandboxSvc.Stop()
+		defer stopSandbox()
+		go func() {
+			if err := sandboxSvc.Run(sandboxCtx); err != nil {
+				slog.Error("sandbox: sweep stopped", "error", err)
+			}
+		}()
+	}
+
 	opts := adapter.Options{
 		CLITimeout:      cfg.CLITimeout,
 		CLIAllowlist:    cfg.CLIAllowlist,
 		MaxOutputBytes:  cfg.MaxOutputBytes,
 		ModelRouterMode: cfg.ModelRouterMode,
 		AgentTimeout:    cfg.AgentTimeout,
+		Sandbox:         sandboxSvc,
 	}
 	pushRepo := store.NewPushRepository(db)
 	pusher := hub.PushNotifier(&hub.MockNotifier{Repo: pushRepo})
@@ -223,7 +257,7 @@ func main() {
 			"hint", "set AGENTHUB_ROUTER_ENABLED=true, schedules then fire on their cron expression")
 	}
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc}
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc, Sandboxes: sandboxSvc}
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           handlers.Wrap(handlers.Register(deps), cfg),
@@ -270,6 +304,155 @@ func main() {
 		slog.Error("shutdown", "error", err)
 	}
 	slog.Info("agenthub stopped")
+}
+
+// newSandboxStack assembles the execution-environment control plane: the provider
+// catalogue, the lease manager and the facade the handlers and adapters talk to.
+//
+// It returns nil when the feature is switched off, which is what makes the sandbox
+// endpoints answer 503 feature_unavailable and the adapters keep their pre-sandbox
+// behaviour. Everything else — including a provider that cannot run on this host —
+// is a started control plane that fails closed at execution time with
+// sandbox_unsupported: refusing loudly beats degrading quietly.
+func newSandboxStack(cfg *config.Config, db *gorm.DB) (*sandbox.Service, error) {
+	if !cfg.SandboxEnabled {
+		slog.Info("sandbox: disabled",
+			"hint", "set AGENTHUB_SANDBOX_ENABLED=true to lease execution environments; commands then run where the resource says")
+		return nil, nil
+	}
+
+	// The queue exists before the catalogue because the remote provider is built
+	// on it: a node's long poll *is* the queue, so there is nothing to persist.
+	queue := sandbox.NewJobQueue()
+	catalogue := sandbox.NewRegistry(sandbox.RegistryOptions{
+		Default: cfg.SandboxProvider,
+		Clock:   time.Now,
+	})
+	for _, provider := range builtinSandboxProviders(cfg, queue) {
+		if err := catalogue.Register(provider); err != nil {
+			return nil, fmt.Errorf("register provider %q: %w", provider.Name(), err)
+		}
+	}
+	for i, spec := range cfg.SandboxProviders {
+		provider, err := sandbox.NewDeclarativeProvider(spec)
+		if err != nil {
+			return nil, fmt.Errorf("AGENTHUB_SANDBOX_PROVIDERS[%d] (%s): %w", i, spec.Name, err)
+		}
+		if err := catalogue.Register(provider); err != nil {
+			// A duplicate name is refused rather than replaced: two definitions of
+			// "docker" would make the catalogue lie about what will run.
+			return nil, fmt.Errorf("AGENTHUB_SANDBOX_PROVIDERS[%d] (%s): %w", i, spec.Name, err)
+		}
+	}
+
+	sbStore := store.NewSandboxStore(db)
+	bus := sandbox.NewBus(sbStore, time.Now)
+	manager := sandbox.NewManager(sandbox.ManagerOptions{
+		Registry: catalogue,
+		Store:    sbStore,
+		Defaults: sandboxDefaults(cfg),
+		IdleTTL:  cfg.SandboxIdleTTL,
+		MaxTTL:   cfg.SandboxMaxTTL,
+		// The ceilings are what keeps one tenant from filling the host, and the
+		// router's concurrency is checked against them in config.Validate.
+		MaxPerOwner: cfg.SandboxMaxPerOwner,
+		MaxTotal:    cfg.SandboxMaxTotal,
+		Bus:         bus,
+		Clock:       time.Now,
+		Log:         slog.Default(),
+	})
+	service := sandbox.NewService(sandbox.ServiceOptions{
+		Manager:  manager,
+		Registry: catalogue,
+		Bus:      bus,
+		Queue:    queue,
+		Interval: cfg.SandboxSweepInterval,
+		Clock:    time.Now,
+		Log:      slog.Default(),
+	})
+
+	// Probe the default provider once at boot so the reason a host cannot execute
+	// appears in the startup log rather than waiting for the first task to fail.
+	info, ierr := catalogue.Info(context.Background(), cfg.SandboxProvider)
+	switch {
+	case ierr != nil:
+		slog.Warn("sandbox: default provider is not registered",
+			"provider", cfg.SandboxProvider, "error", ierr.Error())
+	case !info.Available:
+		slog.Warn("sandbox: default provider cannot run on this host, execution will be refused",
+			"provider", cfg.SandboxProvider, "reason", info.Reason,
+			"hint", "install the runtime, point AGENTHUB_SANDBOX_PROVIDER at another provider, or set it to mock for an offline instance")
+	default:
+		slog.Info("sandbox: control plane ready",
+			"provider", cfg.SandboxProvider, "layer", info.Layer, "isolation", info.Isolation,
+			"providers", len(catalogue.Names()),
+			"maxTotal", cfg.SandboxMaxTotal, "idleTTL", cfg.SandboxIdleTTL)
+	}
+	return service, nil
+}
+
+// builtinSandboxProviders is the shipped catalogue. It is registered in full even
+// when most entries cannot run here: the console's job is to show what could be
+// enabled, with the probe's reason next to each unavailable entry.
+//
+// gVisor and Kata are the same container backend with a different --runtime, not
+// two implementations: giving them their own code would only let the three drift
+// apart.
+func builtinSandboxProviders(cfg *config.Config, queue *sandbox.JobQueue) []sandbox.Provider {
+	host := cfg.SandboxDockerHost
+	runtime := strings.TrimSpace(cfg.SandboxRuntime)
+	providers := []sandbox.Provider{
+		sandbox.NewDockerProvider(sandbox.ProviderDocker, "docker", runtime, host),
+		sandbox.NewDockerProvider("podman", "podman", "", host),
+		sandbox.NewDockerProvider("gvisor", "docker", runtimeOrDefault(runtime, "runsc"), host),
+		sandbox.NewDockerProvider("kata", "docker", runtimeOrDefault(runtime, "kata"), host),
+		sandbox.NewBwrapProvider(),
+		sandbox.NewLocalProvider(),
+		sandbox.NewMockProvider(),
+		sandbox.NewRemoteProvider(queue),
+	}
+	// The hosted platforms are catalogue entries, not SDK integrations: each one
+	// talks to an operator-run shim so no vendor code lands in this binary.
+	for _, preset := range sandbox.PlatformPresets() {
+		providers = append(providers, sandbox.NewHTTPProvider(preset, os.Getenv))
+	}
+	return providers
+}
+
+// sandboxDefaults is the instance-wide policy a resource inherits. Its whole
+// purpose is that a resource which names nothing still gets a closed sandbox:
+// no network, a read-only root, a capped output and no caller-supplied arguments.
+func sandboxDefaults(cfg *config.Config) sandbox.Defaults {
+	timeout := cfg.CLITimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	return sandbox.Defaults{
+		Provider:       cfg.SandboxProvider,
+		Runtime:        cfg.SandboxRuntime,
+		Image:          cfg.SandboxDefaultImage,
+		Network:        sandbox.NetworkNone,
+		EgressAllow:    cfg.SandboxEgressAllowlist,
+		CPU:            1,
+		MemoryMB:       1024,
+		PidsLimit:      128,
+		TimeoutMS:      int(timeout / time.Millisecond),
+		MaxOutputBytes: cfg.MaxOutputBytes,
+		// PATH only, plus the four variables every CLI expects to find. The
+		// agenthub process's own environment (DATABASE_URL, API keys) is never
+		// inherited into a sandbox.
+		EnvAllow:   []string{"PATH", "HOME", "LANG", "TZ", "TERM"},
+		ArgsPolicy: sandbox.ArgsNone,
+		ReuseScope: "",
+		IdleTTL:    cfg.SandboxIdleTTL,
+	}
+}
+
+func runtimeOrDefault(runtime, fallback string) string {
+	if runtime != "" {
+		return runtime
+	}
+	return fallback
 }
 
 // newBackupService assembles the checkpoint service.

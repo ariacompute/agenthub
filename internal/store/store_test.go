@@ -102,6 +102,7 @@ func TestEmbeddedMigrationsAreOrderedAndIdempotent(t *testing.T) {
 		"016_wechat_login.sql",
 		"017_computers.sql", "018_schedules.sql", "019_knowledge.sql",
 		"020_router.sql",
+		"021_sandboxes.sql",
 	}
 	if len(names) != len(want) {
 		t.Fatalf("embedded migrations = %v, want %v", names, want)

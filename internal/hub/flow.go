@@ -34,6 +34,10 @@ type FlowContext struct {
 	Text string            `json:"text"`
 	Kind string            `json:"kind,omitempty"`
 	Keys map[string]string `json:"keys,omitempty"`
+	// OwnerID and Scope travel with the flow so every step of one run shares an
+	// execution environment instead of each opening its own.
+	OwnerID string `json:"ownerId,omitempty"`
+	Scope   string `json:"scope,omitempty"`
 }
 
 // Outcome is the result of invoking one resource inside a flow.

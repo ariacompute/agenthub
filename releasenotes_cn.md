@@ -563,3 +563,61 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
 - **备份加密**：设置 `AGENTHUB_ENCRYPTION_KEY` 时，检查点归档以 AES-256-GCM 静态加密为
   `<file>.tar.gz.enc` 并附 `<file>.enc.sha256` 清单；定期用 `scripts/backup-restore-drill.sh`
   演练可恢复性。
+
+---
+
+## 十四、执行沙盒
+
+大脑与双手分离。`internal/sandbox` 是按 `(归属人, 资源, 作用域)` 租用执行环境的控制面，平台
+不再以宿主进程身份替 Agent 执行任何东西。
+
+### 内核
+
+- **目录而非分支**：`sandbox.Registry` 把名字映射到 `Provider` 与 `Descriptor`（隔离层、强度、
+  依赖二进制、来源）。可用性探测结果缓存 30 秒并单飞，绝不进请求热路径。
+- **单写者**：`Manager` 负责解析键、复用或创建、执行、落审计、到期回收。`Service` 是门面，持有
+  唯一的常驻 goroutine（单飞清扫 + 合并一次 kick），与 `internal/router` 同构。
+- **四层加平台层**：容器（`docker`、`podman`）、用户态内核（`runsc`）、microVM（`kata`）、
+  进程沙盒（`bwrap`，以及声明式的 `nsjail` / `isolate` / `systemd-run` / `local`），平台层
+  （`e2b`、`microsandbox`、`daytona`、`cubesandbox`、`openhands`）以配置模板接入。`mock`
+  确定性离线；`off` 拒绝一切。
+- **三条扩展路径**：编译期实现接口、声明式 argv 模板、节点协议。新增一类后端不改注册表以上的
+  任何 Go 代码。
+
+### 保证
+
+- **默认 Docker，拒绝是设计的一部分**：`AGENTHUB_SANDBOX_PROVIDER=docker`。套接字不可达返回
+  `sandbox_unsupported`，目录端点与 `/healthz` 如实显示原因，**不回落宿主执行**。
+- **租约活过任务**：任务取消不销毁环境；环境消失也不使任务失败，下一次调用透明重建。
+- **按 ticket 复用**：作用域解析 `metadata.ticket` → `metadata.contextId` → `default`，同一
+  ticket 的多步共享一个环境；`Hub.SendAs` 让归属人贯穿，租约不再落进「匿名不复用」分支。
+- **并发联动**：启动时校验 `SANDBOX_MAX_TOTAL ≥ ROUTER_MAX_TICKETS`；取不到租约返回可重试的
+  `sandbox_limit_reached`，交给调度器退避。
+- **凭据不进上下文**：远端 Agent 调用由服务端从 `credential_env` 注入，任务元数据与产物只留
+  变量名。
+
+### 收口的执行面
+
+- CLI 不再用提示词首词推导命令：命令必须等于登记命令，参数按 `args_policy` 校验，提示词最多
+  成为标准输入；回执是真实的（`exitCode`、`durationMs`、`truncated`、`provider`）。
+- MCP stdio 在租约内启动，工具白名单在进程真正运行的地方生效。
+- 计算机指向真实租约（`provider` / `lease_id` / `node_id` / `expires_at`），可在控制台试跑一次。
+- 远端 Agent 出网经服务端代理，并受白名单约束。
+
+### 持久化、API 与控制台
+
+- `021_sandboxes.sql` 新增 `sandbox_leases` / `sandbox_execs` / `sandbox_nodes` /
+  `sandbox_jobs` / `sandbox_events` 与 `computers` 新列；审计表只存摘要，不存输出。
+- `/api/sandboxes`、`/{id}`、`/stats`、`/events`（SSE 支持 `since`）、`/api/sandbox-providers`
+  （按层分组并给出原因）、`/api/sandbox-nodes`（注册、心跳、长轮询、回报）。
+- 未接线的实例返回 `503 feature_unavailable`；已接线但后端跑不起来的返回
+  `sandbox_unsupported`。两者刻意区分：一个是「去配置」，一个是「去安装」。
+
+### 测试
+
+- `internal/sandbox/sandbox_test.go`：复用、作用域隔离、匿名不复用、每人上限、审计行、终止、
+  续租上限、清扫、目录原因、重复注册、统计、事件回放，以及任务队列（单次领取、能力匹配、
+  未知回报）。
+- `tests/sandbox_e2e_test.go`：真实 HTTP 打控制台端点、空命令被拒、未知租约 404、他人租约不可见、
+  未接线 503、节点注册 → 领取 → 回报（第二台节点被拒），以及 SSE 回放。
+- agenthub 前端：`docs-content.spec.js` 钉住 13 语的沙盒文档分组，单色守卫继续覆盖新增文案。
