@@ -259,13 +259,13 @@ func TestDockerProbeReportsAMissingBinaryInsteadOfFailing(t *testing.T) {
 
 func TestShortIDKeepsContainerNamesLegal(t *testing.T) {
 	cases := map[string]string{
-		"lease-abc":                    "lease-abc",
-		"lease abc/../def":             "leaseabcdef",
-		"":                             "lease",
-		"../../":                       "lease",
-		strings.Repeat("a", 40):        strings.Repeat("a", 24),
-		"LEASE_1.with.dots":            "LEASE_1withdots",
-		"名字ü":                         "lease",
+		"lease-abc":                     "lease-abc",
+		"lease abc/../def":              "leaseabcdef",
+		"":                              "lease",
+		"../../":                        "lease",
+		strings.Repeat("a", 40):         strings.Repeat("a", 24),
+		"LEASE_1.with.dots":             "LEASE_1withdots",
+		"名字ü":                           "lease",
 		"lease-0000-1111-2222-3333-444": "lease-0000-1111-2222-333",
 	}
 	for in, want := range cases {
@@ -326,7 +326,7 @@ func TestBwrapBindsTheWorkdirAndOnlyForwardsAllowedEnvironment(t *testing.T) {
 
 func declarativeSpec(bin string) DeclarativeSpec {
 	return DeclarativeSpec{
-		Name:      "helper",
+		Name: "helper",
 		// DeclarativeSpec carries the layer as text: the operator writes it in JSON.
 		Layer:     string(LayerProcess),
 		Isolation: IsolationNamespace,
