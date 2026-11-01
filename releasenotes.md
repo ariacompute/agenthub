@@ -489,8 +489,8 @@ screen and a visual inspector for the A2A contract.
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
-- **Frontend**: `bunx vitest run`, 57 tests passing (languages / copy-fallback /
-  enums-copy / api / format / errors / backup-api / style guard).
+- **Frontend**: `bunx vitest run`, 154 tests passing across 14 files (languages /
+  copy-fallback / enums-copy / api / format / errors / backup-api / style guard).
 - **A2A & control-plane smoke**: send (once per kind), stream (no `[DONE]`, terminal frame
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
