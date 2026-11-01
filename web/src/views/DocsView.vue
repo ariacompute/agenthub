@@ -249,9 +249,16 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           <p class="lede">{{ t('authBody') }}</p>
           <h4>{{ t('authSessionTitle') }}</h4>
           <p>{{ t('authSessionBody') }}</p>
+
+          <h4>{{ t('authSignupTitle') }}</h4>
+          <p>{{ t('authSignupBody') }}</p>
+
           <h4>{{ t('authPermTitle') }}</h4>
           <p>{{ t('authPermBody') }}</p>
           <p class="note">{{ t('authOwnerNote') }}</p>
+
+          <h4>{{ t('authGroupTitle') }}</h4>
+          <p>{{ t('authGroupBody') }}</p>
 
           <h4>{{ t('authApiKeyTitle') }}</h4>
           <p>{{ t('authApiKeyBody') }}</p>

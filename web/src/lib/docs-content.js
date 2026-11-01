@@ -532,7 +532,7 @@ export const httpEndpoints = [
     permission: 'users:manage',
     descKey: 'verbCreate',
     nounKey: 'nounUsers',
-    request: '{ email, password, name, roles[], groups[] }',
+    request: '{ email, password, name, status?, roles[], groups[] }',
     response: '{ user } — 201',
   },
   {
@@ -653,7 +653,7 @@ export const httpEndpoints = [
     permission: 'roles:manage',
     descKey: 'verbReplace',
     nounKey: 'nounGroups',
-    request: 'Group',
+    request: '{ name?, description?, roles[]? }',
     response: '{ group }',
   },
   {

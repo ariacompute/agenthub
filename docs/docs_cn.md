@@ -177,7 +177,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/users` | `users:manage` — 管理用户 | 列出全部用户 | `?q=` | `{ users: [{ id, email, name, status, isOwner, roles, groups }] }` |
-| `POST` | `/api/users` | `users:manage` — 管理用户 | 在用户中新建一条 | `{ email, password, name, roles[], groups[] }` | `{ user } — 201` |
+| `POST` | `/api/users` | `users:manage` — 管理用户 | 在用户中新建一条 | `{ email, password, name, status?, roles[], groups[] }` | `{ user } — 201` |
 | `GET` | `/api/users/{id}` | `users:manage` — 管理用户 | 按 id 读取其中一条用户 | — | `{ user }` |
 | `PUT` | `/api/users/{id}` | `users:manage` — 管理用户 | 整体替换其中一条用户 | `{ email?, name?, password?, status?, roles[]?, groups[]? }` | `{ user }` |
 | `DELETE` | `/api/users/{id}` | `users:manage` — 管理用户 | 删除其中一条用户 | — | `204, no body` |
@@ -194,7 +194,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `DELETE` | `/api/roles/{id}` | `roles:manage` — 管理用户组与角色 | 删除其中一条角色 | — | `204, no body` |
 | `GET` | `/api/groups` | `roles:manage` — 管理用户组与角色 | 列出全部用户组 | — | `{ groups: [{ id, name, description, roles[] }] }` |
 | `POST` | `/api/groups` | `roles:manage` — 管理用户组与角色 | 在用户组中新建一条 | `{ name, description?, roles[] }` | `{ group } — 201` |
-| `PUT` | `/api/groups/{id}` | `roles:manage` — 管理用户组与角色 | 整体替换其中一条用户组 | `Group` | `{ group }` |
+| `PUT` | `/api/groups/{id}` | `roles:manage` — 管理用户组与角色 | 整体替换其中一条用户组 | `{ name?, description?, roles[]? }` | `{ group }` |
 | `DELETE` | `/api/groups/{id}` | `roles:manage` — 管理用户组与角色 | 删除其中一条用户组 | — | `204, no body` |
 | `GET` | `/api/grants` | `grants:manage` — 管理资源授权 | 列出全部授权 | `?resource=` | `{ grants: [{ id, resourceId, principalKind, principalId, level }] }` |
 | `POST` | `/api/grants` | `grants:manage` — 管理资源授权 | 在授权中新建一条 | `{ resourceId, principalKind: "user"\|"group", principalId, level: "read"\|"write" }` | `{ grant } — 201` |
@@ -277,11 +277,19 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 
 POST /api/auth/login 会下发一个仅 http 的 cookie。OAuth 流程从 /api/auth/oauth/{provider} 开始，再回到回调地址。
 
+### 注册与首次登录
+
+开启 AGENTHUB_ALLOW_REGISTRATION 后可自助注册。密码至少 8 字节，邮箱需符合基本结构；空实例上的第一个账号成为所有者。这类账号（以及 OAuth 首次登录自动创建的账号）一律从只读的 viewer 角色起步，只能读目录，直到管理员放宽。通过 POST /api/users 创建的账号则完全按请求里的角色落库。
+
 ### 权限
 
 一条路由由一项权限或一个权限清单守卫，满足其中任意一项即可进入。
 
 owner 账号持有全部已知权限，完全绕过权限矩阵。
+
+### 用户组
+
+用户组携带角色，成员自动继承：给组命名一次，好过在每个人身上重复勾同一批角色；用户组同时可作为资源授权的授予对象。改名或改角色在下次请求即生效；传 roles: [] 表示清空，省略该字段表示保持不变。
 
 ### API 密钥
 

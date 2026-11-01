@@ -177,7 +177,7 @@ The control plane the console itself talks to. Each route needs a session cookie
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/users` | `users:manage` — Manage users | List all users | `?q=` | `{ users: [{ id, email, name, status, isOwner, roles, groups }] }` |
-| `POST` | `/api/users` | `users:manage` — Manage users | Create a new entry among the users | `{ email, password, name, roles[], groups[] }` | `{ user } — 201` |
+| `POST` | `/api/users` | `users:manage` — Manage users | Create a new entry among the users | `{ email, password, name, status?, roles[], groups[] }` | `{ user } — 201` |
 | `GET` | `/api/users/{id}` | `users:manage` — Manage users | Read one of the users by id | — | `{ user }` |
 | `PUT` | `/api/users/{id}` | `users:manage` — Manage users | Replace one of the users outright | `{ email?, name?, password?, status?, roles[]?, groups[]? }` | `{ user }` |
 | `DELETE` | `/api/users/{id}` | `users:manage` — Manage users | Delete one of the users | — | `204, no body` |
@@ -194,7 +194,7 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `DELETE` | `/api/roles/{id}` | `roles:manage` — Manage groups and roles | Delete one of the roles | — | `204, no body` |
 | `GET` | `/api/groups` | `roles:manage` — Manage groups and roles | List all groups | — | `{ groups: [{ id, name, description, roles[] }] }` |
 | `POST` | `/api/groups` | `roles:manage` — Manage groups and roles | Create a new entry among the groups | `{ name, description?, roles[] }` | `{ group } — 201` |
-| `PUT` | `/api/groups/{id}` | `roles:manage` — Manage groups and roles | Replace one of the groups outright | `Group` | `{ group }` |
+| `PUT` | `/api/groups/{id}` | `roles:manage` — Manage groups and roles | Replace one of the groups outright | `{ name?, description?, roles[]? }` | `{ group }` |
 | `DELETE` | `/api/groups/{id}` | `roles:manage` — Manage groups and roles | Delete one of the groups | — | `204, no body` |
 | `GET` | `/api/grants` | `grants:manage` — Manage resource grants | List all grants | `?resource=` | `{ grants: [{ id, resourceId, principalKind, principalId, level }] }` |
 | `POST` | `/api/grants` | `grants:manage` — Manage resource grants | Create a new entry among the grants | `{ resourceId, principalKind: "user"\|"group", principalId, level: "read"\|"write" }` | `{ grant } — 201` |
@@ -277,11 +277,19 @@ Identity comes from a session cookie, authorisation from permissions resolved on
 
 POST /api/auth/login sets an http-only cookie. An OAuth round trip starts at /api/auth/oauth/{provider} and lands back on the callback.
 
+### Sign-up and first login
+
+Self-service sign-up is available when AGENTHUB_ALLOW_REGISTRATION is on. A password must be at least 8 bytes, the address must look like an address, and the first account on an empty instance becomes the owner. Accounts created this way - and accounts a first OAuth login provisions - start on the read-only viewer role: they read the catalogue and nothing more until an administrator widens them. Accounts created through POST /api/users get exactly the roles that were asked for.
+
 ### Permissions
 
 A route is guarded by one permission or a list, and any single one of them is enough to enter.
 
 The owner account holds every known permission and bypasses the matrix entirely.
+
+### Groups
+
+A group carries roles and its members inherit them, so naming a group once beats ticking the same roles on every user; a group is also a principal that resource grants can point at. Renaming it or changing its roles takes effect on the next request. Sending roles: [] clears the bundle; omitting the field leaves it alone.
 
 ### API keys
 

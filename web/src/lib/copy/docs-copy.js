@@ -13,6 +13,12 @@
 //   - `ep*` keys describe one specific endpoint; they are never templated.
 export const docsCopy = {
   en: {
+    authSignupTitle: 'Sign-up and first login',
+    authSignupBody:
+      'Self-service sign-up is available when AGENTHUB_ALLOW_REGISTRATION is on. A password must be at least 8 bytes, the address must look like an address, and the first account on an empty instance becomes the owner. Accounts created this way - and accounts a first OAuth login provisions - start on the read-only viewer role: they read the catalogue and nothing more until an administrator widens them. Accounts created through POST /api/users get exactly the roles that were asked for.',
+    authGroupTitle: 'Groups',
+    authGroupBody:
+      'A group carries roles and its members inherit them, so naming a group once beats ticking the same roles on every user; a group is also a principal that resource grants can point at. Renaming it or changing its roles takes effect on the next request. Sending roles: [] clears the bundle; omitting the field leaves it alone.',
     authApiKeyTitle: "API keys",
     authApiKeyBody: "A key is a long-lived bearer credential that authenticates as its owner but only with the permissions chosen at creation. Send it as `Authorization: Bearer ahk_…` on /api routes, or as `X-AgentHub-Key`, and on the A2A endpoint.",
     authApiKeyScopeNote: "Scope a key to the least permission it needs; a key can never be granted more than its owner holds. Treat the token as a secret — it is shown once and only its hash is stored.",
@@ -187,6 +193,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: replay history, then follow delegated tasks and persist agent replies.",
 },
   zh: {
+    authSignupTitle: '注册与首次登录',
+    authSignupBody:
+      '开启 AGENTHUB_ALLOW_REGISTRATION 后可自助注册。密码至少 8 字节，邮箱需符合基本结构；空实例上的第一个账号成为所有者。这类账号（以及 OAuth 首次登录自动创建的账号）一律从只读的 viewer 角色起步，只能读目录，直到管理员放宽。通过 POST /api/users 创建的账号则完全按请求里的角色落库。',
+    authGroupTitle: '用户组',
+    authGroupBody:
+      '用户组携带角色，成员自动继承：给组命名一次，好过在每个人身上重复勾同一批角色；用户组同时可作为资源授权的授予对象。改名或改角色在下次请求即生效；传 roles: [] 表示清空，省略该字段表示保持不变。',
     authApiKeyTitle: "API 密钥",
     authApiKeyBody: "API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证，但仅拥有创建时选定的权限。在 /api 路由上通过 `Authorization: Bearer ahk_…` 或 `X-AgentHub-Key` 发送，A2A 端点同样支持。",
     authApiKeyScopeNote: "请按最小权限为密钥授权；密钥的权限绝不会超过其所属用户。密钥等同于秘密——它仅显示一次，库中只保存其哈希值。",
@@ -356,6 +368,12 @@ export const docsCopy = {
     epThreadEvents: "SSE：先回访历史，再跟随被委派任务并落库 agent 回复。",
 },
   'zh-TW': {
+    authSignupTitle: '註冊與首次登入',
+    authSignupBody:
+      '開啟 AGENTHUB_ALLOW_REGISTRATION 後可自助註冊。密碼至少 8 位元組，電子郵件需符合基本結構；空實例上的第一個帳號成為擁有者。這類帳號（以及 OAuth 首次登入自動建立的帳號）一律從唯讀的 viewer 角色起步，只能讀目錄，直到管理員放寬。透過 POST /api/users 建立的帳號則完全依請求中的角色落庫。',
+    authGroupTitle: '群組',
+    authGroupBody:
+      '群組攜帶角色，成員會自動繼承：為群組命名一次，勝過在每個人身上重複勾選同一批角色；群組同時可作為資源授權的授予對象。改名或改角色於下次請求即生效；傳 roles: [] 表示清空，省略該欄位表示維持不變。',
     authApiKeyTitle: "API 金鑰",
     authApiKeyBody: "API 金鑰是一種長效 bearer 憑證，以所屬使用者的身份認證，但僅擁有建立時選定的權限。在 /api 路由上透過 `Authorization: Bearer ahk_…` 或 `X-AgentHub-Key` 傳送，A2A 端點同樣支援。",
     authApiKeyScopeNote: "請依最小權限為金鑰授權；金鑰的權限絕不會超過其所屬使用者。金鑰等同於秘密——它只顯示一次，庫中只保存其雜湊值。",
@@ -525,6 +543,12 @@ export const docsCopy = {
     epThreadEvents: "SSE：先回訪歷史，再跟隨被委派任務並寫入 agent 回覆。",
 },
   es: {
+    authSignupTitle: 'Registro y primer inicio de sesión',
+    authSignupBody:
+      'El registro libre está disponible con AGENTHUB_ALLOW_REGISTRATION activo. La contraseña debe tener al menos 8 bytes, la dirección debe parecer una dirección, y la primera cuenta de una instancia vacía pasa a ser la propietaria. Las cuentas creadas así —y las que provisiona el primer inicio de sesión OAuth— empiezan con el rol de solo lectura viewer: leen el catálogo y nada más hasta que un administrador las amplíe. Las cuentas creadas con POST /api/users reciben exactamente los roles solicitados.',
+    authGroupTitle: 'Grupos',
+    authGroupBody:
+      'Un grupo lleva roles y sus miembros los heredan, así que nombrar un grupo una vez evita marcar los mismos roles en cada usuario; además, un grupo es un sujeto al que pueden apuntar las autorizaciones de recursos. Renombrarlo o cambiar sus roles surte efecto en la siguiente petición. Enviar roles: [] vacía el conjunto; omitir el campo lo deja intacto.',
     authApiKeyTitle: "Claves de API",
     authApiKeyBody: "Una clave es una credencial bearer de larga duración que se autentica como su propietario pero solo con los permisos elegidos al crearla. Envíala como `Authorization: Bearer ahk_…` en las rutas /api, o como `X-AgentHub-Key`, y también en el endpoint A2A.",
     authApiKeyScopeNote: "Limita una clave a los permisos mínimos que necesita; una clave nunca puede tener más que su propietario. Trata el token como un secreto: se muestra una vez y solo se guarda su hash.",
@@ -699,6 +723,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: reproduce el historial y luego sigue las tareas delegadas y persiste las respuestas del agente.",
 },
   fr: {
+    authSignupTitle: 'Inscription et première connexion',
+    authSignupBody:
+      'L’inscription libre est disponible quand AGENTHUB_ALLOW_REGISTRATION est actif. Le mot de passe doit faire au moins 8 octets, l’adresse doit ressembler à une adresse, et le premier compte d’une instance vide devient propriétaire. Les comptes créés ainsi — comme ceux provisionnés par une première connexion OAuth — démarrent avec le rôle en lecture seule viewer : ils lisent le catalogue et rien de plus tant qu’un administrateur ne les élargit pas. Les comptes créés via POST /api/users reçoivent exactement les rôles demandés.',
+    authGroupTitle: 'Groupes',
+    authGroupBody:
+      'Un groupe porte des rôles que ses membres héritent : nommer un groupe une fois vaut mieux que cocher les mêmes rôles sur chaque utilisateur, et un groupe est aussi un sujet auquel les autorisations de ressource peuvent se référer. Le renommer ou changer ses rôles prend effet à la requête suivante. Envoyer roles: [] vide l’ensemble ; omettre le champ le laisse tel quel.',
     authApiKeyTitle: "Clés API",
     authApiKeyBody: "Une clé est une credential bearer durable qui s’authentifie comme son propriétaire mais uniquement avec les permissions choisies à la création. Envoyez-la via `Authorization: Bearer ahk_…` sur les routes /api, ou `X-AgentHub-Key`, ainsi que sur le endpoint A2A.",
     authApiKeyScopeNote: "Restreignez une clé aux permissions minimales dont elle a besoin ; une clé ne peut jamais dépasser les droits de son propriétaire. Traitez le token comme un secret — il n’est affiché qu’une fois et seul son hash est stocké.",
@@ -873,6 +903,12 @@ export const docsCopy = {
     epThreadEvents: "SSE : rejoue l'historique, puis suit les tâches déléguées et persiste les réponses de l'agent.",
 },
   de: {
+    authSignupTitle: 'Registrierung und erste Anmeldung',
+    authSignupBody:
+      'Selbstregistrierung ist mit AGENTHUB_ALLOW_REGISTRATION verfügbar. Das Passwort muss mindestens 8 Bytes haben, die Adresse wie eine Adresse aussehen, und das erste Konto einer leeren Instanz wird Eigentümer. So entstandene Konten – und Konten, die eine erste OAuth-Anmeldung anlegt – starten mit der schreibgeschützten Rolle viewer: Sie lesen den Katalog und sonst nichts, bis ein Administrator sie erweitert. Über POST /api/users angelegte Konten erhalten genau die angeforderten Rollen.',
+    authGroupTitle: 'Gruppen',
+    authGroupBody:
+      'Eine Gruppe trägt Rollen, die ihre Mitglieder erben; sie einmal zu benennen ist besser, als bei jedem Benutzer dieselben Rollen anzukreuzen. Eine Gruppe ist zugleich ein Subjekt, auf das Ressourcenfreigaben zeigen können. Umbenennen oder geänderte Rollen wirken bei der nächsten Anfrage. roles: [] leert das Bündel; das Weglassen des Feldes lässt es unverändert.',
     authApiKeyTitle: "API-Schlüssel",
     authApiKeyBody: "Ein Schlüssel ist ein langlebiges Bearer-Anmeldedatum, das sich als sein Besitzer authentifiziert, aber nur mit den bei der Erstellung gewählten Berechtigungen. Senden Sie ihn auf /api-Routen als `Authorization: Bearer ahk_…` oder als `X-AgentHub-Key` und ebenso am A2A-Endpoint.",
     authApiKeyScopeNote: "Schränken Sie einen Schlüssel auf die minimal nötigen Berechtigungen ein; ein Schlüssel darf nie mehr als sein Besitzer haben. Behandeln Sie das Token als Geheimnis — es wird nur einmal angezeigt, und nur sein Hash wird gespeichert.",
@@ -1047,6 +1083,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: spielt den Verlauf erneut ab und verfolgt dann delegierte Tasks und speichert Agent-Antworten.",
 },
   it: {
+    authSignupTitle: 'Registrazione e primo accesso',
+    authSignupBody:
+      'La registrazione libera è disponibile con AGENTHUB_ALLOW_REGISTRATION attivo. La password deve essere di almeno 8 byte, l’indirizzo deve sembrare un indirizzo e il primo account di un’istanza vuota diventa proprietario. Gli account creati così — e quelli creati al primo accesso OAuth — partono con il ruolo di sola lettura viewer: leggono il catalogo e nulla più finché un amministratore non li amplia. Gli account creati con POST /api/users ricevono esattamente i ruoli richiesti.',
+    authGroupTitle: 'Gruppi',
+    authGroupBody:
+      'Un gruppo porta dei ruoli che i membri ereditano: nominarlo una volta è meglio che spuntare gli stessi ruoli su ogni utente, e un gruppo è anche un soggetto a cui possono puntare le autorizzazioni delle risorse. Rinominarlo o cambiarne i ruoli ha effetto alla richiesta successiva. Inviare roles: [] svuota l’insieme; omettere il campo lo lascia com’è.',
     authApiKeyTitle: "Chiavi API",
     authApiKeyBody: "Una chiave è una credenziale bearer a lungo termine che si autentica come il suo proprietario ma solo con i permessi scelti alla creazione. Inviarla come `Authorization: Bearer ahk_…` sulle rotte /api, o come `X-AgentHub-Key`, e anche sull’endpoint A2A.",
     authApiKeyScopeNote: "Limita una chiave ai permessi minimi di cui ha bisogno; una chiave non può mai avere più del proprietario. Tratta il token come un segreto — viene mostrato una sola volta e ne viene salvato solo l’hash.",
@@ -1221,6 +1263,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: riproduce la cronologia, poi segue le attività delegate e persiste le risposte dell'agente.",
 },
   ru: {
+    authSignupTitle: 'Регистрация и первый вход',
+    authSignupBody:
+      'Самостоятельная регистрация доступна при включённом AGENTHUB_ALLOW_REGISTRATION. Пароль должен быть не короче 8 байт, адрес — походить на адрес, а первая учётная запись на пустом экземпляре становится владельцем. Такие записи — и записи, созданные при первом входе через OAuth — начинают с роли «только чтение» viewer: они видят каталог и ничего больше, пока администратор не расширит их права. Записи, созданные через POST /api/users, получают ровно запрошенные роли.',
+    authGroupTitle: 'Группы',
+    authGroupBody:
+      'Группа несёт роли, которые наследуют её участники: назвать группу один раз проще, чем отмечать одни и те же роли у каждого пользователя. Группа также может быть субъектом ресурсных разрешений. Переименование и смена ролей действуют со следующего запроса. roles: [] очищает набор; отсутствие поля оставляет его как есть.',
     authApiKeyTitle: "API-ключи",
     authApiKeyBody: "Ключ — это долговременная bearer-учётная запись, которая аутентифицируется от имени владельца, но только с правами, выбранными при создании. Отправляйте его как `Authorization: Bearer ahk_…` на маршрутах /api или как `X-AgentHub-Key`, а также на A2A-эндпоинте.",
     authApiKeyScopeNote: "Ограничьте ключ минимально необходимыми правами; ключ не может иметь больше прав, чем его владелец. Относитесь к токену как к секрету — он показывается один раз, а в базе хранится только его хеш.",
@@ -1395,6 +1443,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: воспроизводит историю, затем отслеживает делегированные задачи и сохраняет ответы агента.",
 },
   ja: {
+    authSignupTitle: '登録と初回ログイン',
+    authSignupBody:
+      'AGENTHUB_ALLOW_REGISTRATION を有効にするとセルフサインアップが使えます。パスワードは 8 バイト以上、メールアドレスはアドレスの形をしている必要があり、空のインスタンスで最初のアカウントは所有者になります。この方法で作られたアカウントと、OAuth の初回ログインで作られたアカウントは、読み取り専用の viewer ロールから始まります。管理者が広げるまでカタログを読むだけで、それ以外はできません。POST /api/users で作ったアカウントには、要求したロールがそのまま付きます。',
+    authGroupTitle: 'グループ',
+    authGroupBody:
+      'グループはロールを保持し、メンバーはそれを継承します。同じロールを利用者ごとに付けるより、グループに一度名前を付けるほうが確実です。グループはリソース許可の対象にもなります。名前やロールの変更は次のリクエストから効きます。roles: [] は中身を空にし、フィールドを省略すると変更しません。',
     authApiKeyTitle: "API キー",
     authApiKeyBody: "キーは長期間有効な bearer 認証情報で、作成時に選んだ権限のみで所有者として認証されます。/api ルートでは `Authorization: Bearer ahk_…` または `X-AgentHub-Key` として、A2A エンドポイントでも送信できます。",
     authApiKeyScopeNote: "キーには必要最小限の権限のみを付与してください。キーが所有者以上の権限を持つことはありません。トークンは秘密として扱い、一度だけ表示され、保存されるのはハッシュのみです。",
@@ -1569,6 +1623,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: 履歴を再生した後、委任されたタスクを追跡し、エージェントの応答を保存します。",
 },
   ko: {
+    authSignupTitle: '가입과 첫 로그인',
+    authSignupBody:
+      'AGENTHUB_ALLOW_REGISTRATION 이 켜져 있으면 셀프 가입을 쓸 수 있습니다. 비밀번호는 8바이트 이상이어야 하고, 주소는 주소 형태여야 하며, 빈 인스턴스의 첫 계정은 소유자가 됩니다. 이렇게 만든 계정과 OAuth 첫 로그인으로 만들어진 계정은 읽기 전용 viewer 역할에서 시작합니다. 관리자가 넓혀 주기 전까지는 카탈로그만 읽을 수 있습니다. POST /api/users 로 만든 계정에는 요청한 역할이 그대로 적용됩니다.',
+    authGroupTitle: '그룹',
+    authGroupBody:
+      '그룹은 역할을 담고 구성원이 이를 상속합니다. 사용자마다 같은 역할을 체크하는 것보다 그룹에 한 번 이름을 붙이는 편이 낫고, 그룹은 리소스 권한의 대상이 되기도 합니다. 이름이나 역할 변경은 다음 요청부터 적용됩니다. roles: [] 는 구성을 비우고, 필드를 생략하면 그대로 둡니다.',
     authApiKeyTitle: "API 키",
     authApiKeyBody: "키는 소유자로 인증되지만 생성 시 선택한 권한만 가지는 장기 bearer 인증 정보입니다. /api 경로에서는 `Authorization: Bearer ahk_…` 또는 `X-AgentHub-Key` 로, A2A 엔드포인트에서도 전송할 수 있습니다.",
     authApiKeyScopeNote: "키에는 필요한 최소 권한만 부여하세요. 키가 소유자보다 많은 권한을 가질 수는 없습니다. 토큰은 비밀로 다루고, 한 번만 표시되며 저장되는 것은 해시뿐입니다.",
@@ -1743,6 +1803,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: 기록을 재생한 후 위임된 작업을 추적하고 에이전트 응답을 저장합니다.",
 },
   pt: {
+    authSignupTitle: 'Cadastro e primeiro acesso',
+    authSignupBody:
+      'O cadastro livre fica disponível com AGENTHUB_ALLOW_REGISTRATION ativo. A senha precisa ter ao menos 8 bytes, o endereço precisa parecer um endereço e a primeira conta de uma instância vazia torna-se proprietária. Contas criadas assim — e as provisionadas no primeiro acesso via OAuth — começam com o papel somente leitura viewer: leem o catálogo e nada mais até um administrador ampliá-las. Contas criadas por POST /api/users recebem exatamente os papéis pedidos.',
+    authGroupTitle: 'Grupos',
+    authGroupBody:
+      'Um grupo carrega papéis herdados pelos membros: nomear o grupo uma vez é melhor que marcar os mesmos papéis em cada usuário, e o grupo também é um sujeito para o qual autorizações de recurso podem apontar. Renomear ou trocar os papéis vale na requisição seguinte. Enviar roles: [] esvazia o conjunto; omitir o campo o mantém.',
     authApiKeyTitle: "Chaves de API",
     authApiKeyBody: "Uma chave é uma credencial bearer de longa duração que se autentica como seu dono, mas apenas com as permissões escolhidas na criação. Envie como `Authorization: Bearer ahk_…` nas rotas /api, ou como `X-AgentHub-Key`, e também no endpoint A2A.",
     authApiKeyScopeNote: "Limite uma chave às permissões mínimas de que precisa; uma chave nunca pode ter mais do que seu dono. Trate o token como segredo — ele é exibido uma vez e apenas seu hash é armazenado.",
@@ -1917,6 +1983,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: reproduz o histórico e então acompanha as tarefas delegadas e persiste as respostas do agente.",
 },
   ar: {
+    authSignupTitle: 'التسجيل وأول دخول',
+    authSignupBody:
+      'يتوفر التسجيل الذاتي عند تفعيل AGENTHUB_ALLOW_REGISTRATION. يجب أن تكون كلمة المرور 8 بايتات على الأقل وأن يشبه العنوان عنوانًا، ويصبح أول حساب في نسخة فارغة هو المالك. الحسابات المنشأة بهذه الطريقة — وتلك التي ينشئها أول دخول عبر OAuth — تبدأ بدور viewer للقراءة فقط: تقرأ الكتالوج ولا شيء غيره حتى يوسّعها المسؤول. أما الحسابات المنشأة عبر POST /api/users فتحصل على الأدوار المطلوبة تمامًا.',
+    authGroupTitle: 'المجموعات',
+    authGroupBody:
+      'تحمل المجموعة أدوارًا يرثها أعضاؤها، فتسمية المجموعة مرة واحدة أفضل من تعليم الأدوار نفسها لكل مستخدم، كما يمكن أن تكون المجموعة جهة تُنسب إليها أذونات الموارد. يسري تغيير الاسم أو الأدوار مع الطلب التالي. إرسال roles: [] يفرّغ الحزمة، وإغفال الحقل يتركها كما هي.',
     authApiKeyTitle: "مفاتيح API",
     authApiKeyBody: "المفتاح بيانات اعتماد Bearer طويلة الأمد يُصادَق بها بصفة مالكه ولكن فقط بالصلاحيات المختارة عند الإنشاء. أرسله كـ `Authorization: Bearer ahk_…` على مسارات /api، أو كـ `X-AgentHub-Key`، وكذلك على نقطة نهاية A2A.",
     authApiKeyScopeNote: "اقصر المفتاح على الحد الأدنى من الصلاحيات التي يحتاجها؛ لا يمكن للمفتاح أن يتجاوز ما يملكه صاحبه. عامل الرمز كسرٍ — يُعرض مرة واحدة ولا يُحفظ سوى تجزئته (hash).",
@@ -2091,6 +2163,12 @@ export const docsCopy = {
     epThreadEvents: "SSE: يعيد تشغيل السجل، ثم يتابع المهام المفوّضة ويحفظ ردود الوكيل.",
 },
   hi: {
+    authSignupTitle: 'साइन-अप और पहला लॉगिन',
+    authSignupBody:
+      'AGENTHUB_ALLOW_REGISTRATION चालू होने पर स्वयं साइन-अप उपलब्ध है। पासवर्ड कम से कम 8 बाइट का होना चाहिए, पता पते जैसा दिखना चाहिए, और खाली इंस्टेंस पर पहला खाता स्वामी बनता है। इस तरह बने खाते — और OAuth के पहले लॉगिन से बने खाते — केवल-पढ़ने वाली viewer भूमिका से शुरू होते हैं: वे कैटलॉग पढ़ सकते हैं और कुछ नहीं, जब तक प्रशासक अधिकार न बढ़ाए। POST /api/users से बने खातों को ठीक वही भूमिकाएँ मिलती हैं जो माँगी गई थीं।',
+    authGroupTitle: 'समूह',
+    authGroupBody:
+      'समूह भूमिकाएँ रखता है और सदस्य उन्हें विरासत में पाते हैं, इसलिए हर उपयोगकर्ता पर वही भूमिकाएँ चुनने से बेहतर है समूह को एक बार नाम देना; समूह संसाधन अनुमतियों का पक्ष भी हो सकता है। नाम या भूमिकाएँ बदलने का असर अगले अनुरोध से होता है। roles: [] समूह खाली करता है, फ़ील्ड छोड़ने पर वह ज्यों का त्यों रहता है।',
     authApiKeyTitle: "API कुंजी",
     authApiKeyBody: "कुंजी एक दीर्घकालिक bearer क्रेडेंशियल है जो अपने स्वामी के रूप में प्रमाणित होती है, लेकिन केवल निर्माण के समय चुनी गई अनुमतियों के साथ। इसे /api मार्गों पर `Authorization: Bearer ahk_…` या `X-AgentHub-Key` के रूप में, और A2A एंडपॉइंट पर भेजें।",
     authApiKeyScopeNote: "कुंजी को आवश्यक न्यूनतम अनुमतियों तक सीमित रखें; कुंजी कभी भी अपने स्वामी से अधिक अधिकार नहीं ले सकती। टोकन को गोपनीय मानें — यह केवल एक बार दिखाया जाता है और केवल उसका हैश संग्रहीत होता है।",
