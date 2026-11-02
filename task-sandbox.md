@@ -80,6 +80,11 @@
   拒绝 / 申请租约与拒绝）+ 设置页执行节点 4 条；`docs-content.spec.js` 钉住 13 语文档分组；单色守卫
 - [x] cargo：策略拒绝 / 越界路径 / 超时 / 截断
 - [x] README / README_cn / releasenotes / releasenotes_cn / AGENTS 同步；`docs/docs*.md` 由 `make docs-md` 重生成
+- [x] **WSL2 `go test -race` 实机修正**：`TestASweepFailureIsRecordedAndClearedByTheNextPass` 原先在
+  `Sweep` 回调里发信号、随即读计数器，而 `pass()` 是「先加 `passes` → 调 sweep → 再写 `lastErr`」，
+  信号落在中间，`-race` 下调度变慢就必然读到上一轮的值。改为轮询等待**结果**（`lastErr`/`reclaimed`
+  达到期望值，2s 上限），不再依赖回调与计数器之间的时序。连跑 `-count=5` 稳定通过，
+  全仓 `-race ./...` 绿
 
 ## 取舍记录
 

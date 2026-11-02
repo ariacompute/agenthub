@@ -641,13 +641,11 @@ func TestTheSweepBeatCountsPassesAndKicks(t *testing.T) {
 
 func TestASweepFailureIsRecordedAndClearedByTheNextPass(t *testing.T) {
 	calls := 0
-	passed := make(chan struct{}, 4)
 	sweeper := NewSweeper(SweeperOptions{
 		Interval: time.Hour,
 		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Sweep: func(context.Context) (int, error) {
 			calls++
-			passed <- struct{}{}
 			if calls == 1 {
 				return 0, errors.New("daemon gone")
 			}
@@ -658,26 +656,33 @@ func TestASweepFailureIsRecordedAndClearedByTheNextPass(t *testing.T) {
 	defer cancel()
 	go func() { _ = sweeper.Run(ctx) }()
 
-	wait := func() {
+	// Wait for the recorded outcome, not for the sweep to be entered: `pass`
+	// bumps the counter before calling sweep and writes the result after, so a
+	// signal sent from inside sweep leaves a window where the counters still
+	// hold the previous pass. That window is small enough to pass without -race
+	// and wide enough to fail with it.
+	waitFor := func(wantErr string, wantReclaimed int) {
 		t.Helper()
-		select {
-		case <-passed:
-		case <-time.After(2 * time.Second):
-			t.Fatal("the beat never ran")
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			_, reclaimed, _, lastErr := sweeper.Counters()
+			if lastErr == wantErr && reclaimed == wantReclaimed {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("want err=%q reclaimed=%d, got err=%q reclaimed=%d",
+					wantErr, wantReclaimed, lastErr, reclaimed)
+			}
+			time.Sleep(time.Millisecond)
 		}
 	}
 
 	sweeper.Kick()
-	wait()
-	if _, _, _, lastErr := sweeper.Counters(); lastErr != "daemon gone" {
-		t.Fatalf("a failed sweep must be visible to the console, got %q", lastErr)
-	}
+	waitFor("daemon gone", 0)
 
 	sweeper.Kick()
-	wait()
-	if _, reclaimed, _, lastErr := sweeper.Counters(); lastErr != "" || reclaimed != 1 {
-		t.Fatalf("the next pass must clear the error and count the reclaim, got %q/%d", lastErr, reclaimed)
-	}
+	waitFor("", 1)
+
 	sweeper.Stop()
 	sweeper.Wait(time.Second)
 }
