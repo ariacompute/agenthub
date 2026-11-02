@@ -239,7 +239,8 @@ agenthub-server Deployment. PostgreSQL stays external; the connection string is 
 
 - `operator/README.md` — install steps, the full `AgentHub` CRD field list, the external-DB
   requirement, the prod prerequisites (`BOOTSTRAP_ADMIN_EMAIL` + `ENCRYPTION_KEY` ≥ 32 bytes)
-  and the single-replica migration caveat.
+  and the multi-replica migration note (startup migrations are serialised by an advisory lock,
+  so scaling up no longer races on DDL).
 - `operator/deploy/agenthub-operator/` — the Helm chart (operator Deployment + bundled CRD +
   namespace-scoped RBAC).
 - `operator/examples/agenthub-sample.yaml` — a ready-to-apply `AgentHub` CR.
@@ -616,7 +617,10 @@ curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
 | `api_keys` / `api_key_scopes` | Long-lived bearer credentials; only the `sha256` of the token (`token_hash`) and a display `prefix` are stored (never the secret), with an optional `expires_at` and a soft `revoked_at`; `api_key_scopes` is the key → permission edge |
 
 - Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
-  transaction per file; the SQL itself is idempotent.
+  transaction per file; the SQL itself is idempotent. Each file (and the `schema_migrations`
+  bootstrap) is taken under a `pg_advisory_xact_lock` and re-checks the ledger inside it, so
+  several instances starting at once — or two `go test` packages sharing one database — serialise
+  instead of colliding in the system catalogs.
 - Write strategy: tasks / artifacts / spans are **synchronous** (state transitions use a
   conditional update `WHERE state=?` so concurrent writers cannot lose an update); events and push
   records are **best effort** (bounded queue + async writer, failures only warn and **never become

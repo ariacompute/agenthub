@@ -13,20 +13,39 @@ import (
 	"agenthub/migrations"
 )
 
+// migrationLockKey is the advisory lock key that serialises migrators. Any
+// fixed number works; this one is "agenthub" read as eight ASCII bytes.
+const migrationLockKey int64 = 0x6167656e74687562
+
 // Migrate applies every embedded migration that has not run yet.
 //
 // Each file executes inside one transaction and is recorded in
 // schema_migrations on success, so a restart skips what is already applied. The
 // SQL itself is idempotent (CREATE TABLE / INDEX IF NOT EXISTS), which keeps a
 // manual rollback-and-replay safe.
+//
+// Idempotent is not the same as concurrency-safe, so the bootstrap and every
+// file run under a transaction-scoped advisory lock: two migrators that start
+// together — two replicas, or two test packages sharing a database — otherwise
+// both find `IF NOT EXISTS` satisfied and both insert the same catalog row, and
+// the loser aborts a migration that had nothing wrong with it (23505 from
+// pg_type_typname_nsp_index for a table, pg_proc_proname_args_nsp_index for a
+// function).
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("store: migrate: db is nil")
 	}
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	// The bootstrap CREATE TABLE races the same way, and it cannot assume the
+	// lock is held already: taking the lock does not need the table to exist.
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, migrationLockKey).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		filename  TEXT PRIMARY KEY,
 		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`).Error; err != nil {
+	)`).Error
+	}); err != nil {
 		return fmt.Errorf("store: create schema_migrations: %w", err)
 	}
 
@@ -103,6 +122,23 @@ func applyMigration(db *gorm.DB, name string) error {
 	tx := db.Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("store: begin migration %s: %w", name, tx.Error)
+	}
+	// Wait for whoever is migrating right now, then look again: the pre-scan in
+	// Migrate can be stale by the time this transaction owns the lock. Holding
+	// the lock until commit is what makes check-apply-record one step.
+	if err := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, migrationLockKey).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("store: lock migration %s: %w", name, err)
+	}
+	var done int64
+	if err := tx.Raw(`SELECT count(*) FROM schema_migrations WHERE filename = ?`, name).Scan(&done).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("store: recheck migration %s: %w", name, err)
+	}
+	if done > 0 {
+		tx.Rollback()
+		slog.Debug("store: migration applied by another migrator while waiting", "file", name)
+		return nil
 	}
 	for _, stmt := range stmts {
 		if err := tx.Exec(stmt).Error; err != nil {

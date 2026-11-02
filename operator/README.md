@@ -61,7 +61,7 @@ server (defaults mirror `config.go`):
 | spec field | env var | notes |
 |---|---|---|
 | `image` | — | agenthub container image |
-| `replicas` | — | default **1** (see migration warning) |
+| `replicas` | — | default **1** (see multi-replica migrations) |
 | `env` | `AGENTHUB_ENV` | `dev` / `staging` / `prod` |
 | `httpPort` | `AGENTHUB_HTTP_PORT` | default 3500 |
 | `staticDir` | `AGENTHUB_STATIC_DIR` | default `/app/backend/static` |
@@ -111,11 +111,14 @@ A prod CR missing either fails fast with `reason=MissingAdminEmail` or
 `reason=WeakEncryptionKey` — the Pod is never created, so you get a clear
 status condition instead of a silent CrashLoop.
 
-### Multi-replica migration race
-agenthub runs its embedded schema migration at startup. With `replicas > 1`
-several Pods race on DDL. **Keep `replicas: 1`** for the initial schema
-creation, then scale up once the database is migrated. (A dedicated migration
-Job is out of scope here.)
+### Multi-replica migrations
+agenthub runs its embedded schema migration at startup, and `store.Migrate`
+serialises it: the `schema_migrations` bootstrap and every file are taken
+under a transaction-scoped advisory lock (`pg_advisory_xact_lock`), with the
+ledger re-checked inside the lock. Several Pods starting together therefore
+queue up instead of racing on DDL, and `replicas > 1` is safe from the first
+boot. A dedicated migration Job is still out of scope — the lock is what
+replaces it.
 
 ### Namespace scoping
 The operator is granted a **namespaced `Role`** (not a `ClusterRole`) limited
@@ -225,7 +228,7 @@ curl -s localhost:8080/healthz
 `status.conditions[Available]=True` with `readyReplicas: 1` means the operator
 reconciled successfully. Once the database is migrated you may scale up with
 `kubectl -n agenthub-operator scale agenthub agenthub --replicas=3` (or edit the
-CR's `spec.replicas`) — see [Multi-replica migration race](#multi-replica-migration-race).
+CR's `spec.replicas`) — see [Multi-replica migrations](#multi-replica-migrations).
 
 ### Cleanup
 

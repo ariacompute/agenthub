@@ -210,7 +210,8 @@ AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支�
 调和成运行中的 agenthub-server Deployment。PostgreSQL 仍由外部提供，连接串经 CR 注入。
 
 - `operator/README.md` —— 安装步骤、完整的 `AgentHub` CRD 字段清单、外部数据库要求、生产前置条件
-  （`BOOTSTRAP_ADMIN_EMAIL` + `ENCRYPTION_KEY` ≥ 32 字节）与「先单副本建库再扩容」提示。
+  （`BOOTSTRAP_ADMIN_EMAIL` + `ENCRYPTION_KEY` ≥ 32 字节）与多副本迁移说明（迁移在
+  `pg_advisory_xact_lock` 下串行，无需先单副本建库再扩容）。
 - `operator/deploy/agenthub-operator/` —— Helm chart（控制器 Deployment + 随包 CRD + 命名空间级 RBAC）。
 - `operator/examples/agenthub-sample.yaml` —— 一份可直接 apply 的 `AgentHub` CR。
 
@@ -513,6 +514,8 @@ curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
 | `api_keys` / `api_key_scopes` | 长效 bearer 凭证；只存令牌的 `sha256`（`token_hash`，唯一索引）与展示用 `prefix`（绝不存明文），含可选 `expires_at` 与软 `revoked_at`；`api_key_scopes` 是 key → 权限 的边表 |
 
 - 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
+  建 `schema_migrations` 与每个文件都在 `pg_advisory_xact_lock` 下进行、并在锁内复查台账，因此
+  多个实例同时启动（或 `go test` 的两个包共用一库）只会排队，不会在系统目录里撞 23505。
 - 写入策略：任务/artifact/span **同步写**（状态迁移为条件更新 `WHERE state=?`，防并发丢更新）；
   events 与 push_records **尽力而为**（有界队列 + 异步 writer，失败只告警，**绝不回压任务执行**）。
 - 事件重连：`GET /api/tasks/{id}/events?since=<seq>` 回放该 seq 之后的所有帧，再接实时流。

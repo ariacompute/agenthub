@@ -83,7 +83,8 @@ persistence ← internal/store（GORM 实现）
 - `internal/authz`：**授权内核**。`Permission` 常量 + `Principal.Can`（owner 持有全部已知权限）+
   组/角色/权限解析（一次请求一次）+ `CanAccessResource` / `VisibleResourceIDs` + 端口 `AuthzStore`
 - `internal/store`：`db.go`（`Open`/`Ping`/`Close`/`RedactDSN`，连接池 25/10/30min、`PrepareStmt`）、
-  `migrate.go`（`go:embed` + `schema_migrations` 按序单事务执行）、`seed.go`（demo 五类资源）、
+  `migrate.go`（`go:embed` + `schema_migrations` 按序单事务执行，`pg_advisory_xact_lock`
+  串行化并发迁移者）、`seed.go`（demo 五类资源）、
   `resource_store.go` / `task_store.go` / `event_store.go` / `push_store.go` /
   `auth_store.go` / `authz_store.go` / `backup_store.go` / `registry_store.go` /
   `computers_store.go` / `schedules_store.go` / `knowledge_store.go`
@@ -207,6 +208,8 @@ persistence ← internal/store（GORM 实现）
   DSN 一律经 `store.RedactDSN` 脱敏后再记录；禁止吞错与静默 no-op。
 - **数据库必填**：`DATABASE_URL` 缺失即 `config.Validate` 拒绝启动，不存在「无库降级」路径；
   迁移 SQL 必须幂等（`CREATE TABLE/INDEX IF NOT EXISTS`），新增表或列走新文件、**不改已执行文件**。
+  幂等 ≠ 并发安全：`store.Migrate` 对建表与每个文件持 `pg_advisory_xact_lock` 并在锁内复查
+  `schema_migrations`（两个副本、或 `go test` 的两个包同时迁移会撞系统目录 23505），别把这段去掉。
 - **持久化不得阻塞运行**：状态/artifact/span 同步写，`events` 与 `push_records` **尽力而为**
   （有界队列 + 异步 writer，队列满或失败只 `slog.Warn`，绝不回压任务执行）；
   所有持久层调用统一走 `context.Background()`（客户端断连不得丢弃任务状态）。

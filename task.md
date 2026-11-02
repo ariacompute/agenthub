@@ -692,3 +692,44 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 ### 5. 校验
 - [x] `go vet ./...` 干净；`go test ./tests/ ./internal/backup/` 通过（无 `DATABASE_URL` 时集成
       用例 skip）。本机无 Docker/PostgreSQL，RLS 与其余数据库用例只能在 CI 上验证，不伪称已跑过。
+
+## M11 — `go test ./...` 的并发迁移竞态（bug fix，2026-11-02）
+
+第二次 CI run：RLS 与 backup 的用例全绿（M10 生效），但 `tests` 包有 5 条用例在
+`openDBReal` 的第一步就挂了，全部是同一种错：
+
+```
+migrate: store: migration 020_router.sql failed:
+  ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index" (23505)
+migrate: store: record migration 024_resource_visibility.sql:
+  ERROR: duplicate key value violates unique constraint "schema_migrations_pkey" (23505)
+migrate: store: migration 026_rls_policies.sql failed:
+  ERROR: duplicate key value violates unique constraint "pg_proc_proname_args_nsp_index" (23505)
+```
+
+### 1. 根因：`Migrate` 幂等但不并发安全
+- `go test ./...` 并行跑包，`internal/store` 与 `tests` 各自 `store.Migrate` 同一库。
+- `CREATE TABLE IF NOT EXISTS` 不是原子的：两个会话都判定「不存在」，都去插系统目录，输的一方
+  拿到 23505（表撞 `pg_type_typname_nsp_index`，函数撞 `pg_proc_proname_args_nsp_index`），
+  整个迁移事务回滚；`schema_migrations_pkey` 那一条则是两边都认定某文件没跑过、抢写同一行。
+- 生产同样成立：两个副本同时启动就会撞，不是 CI 专属问题。
+
+### 2. 修复：事务级 advisory lock + 锁内复查
+- `internal/store/migrate.go`：新增 `migrationLockKey`（`0x6167656e74687562`，"agenthub" 的
+  ASCII 字节）；建 `schema_migrations` 先在一个持有 `pg_advisory_xact_lock` 的事务里完成
+  （锁不需要表存在，因此没有先有鸡还是先有蛋的问题）。
+- `applyMigration`：进入事务后先取同一把锁，再 `SELECT count(*) FROM schema_migrations` 复查；
+  已被别人跑过就回滚返回 nil（不再写入）——把「判定 + 执行 + 记账」变成锁内的一步。
+- 用事务级锁（`pg_advisory_xact_lock`）而不是会话级：提交/回滚即释放，不会因连接回池而泄漏成
+  幽灵锁。热启动路径不变：`appliedMigrations` 预扫描命中就完全不加锁。
+
+### 3. 校验与未覆盖项
+- [x] `go vet ./...` 干净；`go test ./internal/store/ ./tests/` 通过（无 `DATABASE_URL` 时集成用例
+      skip；`gofmt -l internal/store` 无输出）。
+- [ ] 本机无 PostgreSQL，**并发路径未经本机验证**。该竞态在 CI 里每轮都会由
+      `internal/store` 与 `tests` 两个进程真实触发，绿色即证；未另写「两个迁移者并发」的用例——
+      它需要临时 schema 与第二个连接池，在无库环境下无法验证，宁可留给 CI 的真实竞态。
+- [ ] 上一轮（M10）改写的 `TestIntegrationResourceGrantRestricts` /
+      `TestIntegrationAPIKeyLifecycle` 这次都止步于迁移失败，断言仍未被执行过；其期望已逐条比对
+      `authz.CanAccessResource` / `VisibleResourceIDs` / `BootstrapAdmin` 与 `006_rbac.sql`
+      的 viewer 权限表，需以 CI 下一轮结果为准。
