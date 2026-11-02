@@ -51,7 +51,7 @@ POSTGRES_PORT ?= 5434
 
 .PHONY: run build test test-integration test-cover vet fmt version up down ports \
         docker-build compose-build \
-        db-up db-down db-psql \
+        db-up db-down db-migrate db-psql \
         web-install web-dev web-build web-test web-test-watch clean \
         docs-md
 
@@ -69,17 +69,29 @@ run: db-up web-build
 build: web-build
 	go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
 
+# Schema first: internal/store owns the migrations and its DB-backed cases call
+# Migrate on Open, so running that package alone provisions the database. Without
+# it the dump engines in internal/backup query a fresh database before any
+# migrator has created a table and die with "no application tables found" — the
+# same ordering ci.yml pins with this step. `-count=1` is required: a cached
+# result would skip the migration and provision nothing. Without DATABASE_URL
+# every case here skips, so the target is free on an offline machine.
+db-migrate:
+	go test -race -count=1 -p 1 ./internal/store/
+
 # Unit + integration: integration cases skip themselves when DATABASE_URL is unset.
-test:
+test: db-migrate
 	go test -race ./...
 
 # Integration only, against the compose database (or $DATABASE_URL).
-test-integration:
+test-integration: db-migrate
 	go test -race -count=1 -run Integration ./tests/...
 
 # Per package coverage. The store package needs DATABASE_URL to measure: its
-# cases skip without one, which is honest but leaves the number near zero.
-test-cover:
+# cases skip without one, which is honest but leaves the number near zero. Same
+# schema-first dependency as the two test targets, for the same reason: the
+# coverage run also reaches internal/backup's engines.
+test-cover: db-migrate
 	go test -count=1 -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 	@printf '\nper package:\n'

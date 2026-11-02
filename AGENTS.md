@@ -290,6 +290,7 @@ make up                # docker compose up -d，完成后打印监听端口与�
 make down              # docker compose down（数据在 agenthub-pgdata 卷）
 make ports             # 重打印运行栈的端口表（宿主端口 + 用途 + 健康态）
 make db-up             # 只起 postgres（宿主 5434）+ 等待 ready
+make db-migrate        # 只建 schema（跑 internal/store，其 DB 用例在 Open 时就 Migrate）
 make db-down           # docker compose down
 make db-psql           # psql 进 compose 数据库
 make run              # db-up + go run（默认 :3500）
@@ -297,9 +298,9 @@ make build            # web-build + go build → bin/agenthub-server
 make version          # 打印本次构建将写入的 version（git describe）
 make docker-build     # docker build --build-arg VERSION=$(make version)
 make compose-build    # 同一镜像改走 compose 构建（含 git 打标转发）
-make test             # go test -race ./...（含DB 门控用例）
-make test-integration # 只跑 Integration 用例
-go test ./... -cover  # 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
+make test             # db-migrate + go test -race ./...（含DB 门控用例）
+make test-integration # db-migrate + 只跑 Integration 用例
+make test-cover       # db-migrate + 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 ./scripts/test-api.sh        # 对运行中实例的完整 HTTP 接口自测（PASS/FAIL 逐条，失败非 0 退出）

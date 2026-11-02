@@ -361,6 +361,7 @@ Unit and integration suites:
 
 ```bash
 make db-up             # integration cases need a real PostgreSQL
+make db-migrate        # create the schema; both test targets run this first
 make test              # go test -race ./... (integration cases skip without DATABASE_URL)
 make test-integration  # only integration_test.go
 make test-cover        # -coverprofile + go tool cover -func, per package and in total

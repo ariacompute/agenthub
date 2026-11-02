@@ -64,6 +64,17 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # The service starts empty on every run, and `go test ./...` builds and
+      # runs packages in parallel: internal/backup dumps whatever catalogue it
+      # finds, so on a fresh database it can query before the first migrator has
+      # created a table and fail with "no application tables found" (its tests
+      # would then be red on a schedule, not on a commit). internal/store owns
+      # the migrations and its DB cases call Migrate on Open, so they run once on
+      # their own to provision the schema. `-count=1` because a cached test result
+      # would skip the migration and provision nothing.
+      - name: Migrate (schema before the parallel run)
+        run: go test -race -count=1 -p 1 ./internal/store/
+
       - name: Test (race)
         run: go test -race ./...
 

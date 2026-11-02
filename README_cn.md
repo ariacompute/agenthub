@@ -309,6 +309,7 @@ mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`
 
 ```bash
 make db-up             # 集成用例需要真实 PostgreSQL
+make db-migrate        # 只建 schema；两个 test 目标都会先跑它
 make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
 make test-integration  # 只跑 integration_test.go
 make test-cover        # -coverprofile + go tool cover -func，按包与总计
