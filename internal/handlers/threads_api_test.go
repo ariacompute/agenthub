@@ -150,7 +150,7 @@ func (m *memThreads) UpsertAgentMessage(_ context.Context, threadID, taskID, res
 func TestWorkspaceAggregates(t *testing.T) {
 	agent := &registry.Entry{Kind: registry.KindAgent, Name: "a1"}
 	d := testDeps(t, openConfig(""), agent)
-	d.Hub.Store().Create(agent.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+	d.Hub.Store().Create(context.Background(), agent.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
 	h := Register(d)
 
 	w := do(t, h, http.MethodGet, "/api/workspace", "", nil)

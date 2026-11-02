@@ -16,6 +16,7 @@ import { adminCopy } from './copy/admin-copy.js'
 import { backupCopy } from './copy/backup-copy.js'
 import { playgroundCopy } from './copy/playground-copy.js'
 import { apiKeysCopy } from './copy/apikeys-copy.js'
+import { auditCopy } from './copy/audit-copy.js'
 import { docsCopy } from './copy/docs-copy.js'
 import { enumsCopy } from './copy/enums-copy.js'
 import { errorsCopy } from './copy/errors-copy.js'
@@ -35,6 +36,7 @@ const COPIES = {
   backup: backupCopy,
   playground: playgroundCopy,
   apikeys: apiKeysCopy,
+  audit: auditCopy,
   docs: docsCopy,
   errors: errorsCopy,
   providers: providerCopy,

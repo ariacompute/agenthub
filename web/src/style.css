@@ -1183,3 +1183,277 @@ textarea:focus {
     --stroke-1: var(--stroke-2);
   }
 }
+
+/* ---------- audit trail ----------
+   A forensic table. Everything here is a hairline, an alignment or a motion the
+   eye can ignore: the row content is the only thing allowed to be loud. No new
+   colour token is introduced, so both themes come for free. */
+
+.audit-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-block: 18px 14px;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segmented-item {
+  min-height: 44px;
+  padding-inline: 14px;
+  background: transparent;
+  border: 0;
+  border-inline-end: 1px solid var(--stroke-1);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.segmented-item:last-child {
+  border-inline-end: 0;
+}
+
+.segmented-item:hover {
+  background: var(--accent-softer);
+  color: var(--text-1);
+}
+
+.segmented-item.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.segmented-item:focus-visible,
+.audit-row:focus-visible,
+.audit-select:focus-visible,
+.audit-search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.audit-select,
+.audit-search {
+  min-height: 44px;
+  padding-inline: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+}
+
+.audit-search {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+/* Counters: four equal wells, numbers in tabular figures so they line up down
+   the column instead of jittering as the window changes. */
+.audit-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--radius-sm);
+  margin-block-end: 16px;
+}
+
+.audit-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-inline-end: 1px solid var(--stroke-1);
+}
+
+.audit-stat:last-child {
+  border-inline-end: 0;
+}
+
+.audit-stat-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.audit-stat-value {
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  line-height: 1.1;
+}
+
+.audit-chain {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.audit-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--stroke-3);
+}
+
+.audit-chain[data-state='ok'] .audit-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.audit-chain[data-state='broken'] .audit-dot {
+  border-color: var(--accent);
+}
+
+.audit-chain-count,
+.audit-chain-broken {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* The table is a grid rather than a <table>: a row is a button, so the whole
+   line is one tab stop and the drawer opens from the keyboard as well. */
+.audit-table {
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: 150px minmax(140px, 1.1fr) minmax(180px, 1.6fr) 70px 120px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding-inline: 14px;
+  background: transparent;
+  border: 0;
+  border-block-end: 1px solid var(--stroke-1);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.audit-row:last-child {
+  border-block-end: 0;
+}
+
+.audit-row-head {
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: default;
+  background: var(--accent-softer);
+}
+
+.audit-row:not(.audit-row-head):hover {
+  background: var(--accent-softer);
+  color: var(--text-1);
+}
+
+/* A refusal is marked by a solid spine, not by a colour: the monochrome system
+   has no warm tone to spend, and a 2px bar survives a low-contrast display. */
+.audit-row[data-outcome='denied'],
+.audit-row[data-outcome='failed'] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.audit-time,
+.audit-status {
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-action {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-latency {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A 2px grey bar reads as a duration against the column width without turning
+   the table into a chart. */
+.audit-bar {
+  display: block;
+  height: 2px;
+  min-width: 2px;
+  background: var(--grade-agent);
+}
+
+.audit-more {
+  display: flex;
+  justify-content: center;
+  margin-block-start: 16px;
+}
+
+.audit-empty-hint {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.audit-drawer {
+  width: min(480px, 100%);
+}
+
+.audit-facts {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr;
+  gap: 8px 16px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.audit-facts dt {
+  color: var(--text-3);
+}
+
+.audit-facts dd {
+  margin: 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.audit-hash {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+@media (max-width: 768px) {
+  .audit-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding-block: 10px;
+  }
+
+  .audit-row-head {
+    display: none;
+  }
+}
+
+/* RTL: the spine moves to the inline start edge, which the logical inset
+   already does, so only the duration bar has to flip. */
+[dir='rtl'] .audit-bar {
+  align-self: flex-end;
+}

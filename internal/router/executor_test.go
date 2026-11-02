@@ -28,7 +28,7 @@ func (r *stubRunner) Resume(ctx context.Context, p a2a.TaskResumeParams) (*a2a.T
 	return r.task, r.err
 }
 
-func (r *stubRunner) Cancel(id string) (*a2a.Task, error) {
+func (r *stubRunner) Cancel(_ context.Context, id string) (*a2a.Task, error) {
 	r.cancel = append(r.cancel, id)
 	return r.task, r.err
 }

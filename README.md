@@ -269,7 +269,12 @@ TLS.
 - CSRF: state-changing requests must carry a same-origin `Origin` (loopback and non-browser clients
   such as the desktop client and scripts are exempt), else `403`. The console uses same-origin
   fetch with the session cookie, so it is unaffected.
-- Audit logs record only IP and user id — never passwords, tokens or PII.
+- CLI resources run the command **the record declares**, never one taken from the prompt, and the
+  allowlist match is an exact command name (no prefixes, no paths). Caller arguments are refused
+  unless the record's `args_policy` allows them. `internal/adapter/cli_test.go` pins both rules as
+  regression tests — an allowlisted binary must not become a shell again.
+- Audit rows carry the caller, the IP, the HTTP method, a redacted path, the outcome and a hash —
+  never passwords, tokens, cookies or request/response bodies. See **API audit trail** above.
 
 **A2A callbacks & upstream sync (SSRF).** Push notifications now actually POST to the caller-supplied
 `URL` (`HTTPNotifier` replaces the old record-only mock). The destination is https-only and never
@@ -284,10 +289,57 @@ to the session key with a startup warning. API keys are stored hashed (`token_ha
 secrets are environment-variable references, never database rows — an injection audit confirmed every
 SQL statement is parameterised.
 
-**Database.** Run-time connections should use a least-privilege role; migrations run on the same
-connection at startup. Provision the roles with `scripts/provision-db-roles.sql` (`app` /
-`readonly`). The connection pool is tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` /
-`_CONN_MAX_LIFETIME`).
+**Database.** Run-time connections should use a least-privilege role, and **that role must not own a
+table and must not have `BYPASSRLS`** — either of those silently skips the isolation policies.
+`scripts/provision-db-roles.sql` provisions three roles (`migrator` owns the schema and runs DDL,
+`app` is DML-only, `readonly` is SELECT-only) and refuses to finish while any guarded table lacks
+`ENABLE`+`FORCE ROW LEVEL SECURITY`. Point DDL at the migrator with
+`AGENTHUB_MIGRATE_DATABASE_URL`; when it is unset, migrations fall back to `DATABASE_URL` and the
+startup log warns, because a single-role deployment weakens the boundary. The connection pool is
+tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME`).
+
+**Data isolation (row level security).** Tasks, their artifacts/spans/pending/push rows and their
+events, plus knowledge chunks, all carry `owner_id`. PostgreSQL policies (`migrations/026`) decide
+visibility from three per-transaction settings — `app.owner_id` (the signed-in user), `app.bypass`
+(administrator) and `app.system` (in-process paths: the task state machine, the event broker, seed,
+migrations, backups, the audit writer). An unset setting reads as NULL and every comparison is false,
+so **a request that forgets to scope itself sees nothing** rather than everything. Each repository
+call opens a short transaction (`internal/store.scoped`) and injects the identity with
+`set_config(..., true)`; a request never holds a connection.
+
+`AGENTHUB_RLS=enforce` is the default. `AGENTHUB_RLS=off` makes every policy pass (it appends
+`options=-c app.system=on` to the DSN) and logs a loud warning; with `AGENTHUB_ENV=prod` it is refused
+unless `AGENTHUB_RLS_ACK=1` also says the operator meant it.
+
+Resource visibility is **explicit**: `resources.visibility` is `restricted` by default and `public`
+on request. Access is `public || a grant`, so a resource with no grant and no `public` flag is
+invisible *and* uncallable, including to anonymous A2A peers. **This is a breaking change** — upgrade
+steps, and the three ways to restore an existing record, are in `requirements-isolation.md` §3.1.
+Demo records (`AGENTHUB_SEED_DEMO=true`) are seeded as `public`.
+
+**API audit trail.** Every `/api` and `/a2a` call appends one row to `audit_log`, using CloudTrail's
+vocabulary: `event_id`/`ts`/`source`/`action`/`read_only`/`actor_*`/`ip`/`method`/`path`/
+`resource_*`/`status`/`error_code`/`latency_ms`/`user_agent`. Paths are redacted (query values become
+`REDACTED`) and no request or response body is ever stored. The table is append-only twice over: a
+trigger rejects `UPDATE`/`DELETE`/`TRUNCATE` for every role including the owner, and the runtime role
+is granted only `INSERT`/`SELECT` on it. Rows are hash-chained
+(`hash = sha256(prev_hash ‖ canonical(event))`), so editing or removing one breaks every later link
+and `GET /api/audit/verify` points at the first broken row. A single writer serialises the chain with
+a bounded queue and batched inserts (8192 / 64 / 500 ms by default); a full queue drops frames and
+warns — it never blocks a request.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENTHUB_AUDIT_ENABLED` | `true` | Record the trail at all |
+| `AGENTHUB_AUDIT_RETENTION` | `2160h` | How long a row may live; expiry itself is audited |
+| `AGENTHUB_AUDIT_QUEUE` | `8192` | Bounded queue depth (frames beyond it are counted and dropped) |
+| `AGENTHUB_AUDIT_BATCH` | `64` | Rows per insert (`1..AGENTHUB_AUDIT_QUEUE`) |
+| `AGENTHUB_RLS` | `enforce` | `off` relaxes every policy (dev only; refused in prod without `AGENTHUB_RLS_ACK=1`) |
+| `AGENTHUB_MIGRATE_DATABASE_URL` | unset | DDL connection; falls back to `DATABASE_URL` with a warning |
+
+Reading the trail needs the dedicated `audit:read` permission: `GET /api/audit` (filters `from`, `to`,
+`actor`, `action`, `resource`, `source`, `outcome`, `q`, `before`, `limit`), `GET /api/audit/{id}`, and
+`GET /api/audit/verify?from=&to=`. The console shows them on the **Audit** screen.
 
 **Backups.** When `AGENTHUB_ENCRYPTION_KEY` is set, checkpoint archives are encrypted at rest
 (AES-256-GCM) into `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest — plaintext never touches

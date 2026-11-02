@@ -23,6 +23,26 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    # Hardening. `cap_drop: [ALL]` is deliberately *not* applied here: the
+    # official image starts as root and drops to `postgres` through setuid/setgid,
+    # which needs those capabilities during init. Everything that would let a
+    # compromised database process touch the host is dropped instead, and the
+    # container never gains a privilege it did not start with.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+      - SYS_PTRACE
+      - SYS_TIME
+    pids_limit: 512
+    mem_limit: 2g
+    # The database is reachable only from the application network: nothing on
+    # the console side (not even the vite dev server) can open a connection.
+    networks:
+      - data
     restart: unless-stopped
 
   # Single binary: A2A data plane (/.well-known/agent.json, POST /a2a),
@@ -96,6 +116,19 @@ services:
       AGENTHUB_BACKUP_MODE: ${AGENTHUB_BACKUP_MODE:-off}
       AGENTHUB_BACKUP_KEEP_LAST: ${AGENTHUB_BACKUP_KEEP_LAST:-7}
       AGENTHUB_BACKUP_MAX_AGE_DAYS: ${AGENTHUB_BACKUP_MAX_AGE_DAYS:-30}
+      # Row level security. `enforce` is the default and the only value a
+      # production deployment should run: `off` makes every isolation policy a
+      # no-op and is refused with AGENTHUB_ENV=prod unless AGENTHUB_RLS_ACK=1
+      # also says the operator meant it (left to .env on purpose, so enabling it
+      # is always a deliberate edit).
+      AGENTHUB_RLS: ${AGENTHUB_RLS:-enforce}
+      # API audit trail: on by default, one append-only row per /api and /a2a
+      # call, hash-chained. Retention is how long a row may live before the
+      # cleanup tick removes it (and records that it did).
+      AGENTHUB_AUDIT_ENABLED: ${AGENTHUB_AUDIT_ENABLED:-true}
+      AGENTHUB_AUDIT_RETENTION: ${AGENTHUB_AUDIT_RETENTION:-2160h}
+      AGENTHUB_AUDIT_QUEUE: ${AGENTHUB_AUDIT_QUEUE:-8192}
+      AGENTHUB_AUDIT_BATCH: ${AGENTHUB_AUDIT_BATCH:-64}
     # Pass the operator's .env (or .env.sec copied to .env) into the container.
     # A root-level .env is only used by Compose for variable *substitution*; it is
     # NOT injected as container env unless we do it here. Any variable not listed
@@ -120,6 +153,25 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
+    # Hardening: the binary needs no capability at all (it binds 3500 as an
+    # unprivileged port), never escalates through a setuid helper, and has no
+    # business mutating its own filesystem — the only writable places are the
+    # backup volume and a scratch /tmp for pg_dump.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    mem_limit: 1g
+    # Two networks on purpose: `edge` carries the console, `data` reaches the
+    # database. The dev console cannot see postgres, and a compromised frontend
+    # container has nothing to connect to but the API it already had.
+    networks:
+      - edge
+      - data
     restart: unless-stopped
 
   # Console dev server with hot reload. Optional: `docker compose --profile dev up`.
@@ -139,7 +191,24 @@ services:
       - agenthub
     profiles:
       - dev
+    # A dev server is convention over configuration, so it runs as an ordinary
+    # process with no capabilities and no path to the database.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
+    networks:
+      - edge
 
 volumes:
   agenthub-pgdata:
   agenthub-backups:
+
+# Network split. `data` is internal (no route out at all), so the database
+# cannot be reached from the console side or from the internet.
+networks:
+  edge: {}
+  data:
+    internal: true

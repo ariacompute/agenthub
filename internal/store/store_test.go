@@ -103,6 +103,9 @@ func TestEmbeddedMigrationsAreOrderedAndIdempotent(t *testing.T) {
 		"017_computers.sql", "018_schedules.sql", "019_knowledge.sql",
 		"020_router.sql",
 		"021_sandboxes.sql",
+		"022_task_ownership.sql", "023_knowledge_owner.sql",
+		"024_resource_visibility.sql", "025_audit_log.sql",
+		"026_rls_policies.sql", "027_audit_permission.sql",
 	}
 	if len(names) != len(want) {
 		t.Fatalf("embedded migrations = %v, want %v", names, want)
@@ -134,7 +137,10 @@ func TestEmbeddedMigrationsAreOrderedAndIdempotent(t *testing.T) {
 					t.Fatalf("%s: CREATE INDEX is not idempotent: %q", name, stmt)
 				}
 			}
-			if contains(stmt, ";") {
+			// A dollar quoted body (function, DO block) legitimately contains
+			// semicolons; only a split statement outside such a body would mean
+			// the line based splitter broke it in two.
+			if contains(stmt, ";") && !contains(stmt, "$$") {
 				t.Fatalf("%s: statement still carries a separator: %q", name, stmt)
 			}
 		}

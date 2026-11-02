@@ -418,6 +418,15 @@ func connect(ctx context.Context, dsn string) (*pgx.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: connect: %v", ErrEngineUnavailable, err)
 	}
+	// A checkpoint reads every row of every table, and COPY is subject to row
+	// level security like any other read. Without the system identity a
+	// checkpoint would quietly export only the rows without an owner and report
+	// success — the worst possible failure for a backup, so the session declares
+	// itself a process owned path up front.
+	if _, err := conn.Exec(ctx, `SELECT set_config('app.system', 'on', false)`); err != nil {
+		_ = conn.Close(ctx)
+		return nil, fmt.Errorf("%w: connect: %v", ErrEngineUnavailable, err)
+	}
 	return conn, nil
 }
 

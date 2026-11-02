@@ -419,6 +419,39 @@ export function revokeAPIKey(id) {
   return request(`/api/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+// --- Audit trail ---------------------------------------------------------
+// The trail is append only on the server; the console only ever reads it. The
+// verify call recomputes the hash chain, which is what turns "these rows exist"
+// into "these rows were not edited".
+
+export function listAudit({ from = '', to = '', actor = '', action = '', resource = '', source = '', outcome = '', q = '', before = 0, limit = 100 } = {}) {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  if (actor) params.set('actor', actor)
+  if (action) params.set('action', action)
+  if (resource) params.set('resource', resource)
+  if (source) params.set('source', source)
+  if (outcome) params.set('outcome', outcome)
+  if (q) params.set('q', q)
+  if (before) params.set('before', String(before))
+  if (limit) params.set('limit', String(limit))
+  const query = params.toString()
+  return request(`/api/audit${query ? `?${query}` : ''}`)
+}
+
+export function getAudit(eventId) {
+  return request(`/api/audit/${encodeURIComponent(eventId)}`)
+}
+
+export function verifyAudit({ from = '', to = '' } = {}) {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const query = params.toString()
+  return request(`/api/audit/verify${query ? `?${query}` : ''}`)
+}
+
 // saveBlob hands a downloaded archive to the browser. The object URL is revoked
 // straight after the click so a large checkpoint does not stay pinned in memory.
 export function saveBlob(blob, filename) {

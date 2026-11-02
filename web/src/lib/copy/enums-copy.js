@@ -237,4 +237,21 @@ export const enumsCopy = {
     'ar': { ok: 'نجحت', failed: 'فشلت' },
     'hi': { ok: 'सफल', failed: 'विफल' },
   },
+  // Who may see and invoke a catalogue record. "Public" is a deliberate act, not
+  // the absence of a grant, so both states need a word the operator recognises.
+  visibility: {
+    'en': { public: 'Public', restricted: 'Restricted' },
+    'zh': { public: '公开', restricted: '受限' },
+    'zh-TW': { public: '公開', restricted: '受限' },
+    'es': { public: 'Público', restricted: 'Restringido' },
+    'fr': { public: 'Public', restricted: 'Restreint' },
+    'de': { public: 'Öffentlich', restricted: 'Beschränkt' },
+    'it': { public: 'Pubblico', restricted: 'Limitato' },
+    'ru': { public: 'Публичный', restricted: 'Ограниченный' },
+    'ja': { public: '公開', restricted: '制限' },
+    'ko': { public: '공개', restricted: '제한' },
+    'pt': { public: 'Público', restricted: 'Restrito' },
+    'ar': { public: 'عام', restricted: 'مقيّد' },
+    'hi': { public: 'सार्वजनिक', restricted: 'प्रतिबंधित' },
+  },
 }

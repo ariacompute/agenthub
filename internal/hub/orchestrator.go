@@ -207,11 +207,11 @@ func (h *Hub) Broker() *Broker { return h.broker }
 // Events replays the persisted frames of a task newer than since, oldest first.
 // Without an event repository it returns nil: the caller then falls back to
 // replaying the task state only.
-func (h *Hub) Events(taskID string, since uint64, limit int) []Event {
+func (h *Hub) Events(ctx context.Context, taskID string, since uint64, limit int) []Event {
 	if h.eventRepo == nil {
 		return nil
 	}
-	events, err := h.eventRepo.Since(dbCtx(), taskID, since, limit)
+	events, err := h.eventRepo.Since(ctx, taskID, since, limit)
 	if err != nil {
 		slog.Error("hub: replay events", "task", taskID, "since", since, "error", err)
 		return nil
@@ -264,9 +264,11 @@ func scopeOf(params a2a.MessageSendParams) string {
 	return "default"
 }
 
-// Get returns a task, optionally trimming its history.
-func (h *Hub) Get(id string, historyLength *int) (*a2a.Task, error) {
-	task := h.store.Get(id)
+// Get returns a task the caller may see, optionally trimming its history. A task
+// owned by somebody else is reported as not found: the A2A contract has no
+// "forbidden" state for this method and an id oracle is worse than a 404.
+func (h *Hub) Get(ctx context.Context, id string, historyLength *int) (*a2a.Task, error) {
+	task := h.store.Get(ctx, id)
 	if task == nil {
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
 	}
@@ -277,8 +279,8 @@ func (h *Hub) Get(id string, historyLength *int) (*a2a.Task, error) {
 }
 
 // Cancel parks a task in canceled.
-func (h *Hub) Cancel(id string) (*a2a.Task, error) {
-	task := h.store.Get(id)
+func (h *Hub) Cancel(ctx context.Context, id string) (*a2a.Task, error) {
+	task := h.store.Get(ctx, id)
 	if task == nil {
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
 	}
@@ -302,7 +304,7 @@ func (h *Hub) Resume(ctx context.Context, params a2a.TaskResumeParams) (*a2a.Tas
 		return nil, ErrRestoring
 	}
 	defer h.leaveTask()
-	task := h.store.Get(params.ID)
+	task := h.store.Get(ctx, params.ID)
 	if task == nil {
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
 	}
@@ -357,7 +359,7 @@ func (h *Hub) ParkConnector(ctx context.Context, resourceID, action string) (*a2
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
 	}
 	msg := a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("connector:"+action))
-	task := h.store.Create(entry.ID, msg)
+	task := h.store.Create(ctx, entry.ID, msg)
 	// A freshly created task is `submitted`; the lifecycle only allows
 	// submitted -> working -> input-required, so advance through working first.
 	task, err := h.store.SetState(task.ID, a2a.TaskStateWorking, nil)
@@ -374,11 +376,11 @@ func (h *Hub) ParkConnector(ctx context.Context, resourceID, action string) (*a2
 	}
 	h.publishStatus(updated, nil, true)
 	h.notifyPush(updated)
-	return h.store.Get(task.ID), nil
+	return h.store.Get(ctx, task.ID), nil
 }
 
 // SetPush registers the push notification callback for a task.
-func (h *Hub) SetPush(params a2a.TaskPushNotificationConfigParams) (*a2a.PushNotificationConfig, error) {
+func (h *Hub) SetPush(ctx context.Context, params a2a.TaskPushNotificationConfigParams) (*a2a.PushNotificationConfig, error) {
 	if !h.cfg.PushEnabled {
 		return nil, a2a.NewError(a2a.CodePushNotificationNotSupported, a2a.MsgPushNotificationNotSupported)
 	}
@@ -386,7 +388,14 @@ func (h *Hub) SetPush(params a2a.TaskPushNotificationConfigParams) (*a2a.PushNot
 	if cfg == nil || strings.TrimSpace(cfg.URL) == "" {
 		return nil, a2a.NewError(a2a.CodeInvalidParams, a2a.MsgInvalidParams)
 	}
-	if err := h.store.SetPush(params.TaskID, cfg); err != nil {
+	// Overwriting another account's callback would turn the hub into an egress
+	// primitive aimed at whatever URL the caller names, so the task has to be
+	// visible to the caller first. An unknown task is reported as not found.
+	taskID := params.ResolveTaskID()
+	if h.store.Get(ctx, taskID) == nil {
+		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
+	}
+	if err := h.store.SetPush(taskID, cfg); err != nil {
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
 	}
 	cp := *cfg
@@ -394,7 +403,10 @@ func (h *Hub) SetPush(params a2a.TaskPushNotificationConfigParams) (*a2a.PushNot
 }
 
 // GetPush returns the registered callback for a task.
-func (h *Hub) GetPush(taskID string) (*a2a.PushNotificationConfig, error) {
+func (h *Hub) GetPush(ctx context.Context, taskID string) (*a2a.PushNotificationConfig, error) {
+	if h.store.Get(ctx, taskID) == nil {
+		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
+	}
 	cfg := h.store.Push(taskID)
 	if cfg == nil {
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
@@ -428,7 +440,7 @@ func (h *Hub) run(ctx context.Context, params a2a.MessageSendParams, emit Emit, 
 	if msg.Role == "" {
 		msg.Role = a2a.RoleUser
 	}
-	task := h.store.Create(entry.ID, msg)
+	task := h.store.Create(ctx, entry.ID, msg)
 
 	working, err := h.store.SetState(task.ID, a2a.TaskStateWorking, nil)
 	if err != nil {
@@ -464,7 +476,7 @@ func (h *Hub) complete(ctx context.Context, taskID string, res RunResult, emit E
 	h.publishMessage(taskID, reply, emit)
 	h.publishStatus(updated, emit, true)
 	h.notifyPush(updated)
-	return h.store.Get(taskID), nil
+	return h.store.Get(dbCtx(), taskID), nil
 }
 
 func (h *Hub) park(taskID, prompt string, emit Emit) (*a2a.Task, error) {
@@ -479,7 +491,7 @@ func (h *Hub) park(taskID, prompt string, emit Emit) (*a2a.Task, error) {
 	h.publishMessage(taskID, question, emit)
 	h.publishStatus(updated, emit, true)
 	h.notifyPush(updated)
-	return h.store.Get(taskID), nil
+	return h.store.Get(dbCtx(), taskID), nil
 }
 
 func (h *Hub) fail(taskID string, cause error, emit Emit) (*a2a.Task, error) {
@@ -489,12 +501,12 @@ func (h *Hub) fail(taskID string, cause error, emit Emit) (*a2a.Task, error) {
 	if err != nil {
 		// A task that cannot transition already reached a terminal state; the
 		// original failure is the one worth reporting.
-		return h.store.Get(taskID), adapterError(cause)
+		return h.store.Get(dbCtx(), taskID), adapterError(cause)
 	}
 	h.publishMessage(taskID, reply, emit)
 	h.publishStatus(updated, emit, true)
 	h.notifyPush(updated)
-	return h.store.Get(taskID), adapterError(cause)
+	return h.store.Get(dbCtx(), taskID), adapterError(cause)
 }
 
 func (h *Hub) invoker(emit Emit, origin Origin) Invoker {
@@ -587,6 +599,18 @@ func (h *Hub) flowFor(params a2a.MessageSendParams, resourceID string) ([]Step, 
 	return DefaultSteps(resourceID), nil
 }
 
+// ResolveResource answers "which record would this message run on?" without
+// running anything.
+//
+// It exists so the A2A entry point can authorize the resource a request will
+// actually reach. The alternative — only checking an explicitly named
+// resourceId — left the unnamed path guarded by nothing, and that is precisely
+// how an anonymous caller used to land on a restricted agent through the hub's
+// kind fallback.
+func (h *Hub) ResolveResource(params a2a.MessageSendParams) (*registry.Entry, error) {
+	return h.selectResource(params)
+}
+
 func (h *Hub) selectResource(params a2a.MessageSendParams) (*registry.Entry, error) {
 	var selector string
 	if params.Metadata != nil {
@@ -675,7 +699,7 @@ func (h *Hub) publishStatus(task *a2a.Task, emit Emit, final bool) {
 }
 
 func (h *Hub) publishArtifact(taskID string, art a2a.Artifact, emit Emit) {
-	task := h.store.Get(taskID)
+	task := h.store.Get(dbCtx(), taskID)
 	frame := a2a.TaskArtifactUpdateEvent{
 		Kind:      a2a.KindArtifactUpdate,
 		TaskID:    taskID,

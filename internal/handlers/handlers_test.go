@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -27,6 +28,12 @@ func testDeps(t *testing.T, cfg *config.Config, entries ...*registry.Entry) Deps
 	t.Helper()
 	reg := registry.New()
 	for _, e := range entries {
+		// Authorisation is fail closed, so a fixture has to say it is published:
+		// a record with no grants is private by default and an anonymous or
+		// non-owner call would be refused before it reaches the adapter.
+		if e.Visibility == "" {
+			e.Visibility = registry.VisibilityPublic
+		}
 		stored, err := reg.Upsert(e)
 		if err != nil {
 			t.Fatalf("seed %q: %v", e.Name, err)
@@ -297,7 +304,7 @@ func TestJSONRPCSendGetCancel(t *testing.T) {
 	}
 
 	// Cancelling a live task works, and a second cancel is rejected.
-	live := d.Hub.Store().Create(entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("x")))
+	live := d.Hub.Store().Create(context.Background(), entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("x")))
 	if live.Status.State != a2a.TaskStateSubmitted {
 		t.Fatalf("state = %s, want submitted", live.Status.State)
 	}
@@ -607,7 +614,7 @@ func TestTaskAPI(t *testing.T) {
 	}
 
 	// The console cancel / resume endpoints mirror the A2A methods.
-	live := d.Hub.Store().Create(entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+	live := d.Hub.Store().Create(context.Background(), entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
 	w = do(t, h, http.MethodPost, "/api/tasks/"+live.ID+"/cancel", "", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("cancel: status = %d (%s)", w.Code, w.Body.String())

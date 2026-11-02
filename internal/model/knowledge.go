@@ -4,8 +4,12 @@ import "time"
 
 // Knowledge is one retrieved-or-stored chunk an agent may use as context (mock RAG).
 type Knowledge struct {
-	ID        string    `gorm:"primaryKey;size:64"`
-	AgentID   string    `gorm:"size:64;index;not null;default:''"`
+	ID      string `gorm:"primaryKey;size:64"`
+	AgentID string `gorm:"size:64;index;not null;default:''"`
+	// OwnerID is the account that added the chunk. An empty owner means the
+	// instance itself wrote it (seed, migration) and is visible only to the
+	// platform owner.
+	OwnerID   string    `gorm:"size:64;index;not null;default:''"`
 	ChunkText string    `gorm:"type:text;not null;default:''"`
 	SourceRef string    `gorm:"size:256;not null;default:''"`
 	CreatedAt time.Time `gorm:"index"`

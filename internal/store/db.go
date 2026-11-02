@@ -30,13 +30,32 @@ var ErrNoDatabase = errors.New("DATABASE_URL is not configured")
 // Redacted is the placeholder written over every secret in a logged DSN.
 const Redacted = "REDACTED"
 
+// OpenOptions tunes how the pool is opened.
+type OpenOptions struct {
+	// Debug turns GORM's SQL logging up to Info.
+	Debug bool
+	// RLSEnforce keeps the row level security policies binding (default). When
+	// false the DSN carries `options=-c app.system=on`, so every policy in
+	// 026_rls_policies.sql passes and the instance behaves like it did before
+	// the policies existed. The caller is responsible for logging the warning.
+	RLSEnforce bool
+}
+
 // Open establishes a PostgreSQL connection and verifies it with a ping.
 func Open(dsn string, debug bool) (*gorm.DB, error) {
+	return OpenWithOptions(dsn, OpenOptions{Debug: debug, RLSEnforce: true})
+}
+
+// OpenWithOptions is Open with the row level security switch.
+func OpenWithOptions(dsn string, opts OpenOptions) (*gorm.DB, error) {
 	if dsn == "" {
 		return nil, ErrNoDatabase
 	}
+	if !opts.RLSEnforce {
+		dsn = relaxRLS(dsn)
+	}
 	level := gormlogger.Warn
-	if debug {
+	if opts.Debug {
 		level = gormlogger.Info
 	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -160,4 +179,27 @@ func RedactDSN(dsn string) string {
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// relaxRLS rewrites a DSN so every connection it opens reports the system
+// identity, which is what makes the row level security policies pass. It is the
+// implementation of AGENTHUB_RLS=off and exists only so a developer box or a
+// test run can skip the policies; production is expected to keep them on.
+//
+// The setting travels as a libpq option because it has to be in force before the
+// first query: an ALTER after connecting would leave the pool's other
+// connections (and the time before the first request) unprotected.
+func relaxRLS(dsn string) string {
+	const setting = "-c app.system=on"
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		q := u.Query()
+		if existing := q.Get("options"); existing != "" {
+			q.Set("options", existing+" "+setting)
+		} else {
+			q.Set("options", setting)
+		}
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	return dsn + " options='" + setting + "'"
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"agenthub/internal/adapter"
+	"agenthub/internal/audit"
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
 	"agenthub/internal/backup"
@@ -45,7 +46,10 @@ func main() {
 	// configured the module logs a warning and falls back to a dev-only key.
 	secure.Configure(cfg.EncryptionKey, cfg.EncryptionKey)
 
-	db, err := store.Open(cfg.DatabaseURL, cfg.Env == "dev")
+	db, err := store.OpenWithOptions(cfg.DatabaseURL, store.OpenOptions{
+		Debug:      cfg.Env == "dev",
+		RLSEnforce: cfg.RLSEnforced(),
+	})
 	if err != nil {
 		slog.Error("database", "error", err)
 		os.Exit(1)
@@ -55,8 +59,16 @@ func main() {
 			slog.Error("database close", "error", err)
 		}
 	}()
-	// Migrations run on the application connection at startup.
-	if err := store.Migrate(db); err != nil {
+	if !cfg.RLSEnforced() {
+		// Loud on purpose: this is the one setting that makes every isolation
+		// policy a no-op, and it must never be on in production by accident.
+		slog.Warn("database: row level security is DISABLED by AGENTHUB_RLS=off",
+			"effect", "every session sees every row regardless of owner",
+			"hint", "unset AGENTHUB_RLS (or set it to enforce) to restore the policies")
+	}
+	// Migrations run on the DDL connection: a schema-owning role when one is
+	// configured, otherwise the runtime DSN.
+	if err := runMigrations(cfg, db); err != nil {
 		slog.Error("migrate", "error", err)
 		os.Exit(1)
 	}
@@ -258,9 +270,38 @@ func main() {
 	}
 
 	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc, Sandboxes: sandboxSvc}
+
+	// The audit trail. Off only when an operator says so: a trail nobody turned
+	// on is a trail nobody has when the incident happens.
+	var auditRecorder *audit.Recorder
+	if cfg.AuditEnabled {
+		auditRecorder = audit.New(store.NewAuditStore(db), audit.Options{
+			Queue:     cfg.AuditQueue,
+			Batch:     cfg.AuditBatch,
+			Retention: cfg.AuditRetention,
+			Logger:    slog.Default(),
+		})
+		deps.Audit = auditRecorder
+		auditCtx, stopAudit := context.WithCancel(context.Background())
+		defer stopAudit()
+		go auditRecorder.Run(auditCtx)
+		// Retention runs once a day; the writer is flushed last on shutdown, so
+		// the process never leaves a half written batch behind.
+		go pruneAudit(auditCtx, auditRecorder, cfg.AuditRetention)
+		defer func() {
+			stopAudit()
+			auditRecorder.Close()
+		}()
+		slog.Info("audit: API trail enabled",
+			"retention", cfg.AuditRetention, "queue", cfg.AuditQueue, "batch", cfg.AuditBatch)
+	} else {
+		slog.Warn("audit: API trail DISABLED by AGENTHUB_AUDIT_ENABLED=false")
+	}
+	handler := handlers.Register(deps)
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
-		Handler:           handlers.Wrap(handlers.Register(deps), cfg),
+		Handler:           handlers.WrapWithAudit(handler, cfg, auditRecorder),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 
@@ -557,6 +598,56 @@ func syncSources(ctx context.Context, sources *registry.SourceService, interval 
 			return
 		case <-ticker.C:
 			run()
+		}
+	}
+}
+
+// runMigrations applies the schema on the DDL connection.
+//
+// Two roles is the point: the runtime role must not own the tables, or it could
+// disable the row level security policies guarding them. Falling back to the
+// runtime DSN keeps a single-role deployment working, at the cost of a weaker
+// boundary, so the fallback is logged rather than hidden.
+func runMigrations(cfg *config.Config, db *gorm.DB) error {
+	if strings.TrimSpace(cfg.MigrateDatabaseURL) == "" {
+		slog.Warn("migrate: AGENTHUB_MIGRATE_DATABASE_URL is unset, running DDL on the runtime role",
+			"hint", "point it at a schema owning role so the runtime role never owns a table")
+		return store.Migrate(db)
+	}
+	migDB, err := store.OpenWithOptions(cfg.MigrateDatabaseURL, store.OpenOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := store.Close(migDB); cerr != nil {
+			slog.Warn("migrate: close connection", "error", cerr)
+		}
+	}()
+	return store.Migrate(migDB)
+}
+
+// pruneAudit expires audit rows past the retention window once a day. It is the
+// only path allowed to delete: the append-only trigger checks the retention
+// identity, and the recorder sets it for the transaction.
+func pruneAudit(ctx context.Context, rec *audit.Recorder, retention time.Duration) {
+	if retention <= 0 {
+		return
+	}
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := rec.Prune(ctx)
+			if err != nil {
+				slog.Warn("audit: retention pass failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("audit: expired rows", "rows", n, "retention", retention)
+			}
 		}
 	}
 }

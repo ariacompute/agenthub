@@ -49,11 +49,11 @@ A single JSON-RPC 2.0 endpoint answers every method below. The HTTP status stays
 | --- | --- | --- | --- |
 | `message/send` | Run one turn and wait for the terminal state. | `{ message, configuration?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
 | `message/stream` | The same turn, with frames streamed as it progresses. | `{ message, configuration?, metadata? }` | `text/event-stream: task_status_update \| task_artifact_update \| message \| task_span_update` |
-| `tasks/get` | Read a task together with its history. | `{ id, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
-| `tasks/cancel` | Cancel a task that is still running. | `{ id, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
-| `tasks/resume` | Answer a task that is parked waiting for input. | `{ id, message, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
-| `tasks/pushNotification/set` | Register the callback a task should notify. | `{ taskId, pushNotificationConfig? }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
-| `tasks/pushNotification/get` | Read the callback registered for a task. | `{ id }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
+| `tasks/get` | Read a task together with its history. | `{ id, taskId?, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
+| `tasks/cancel` | Cancel a task that is still running. | `{ id, taskId?, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
+| `tasks/resume` | Answer a task that is parked waiting for input. | `{ id, taskId?, message, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
+| `tasks/pushNotification/set` | Register the callback a task should notify. | `{ taskId, id?, pushNotificationConfig? }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
+| `tasks/pushNotification/get` | Read the callback registered for a task. | `{ id, taskId? }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
 
 The stream ends on the terminal status frame; there is no sentinel frame after it.
 
@@ -285,6 +285,14 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `PUT` | `/api/router/policies/{source}` | `tasks:write` — Cancel and resume tasks | Replace one of the routing rules outright | `{ mode(off\|candidate\|request_only), allow?, keywords?, quietStart?, quietEnd?, resource? }` | `Policy \| 400 router_policy_invalid` |
 | `POST` | `/api/router/passes` | `tasks:write` — Cancel and resume tasks | Run one scheduling beat now instead of waiting for the interval. | — | `{ kicked: true } — 202` |
 | `GET` | `/api/router/events` | `tasks:read` — Read tasks | SSE: replay from `since`, then follow the scheduler live. | `?since=<seq>&subject=` | `text/event-stream, event name router_event` |
+
+### Audit trail
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/audit` | `audit:read` — audit:read | List all audit events | `?from=&to=&actor=&action=&resource=&source=&outcome=&q=&before=&limit=` | `{ events: AuditEvent[], stats: { total, failed, denied, written }, next }` |
+| `GET` | `/api/audit/verify` | `audit:read` — audit:read | Recompute the hash chain over the window and report the first row that does not link. | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
+| `GET` | `/api/audit/{id}` | `audit:read` — audit:read | Read one of the audit events by id | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
 
 Open a row to see its request and response.
 

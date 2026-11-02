@@ -13,6 +13,7 @@ import { adminCopy } from '../src/lib/copy/admin-copy.js'
 import { backupCopy } from '../src/lib/copy/backup-copy.js'
 import { playgroundCopy } from '../src/lib/copy/playground-copy.js'
 import { apiKeysCopy } from '../src/lib/copy/apikeys-copy.js'
+import { auditCopy } from '../src/lib/copy/audit-copy.js'
 import { docsCopy } from '../src/lib/copy/docs-copy.js'
 
 const PROSE = {
@@ -27,6 +28,7 @@ const PROSE = {
   backup: backupCopy,
   playground: playgroundCopy,
   apikeys: apiKeysCopy,
+  audit: auditCopy,
   docs: docsCopy,
   errors: errorsCopy,
 }

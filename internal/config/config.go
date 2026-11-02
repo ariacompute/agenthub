@@ -29,6 +29,17 @@ const (
 	RouterAssessModel = "model"
 )
 
+// The two states of AGENTHUB_RLS.
+const (
+	// RLSModeEnforce keeps PostgreSQL row level security binding. It is the
+	// default: forgetting the variable must never widen what a session sees.
+	RLSModeEnforce = "enforce"
+	// RLSModeOff relaxes the policies by connecting with app.system=on. It
+	// exists for a local sqlite-less box and for tests, and is refused in
+	// production unless the operator also sets AGENTHUB_RLS_ACK=1.
+	RLSModeOff = "off"
+)
+
 // Version is the agenthub release reported by /healthz and the Agent Card. It
 // carries the git tag verbatim, prefix included ("v0.2.0").
 //
@@ -101,6 +112,26 @@ type Config struct {
 	// redirect URI. Empty falls back to the request host at redirect time.
 	PublicBaseURL string
 	DatabaseURL   string
+	// MigrateDatabaseURL is the connection used for DDL. It should be a role
+	// that owns the schema, while DatabaseURL is a DML-only role with no
+	// BYPASSRLS. When empty, migrations reuse DatabaseURL (and the startup log
+	// warns, because row level security is weaker that way).
+	MigrateDatabaseURL string
+	// RLSMode is "enforce" (default) or "off". Off appends
+	// `options=-c app.system=on` to the DSN, which makes every policy pass, and
+	// is refused in production unless AGENTHUB_RLS_ACK=1 says the operator
+	// meant it.
+	RLSMode string
+	// RLSAcknowledged records AGENTHUB_RLS_ACK, the explicit opt-out that lets
+	// a production instance run with RLS off.
+	RLSAcknowledged bool
+	// API audit trail. On by default: an audit switch that has to be found is
+	// an audit trail nobody has when they need it. The queue and the batch are
+	// tuned only for throughput.
+	AuditEnabled   bool
+	AuditRetention time.Duration
+	AuditQueue     int
+	AuditBatch     int
 	// SeedDemo inserts the five demo resources at startup. It is off by
 	// default: an instance should start with whatever the operator registers,
 	// not with sample rows nobody asked for. Turn it on for a local walkthrough
@@ -253,6 +284,20 @@ type Config struct {
 // directory behaves exactly as it did before the feature existed.
 func (c *Config) BackupEnabled() bool { return strings.TrimSpace(c.BackupDir) != "" }
 
+// RLSEnforced reports whether the database policies stay binding.
+func (c *Config) RLSEnforced() bool {
+	return !strings.EqualFold(strings.TrimSpace(c.RLSMode), RLSModeOff)
+}
+
+// EffectiveMigrateURL is the connection migrations run on: the dedicated DDL
+// role when one is configured, otherwise the runtime DSN.
+func (c *Config) EffectiveMigrateURL() string {
+	if strings.TrimSpace(c.MigrateDatabaseURL) != "" {
+		return c.MigrateDatabaseURL
+	}
+	return c.DatabaseURL
+}
+
 // BackupSchedule is the policy a fresh schedule row is seeded from. It is only
 // consulted when the console has never saved one.
 func (c *Config) BackupSchedule() backup.Schedule {
@@ -280,18 +325,26 @@ func Load() (*Config, error) {
 		SessionTTL:             envDur("AGENTHUB_SESSION_TTL", 12*time.Hour),
 		// Secure cookies by default in production; a plain http dev box can
 		// turn them off.
-		CookieSecure:   envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
-		PublicBaseURL:  envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
-		DatabaseURL:    envStr("DATABASE_URL", ""),
-		SeedDemo:       envBool("AGENTHUB_SEED_DEMO", false),
-		LegacyMethods:  envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
-		MaxParallel:    envInt("AGENTHUB_MAX_PARALLEL", 8),
-		CLITimeout:     envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
-		CLIAllowlist:   envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
-		AgentTimeout:   envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
-		MaxOutputBytes: envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
-		EventBuffer:    envInt("AGENTHUB_EVENT_BUFFER", 512),
-		PushEnabled:    envBool("AGENTHUB_PUSH_ENABLED", true),
+		CookieSecure:       envBool("AGENTHUB_COOKIE_SECURE", envStr("AGENTHUB_ENV", "dev") == "prod"),
+		PublicBaseURL:      envStr("AGENTHUB_PUBLIC_BASE_URL", ""),
+		DatabaseURL:        envStr("DATABASE_URL", ""),
+		MigrateDatabaseURL: envStr("AGENTHUB_MIGRATE_DATABASE_URL", ""),
+		// Row level security is on unless somebody turns it off on purpose.
+		RLSMode:         envStr("AGENTHUB_RLS", RLSModeEnforce),
+		RLSAcknowledged: envBool("AGENTHUB_RLS_ACK", false),
+		AuditEnabled:    envBool("AGENTHUB_AUDIT_ENABLED", true),
+		AuditRetention:  envDur("AGENTHUB_AUDIT_RETENTION", 90*24*time.Hour),
+		AuditQueue:      envInt("AGENTHUB_AUDIT_QUEUE", 8192),
+		AuditBatch:      envInt("AGENTHUB_AUDIT_BATCH", 64),
+		SeedDemo:        envBool("AGENTHUB_SEED_DEMO", false),
+		LegacyMethods:   envBool("AGENTHUB_A2A_LEGACY_METHODS", true),
+		MaxParallel:     envInt("AGENTHUB_MAX_PARALLEL", 8),
+		CLITimeout:      envDur("AGENTHUB_CLI_TIMEOUT", 15*time.Second),
+		CLIAllowlist:    envList("AGENTHUB_CLI_ALLOWLIST", []string{"git", "ls", "cat", "echo", "date", "aria-memo"}),
+		AgentTimeout:    envDur("AGENTHUB_AGENT_TIMEOUT", adapter.DefaultAgentTimeout),
+		MaxOutputBytes:  envInt("AGENTHUB_MAX_OUTPUT_BYTES", 65536),
+		EventBuffer:     envInt("AGENTHUB_EVENT_BUFFER", 512),
+		PushEnabled:     envBool("AGENTHUB_PUSH_ENABLED", true),
 		// Retention cap for the push callback audit trail, per task.
 		PushRecordLimit: envInt("AGENTHUB_PUSH_RECORD_LIMIT", 100),
 		PushSecret:      os.Getenv("AGENTHUB_PUSH_SECRET"),
@@ -448,6 +501,42 @@ func (c *Config) Validate() error {
 	// state that disappears with the process.
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL must be set")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.RLSMode)) {
+	case "", RLSModeEnforce:
+		// An empty value is the default: enforce. A config literal built by
+		// hand (tests, embedded use) must not have to repeat the default to
+		// stay valid.
+	case RLSModeOff:
+		// Turning the policies off in production is allowed, but only when the
+		// operator says so twice: a staging value copied into production must
+		// not silently widen row visibility.
+		if c.Env == "prod" && !c.RLSAcknowledged {
+			return fmt.Errorf("AGENTHUB_RLS=off is refused with AGENTHUB_ENV=prod unless AGENTHUB_RLS_ACK=1")
+		}
+	default:
+		return fmt.Errorf("AGENTHUB_RLS must be %q or %q, got %q", RLSModeEnforce, RLSModeOff, c.RLSMode)
+	}
+	// Zero means "unset" for a config literal built by hand (tests, embedded
+	// use); Load always fills the defaults in, so only an explicit negative or
+	// an inconsistent batch size is a real misconfiguration.
+	if c.AuditRetention == 0 {
+		c.AuditRetention = 90 * 24 * time.Hour
+	}
+	if c.AuditRetention < 0 {
+		return fmt.Errorf("AGENTHUB_AUDIT_RETENTION must be positive")
+	}
+	if c.AuditQueue == 0 {
+		c.AuditQueue = 8192
+	}
+	if c.AuditQueue < 1 {
+		return fmt.Errorf("AGENTHUB_AUDIT_QUEUE must be positive, got %d", c.AuditQueue)
+	}
+	if c.AuditBatch == 0 {
+		c.AuditBatch = 64
+	}
+	if c.AuditBatch < 1 || c.AuditBatch > c.AuditQueue {
+		return fmt.Errorf("AGENTHUB_AUDIT_BATCH must be 1..AGENTHUB_AUDIT_QUEUE, got %d", c.AuditBatch)
 	}
 	if c.PushRecordLimit < 1 {
 		return fmt.Errorf("AGENTHUB_PUSH_RECORD_LIMIT must be positive, got %d", c.PushRecordLimit)

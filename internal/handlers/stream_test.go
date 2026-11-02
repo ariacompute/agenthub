@@ -57,7 +57,7 @@ func TestConsoleStreamReplaysASnapshotForAQuietTask(t *testing.T) {
 	h := Register(d)
 
 	// Created directly in the store: submitted, never advanced, no events.
-	live := d.Hub.Store().Create(entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hi")))
+	live := d.Hub.Store().Create(context.Background(), entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hi")))
 
 	rec := streamRequest(t, h, "/a2a/stream?task="+live.ID, 100*time.Millisecond)
 	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
@@ -79,7 +79,7 @@ func TestConsoleStreamEndsOnTheTerminalFrame(t *testing.T) {
 	d := testDeps(t, openConfig(""), entry)
 	h := Register(d)
 
-	live := d.Hub.Store().Create(entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hi")))
+	live := d.Hub.Store().Create(context.Background(), entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hi")))
 	go func() {
 		// Wait for the handler to subscribe, then report the end of the run.
 		time.Sleep(80 * time.Millisecond)
@@ -117,7 +117,7 @@ func TestConsoleStreamStopsWhenTheClientHangsUp(t *testing.T) {
 	d := testDeps(t, openConfig(""), entry)
 	h := Register(d)
 
-	live := d.Hub.Store().Create(entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hi")))
+	live := d.Hub.Store().Create(context.Background(), entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hi")))
 	started := time.Now()
 	streamRequest(t, h, "/a2a/stream?id="+live.ID, 80*time.Millisecond)
 	// The handler must notice the disconnect rather than hold a broker

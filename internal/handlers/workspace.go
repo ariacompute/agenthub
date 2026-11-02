@@ -28,7 +28,7 @@ func (d Deps) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 
 	// TaskStore.List already returns newest first; cap to the eight most recent.
-	tasks := d.Hub.Store().List()
+	tasks := d.Hub.Store().List(r.Context())
 	if len(tasks) > 8 {
 		tasks = tasks[:8]
 	}

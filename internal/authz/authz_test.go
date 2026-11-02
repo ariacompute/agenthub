@@ -99,22 +99,29 @@ func TestOwnerHoldsEveryPermission(t *testing.T) {
 	}
 }
 
-// TestResourceWithoutGrantsIsOpen is the compatibility rule that keeps existing
-// registries working after the grants table appears.
-func TestResourceWithoutGrantsIsOpen(t *testing.T) {
+// TestResourceWithoutGrantsIsClosed pins the fail-closed default: a record with
+// no grants is private. Publishing is an explicit registry.Visibility=public act
+// the caller applies before asking this question, which is why this layer answers
+// "no" for everybody but the owner.
+func TestResourceWithoutGrantsIsClosed(t *testing.T) {
 	s := New(&fakeStore{})
 	ok, err := s.CanAccessResource(context.Background(), principal(false, PermResourcesRead), "mcp-1", false)
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
-	if !ok {
-		t.Fatal("a resource without grants must stay readable")
+	if ok {
+		t.Fatal("a resource without grants must not be readable by a plain reader")
 	}
 
 	// Without the matching permission nothing is visible, grants or not.
 	ok, _ = s.CanAccessResource(context.Background(), principal(false), "mcp-1", false)
 	if ok {
 		t.Fatal("resources:read is required")
+	}
+
+	// The owner still sees everything: an instance must never lock itself out.
+	if ok, _ := s.CanAccessResource(context.Background(), principal(true), "mcp-1", true); !ok {
+		t.Fatal("the owner must reach an ungranted resource")
 	}
 }
 
@@ -159,11 +166,22 @@ func TestVisibleResourceIDsNeverLeaksGrantedResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("visible: %v", err)
 	}
-	if _, ok := visible["open"]; !ok {
-		t.Fatal("the unrestricted resource must be visible")
+	if _, ok := visible["open"]; ok {
+		t.Fatal("a record without grants must not be listed by default")
 	}
 	if _, ok := visible["secret"]; ok {
 		t.Fatal("a resource granted to somebody else must not be visible")
+	}
+	// A grant that covers the caller is the only way in from this layer.
+	granted := New(&fakeStore{
+		grants: []Grant{{ResourceID: "open", PrincipalKind: PrincipalUser, PrincipalID: "u1", Level: LevelRead}},
+	})
+	got, err := granted.VisibleResourceIDs(context.Background(), principal(false, PermResourcesRead), []string{"open"})
+	if err != nil {
+		t.Fatalf("visible: %v", err)
+	}
+	if got["open"] != LevelRead {
+		t.Fatalf("granted resource level = %q, want read", got["open"])
 	}
 
 	// Without resources:read the answer is empty, not "everything".

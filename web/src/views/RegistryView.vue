@@ -42,6 +42,9 @@ const form = reactive({
   tags: '',
   capabilities: '',
   health: 'healthy',
+  // Publishing is an explicit act: a new record starts private and stays visible
+  // only to its owner and to whoever holds a grant.
+  visibility: 'restricted',
   kindConfig: {},
 })
 
@@ -114,6 +117,7 @@ function resetForm() {
     tags: '',
     capabilities: '',
     health: 'healthy',
+    visibility: 'restricted',
     kindConfig: {},
   })
 }
@@ -140,6 +144,7 @@ function openEdit(resource) {
     tags: (resource.tags ?? []).join(', '),
     capabilities: (resource.capabilities ?? []).join(', '),
     health: resource.health ?? 'healthy',
+    visibility: resource.visibility ?? 'restricted',
     kindConfig: resource.kind_config ?? {},
   })
   baseline.value = snapshot(form)
@@ -182,6 +187,7 @@ function payload() {
     capabilities: splitList(form.capabilities),
     health: form.health,
     namespace: form.namespace.trim() || 'default',
+  visibility: form.visibility,
   }
   if (form.displayName.trim()) out.display_name = form.displayName.trim()
   if (form.description.trim()) out.description = form.description.trim()
@@ -325,6 +331,11 @@ async function probe(resource) {
         <div class="tag-row">
           <span class="chip">{{ enumLabel('kind', resource.kind) }}</span>
           <span class="chip">{{ enumLabel('status', statusOf(resource)) }}</span>
+        <span
+          v-if="(resource.visibility || 'restricted') === 'public'"
+          class="chip"
+          :title="t('fieldVisibilityHint')"
+        >{{ enumLabel('visibility', 'public') }}</span>
           <span v-if="resource.transport" class="chip">{{ enumLabel('transport', resource.transport) }}</span>
           <span v-if="resource.namespace && resource.namespace !== 'default'" class="chip mono">{{ resource.namespace }}</span>
           <span v-for="tag in resource.tags ?? []" :key="tag" class="chip">#{{ tag }}</span>
@@ -433,6 +444,14 @@ async function probe(resource) {
             <option value="streamable-http">streamable-http</option>
             <option value="sse-legacy">sse-legacy</option>
           </select>
+        </div>
+        <div class="field">
+          <label for="f-visibility">{{ t('fieldVisibility') }}</label>
+          <select id="f-visibility" v-model="form.visibility">
+            <option value="restricted">{{ enumLabel('visibility', 'restricted') }}</option>
+            <option value="public">{{ enumLabel('visibility', 'public') }}</option>
+          </select>
+          <p class="audit-empty-hint">{{ t('fieldVisibilityHint') }}</p>
         </div>
         <div class="field">
           <label for="f-version">{{ t('fieldVersion') }}</label>

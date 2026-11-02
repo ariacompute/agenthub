@@ -11,10 +11,17 @@ import (
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/hub"
+	"agenthub/internal/identity"
 	"agenthub/internal/model"
 )
 
 // taskRepository is the PostgreSQL backed hub.TaskRepository.
+//
+// Every method runs through scoped, so the identity on ctx becomes the
+// set_config that the row level security policies read. The WHERE clauses below
+// repeat the owner filter on purpose: RLS protects the database, the Go filter
+// keeps the answer correct when an operator runs with AGENTHUB_RLS=off, and one
+// of the two is always in force.
 type taskRepository struct{ db *gorm.DB }
 
 // NewTaskRepository returns a task repository backed by db.
@@ -30,18 +37,28 @@ func (s *taskRepository) Create(ctx context.Context, t *a2a.Task) error {
 	if err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Create(row).Error
+	row.OwnerID = identity.Owner(ctx)
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return db.Create(row).Error
+	})
 }
 
 func (s *taskRepository) Get(ctx context.Context, id string) (*a2a.Task, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (*a2a.Task, error) {
+		return s.get(db, ctx, id)
+	})
+}
+
+func (s *taskRepository) get(db *gorm.DB, ctx context.Context, id string) (*a2a.Task, error) {
 	var row model.Task
-	if err := s.db.WithContext(ctx).Where("id = ?", id).Take(&row).Error; err != nil {
+	q := owned(db, ctx, "owner_id").Where("id = ?", id)
+	if err := q.Take(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, hub.ErrTaskNotFound
 		}
 		return nil, err
 	}
-	arts, err := s.artifacts(ctx, id)
+	arts, err := s.artifacts(db, ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -49,42 +66,46 @@ func (s *taskRepository) Get(ctx context.Context, id string) (*a2a.Task, error) 
 }
 
 func (s *taskRepository) List(ctx context.Context) ([]*a2a.Task, error) {
-	var rows []model.Task
-	if err := s.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return []*a2a.Task{}, nil
-	}
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		ids = append(ids, r.ID)
-	}
-
-	// One query for every artifact of the page keeps listing O(1) round trips.
-	var artRows []model.TaskArtifact
-	if err := s.db.WithContext(ctx).Where("task_id IN ?", ids).
-		Order("task_id ASC, id ASC").Find(&artRows).Error; err != nil {
-		return nil, err
-	}
-	grouped := make(map[string][]a2a.Artifact, len(ids))
-	for i := range artRows {
-		art, err := artifactFromRow(&artRows[i])
-		if err != nil {
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]*a2a.Task, error) {
+		var rows []model.Task
+		q := owned(db, ctx, "owner_id").Order("created_at DESC, id DESC")
+		if err := q.Find(&rows).Error; err != nil {
 			return nil, err
 		}
-		grouped[artRows[i].TaskID] = append(grouped[artRows[i].TaskID], art)
-	}
+		if len(rows) == 0 {
+			return []*a2a.Task{}, nil
+		}
+		ids := make([]string, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+		}
 
-	out := make([]*a2a.Task, 0, len(rows))
-	for i := range rows {
-		task, err := taskFromRow(&rows[i], grouped[rows[i].ID])
-		if err != nil {
+		// One query for every artifact of the page keeps listing O(1) round
+		// trips.
+		var artRows []model.TaskArtifact
+		if err := owned(db, ctx, "owner_id").Where("task_id IN ?", ids).
+			Order("task_id ASC, id ASC").Find(&artRows).Error; err != nil {
 			return nil, err
 		}
-		out = append(out, task)
-	}
-	return out, nil
+		grouped := make(map[string][]a2a.Artifact, len(ids))
+		for i := range artRows {
+			art, err := artifactFromRow(&artRows[i])
+			if err != nil {
+				return nil, err
+			}
+			grouped[artRows[i].TaskID] = append(grouped[artRows[i].TaskID], art)
+		}
+
+		out := make([]*a2a.Task, 0, len(rows))
+		for i := range rows {
+			task, err := taskFromRow(&rows[i], grouped[rows[i].ID])
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, task)
+		}
+		return out, nil
+	})
 }
 
 func (s *taskRepository) SetState(ctx context.Context, id string, from, to a2a.TaskState, msg *a2a.Message) (*a2a.Task, error) {
@@ -93,40 +114,36 @@ func (s *taskRepository) SetState(ctx context.Context, id string, from, to a2a.T
 		return nil, err
 	}
 	now := time.Now().UTC()
-	// The state filter makes the update conditional: a concurrent writer that
-	// already advanced the task matches zero rows instead of clobbering it.
-	res := s.db.WithContext(ctx).Model(&model.Task{}).
-		Where("id = ? AND state = ?", id, string(from)).
-		Updates(map[string]any{
-			"state":            string(to),
-			"status_message":   statusMsg,
-			"status_timestamp": a2a.Timestamp(now),
-			"updated_at":       now,
-		})
-	if res.Error != nil {
-		return nil, res.Error
-	}
-	if res.RowsAffected == 0 {
-		exists, err := s.exists(ctx, id)
-		if err != nil {
-			return nil, err
+	return scoped(ctx, s.db, func(db *gorm.DB) (*a2a.Task, error) {
+		// The state filter makes the update conditional: a concurrent writer
+		// that already advanced the task matches zero rows instead of
+		// clobbering it.
+		res := owned(db, ctx, "owner_id").Model(&model.Task{}).
+			Where("id = ? AND state = ?", id, string(from)).
+			Updates(map[string]any{
+				"state":            string(to),
+				"status_message":   statusMsg,
+				"status_timestamp": a2a.Timestamp(now),
+				"updated_at":       now,
+			})
+		if res.Error != nil {
+			return nil, res.Error
 		}
-		if !exists {
-			return nil, hub.ErrTaskNotFound
+		if res.RowsAffected == 0 {
+			exists, err := s.exists(db, ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if !exists {
+				return nil, hub.ErrTaskNotFound
+			}
+			return nil, hub.ErrStateConflict
 		}
-		return nil, hub.ErrStateConflict
-	}
-	return s.Get(ctx, id)
+		return s.get(db, ctx, id)
+	})
 }
 
 func (s *taskRepository) AddArtifact(ctx context.Context, id string, art a2a.Artifact) (*a2a.Task, error) {
-	exists, err := s.exists(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, hub.ErrTaskNotFound
-	}
 	parts, err := model.NewJSONField(art.Parts)
 	if err != nil {
 		return nil, err
@@ -135,31 +152,41 @@ func (s *taskRepository) AddArtifact(ctx context.Context, id string, art a2a.Art
 	if err != nil {
 		return nil, err
 	}
-	row := &model.TaskArtifact{
-		TaskID:      id,
-		ArtifactID:  art.ArtifactID,
-		Name:        art.Name,
-		Description: art.Description,
-		Parts:       parts,
-		Idx:         art.Index,
-		Append:      art.Append,
-		LastChunk:   art.LastChunk,
-		Metadata:    meta,
-		CreatedAt:   time.Now().UTC(),
-	}
-	if err := s.db.WithContext(ctx).Create(row).Error; err != nil {
-		return nil, err
-	}
-	return s.Get(ctx, id)
+	return scoped(ctx, s.db, func(db *gorm.DB) (*a2a.Task, error) {
+		exists, err := s.exists(db, ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, hub.ErrTaskNotFound
+		}
+		row := &model.TaskArtifact{
+			TaskID:      id,
+			ArtifactID:  art.ArtifactID,
+			Name:        art.Name,
+			Description: art.Description,
+			Parts:       parts,
+			Idx:         art.Index,
+			Append:      art.Append,
+			LastChunk:   art.LastChunk,
+			Metadata:    meta,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if err := db.Create(row).Error; err != nil {
+			return nil, err
+		}
+		return s.get(db, ctx, id)
+	})
 }
 
 func (s *taskRepository) AppendHistory(ctx context.Context, id string, msg a2a.Message) error {
 	// History is a single jsonb column, so the read-modify-write runs inside a
 	// transaction that locks the row: parallel flow branches must not lose a
 	// turn.
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
 		var row model.Task
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&row).Error; err != nil {
+		if err := owned(db, ctx, "owner_id").Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", id).Take(&row).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return hub.ErrTaskNotFound
 			}
@@ -174,7 +201,7 @@ func (s *taskRepository) AppendHistory(ctx context.Context, id string, msg a2a.M
 		if err != nil {
 			return err
 		}
-		return tx.Model(&model.Task{}).Where("id = ?", id).
+		return db.Model(&model.Task{}).Where("id = ?", id).
 			Updates(map[string]any{"history": encoded, "updated_at": time.Now().UTC()}).Error
 	})
 }
@@ -196,95 +223,107 @@ func (s *taskRepository) AddSpan(ctx context.Context, span hub.Span) error {
 		Code:       span.Code,
 		CreatedAt:  time.Now().UTC(),
 	}
-	return s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return db.Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
+	})
 }
 
 func (s *taskRepository) Spans(ctx context.Context, id string) ([]hub.Span, error) {
-	var rows []model.TaskSpan
-	if err := s.db.WithContext(ctx).Where("task_id = ?", id).
-		Order("created_at ASC, id ASC").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]hub.Span, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, hub.Span{
-			ID:         r.ID,
-			TaskID:     r.TaskID,
-			ResourceID: r.ResourceID,
-			Kind:       r.Kind,
-			Label:      r.Label,
-			StartAt:    r.StartAt,
-			EndAt:      r.EndAt,
-			DurationMS: r.DurationMS,
-			Status:     r.Status,
-			Code:       r.Code,
-		})
-	}
-	return out, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]hub.Span, error) {
+		var rows []model.TaskSpan
+		if err := owned(db, ctx, "owner_id").Where("task_id = ?", id).
+			Order("created_at ASC, id ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]hub.Span, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, hub.Span{
+				ID:         r.ID,
+				TaskID:     r.TaskID,
+				ResourceID: r.ResourceID,
+				Kind:       r.Kind,
+				Label:      r.Label,
+				StartAt:    r.StartAt,
+				EndAt:      r.EndAt,
+				DurationMS: r.DurationMS,
+				Status:     r.Status,
+				Code:       r.Code,
+			})
+		}
+		return out, nil
+	})
 }
 
 func (s *taskRepository) SetPending(ctx context.Context, id string, p *hub.PendingInput) error {
-	if p == nil {
-		return s.db.WithContext(ctx).Where("task_id = ?", id).Delete(&model.TaskPending{}).Error
-	}
-	row := &model.TaskPending{
-		TaskID:    id,
-		Prompt:    p.Prompt,
-		AskedAt:   p.AskedAt,
-		UpdatedAt: time.Now().UTC(),
-	}
-	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "task_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"prompt", "asked_at", "updated_at"}),
-	}).Create(row).Error
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		if p == nil {
+			return owned(db, ctx, "owner_id").Where("task_id = ?", id).Delete(&model.TaskPending{}).Error
+		}
+		row := &model.TaskPending{
+			TaskID:    id,
+			Prompt:    p.Prompt,
+			AskedAt:   p.AskedAt,
+			UpdatedAt: time.Now().UTC(),
+		}
+		return db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "task_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"prompt", "asked_at", "updated_at"}),
+		}).Create(row).Error
+	})
 }
 
 func (s *taskRepository) Pending(ctx context.Context, id string) (*hub.PendingInput, error) {
-	var row model.TaskPending
-	err := s.db.WithContext(ctx).Where("task_id = ?", id).Take(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) (*hub.PendingInput, error) {
+		var row model.TaskPending
+		err := owned(db, ctx, "owner_id").Where("task_id = ?", id).Take(&row).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	return &hub.PendingInput{Prompt: row.Prompt, AskedAt: row.AskedAt}, nil
+		return &hub.PendingInput{Prompt: row.Prompt, AskedAt: row.AskedAt}, nil
+	})
 }
 
 func (s *taskRepository) SetPush(ctx context.Context, id string, cfg *a2a.PushNotificationConfig) error {
-	if cfg == nil {
-		return s.db.WithContext(ctx).Where("task_id = ?", id).Delete(&model.TaskPush{}).Error
-	}
-	encoded, err := model.NewJSONField(cfg)
-	if err != nil {
-		return err
-	}
-	row := &model.TaskPush{TaskID: id, Config: encoded, UpdatedAt: time.Now().UTC()}
-	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "task_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"config", "updated_at"}),
-	}).Create(row).Error
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		if cfg == nil {
+			return owned(db, ctx, "owner_id").Where("task_id = ?", id).Delete(&model.TaskPush{}).Error
+		}
+		encoded, err := model.NewJSONField(cfg)
+		if err != nil {
+			return err
+		}
+		row := &model.TaskPush{TaskID: id, Config: encoded, UpdatedAt: time.Now().UTC()}
+		return db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "task_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"config", "updated_at"}),
+		}).Create(row).Error
+	})
 }
 
 func (s *taskRepository) Push(ctx context.Context, id string) (*a2a.PushNotificationConfig, error) {
-	var row model.TaskPush
-	err := s.db.WithContext(ctx).Where("task_id = ?", id).Take(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) (*a2a.PushNotificationConfig, error) {
+		var row model.TaskPush
+		err := owned(db, ctx, "owner_id").Where("task_id = ?", id).Take(&row).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	var cfg a2a.PushNotificationConfig
-	if err := row.Config.Decode(&cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
+		var cfg a2a.PushNotificationConfig
+		if err := row.Config.Decode(&cfg); err != nil {
+			return nil, err
+		}
+		return &cfg, nil
+	})
 }
 
-func (s *taskRepository) exists(ctx context.Context, id string) (bool, error) {
+func (s *taskRepository) exists(db *gorm.DB, ctx context.Context, id string) (bool, error) {
 	var row model.Task
-	err := s.db.WithContext(ctx).Select("id").Where("id = ?", id).Take(&row).Error
+	err := owned(db, ctx, "owner_id").Select("id").Where("id = ?", id).Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, nil
@@ -294,9 +333,9 @@ func (s *taskRepository) exists(ctx context.Context, id string) (bool, error) {
 	return true, nil
 }
 
-func (s *taskRepository) artifacts(ctx context.Context, taskID string) ([]a2a.Artifact, error) {
+func (s *taskRepository) artifacts(db *gorm.DB, ctx context.Context, taskID string) ([]a2a.Artifact, error) {
 	var rows []model.TaskArtifact
-	if err := s.db.WithContext(ctx).Where("task_id = ?", taskID).
+	if err := owned(db, ctx, "owner_id").Where("task_id = ?", taskID).
 		Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -312,6 +351,16 @@ func (s *taskRepository) artifacts(ctx context.Context, taskID string) ([]a2a.Ar
 		return nil, nil
 	}
 	return out, nil
+}
+
+// owned narrows a query to the rows the caller may see. An empty owner scope
+// means "no restriction" (system or bypass, which is also what an operator sees
+// when AGENTHUB_RLS=off); otherwise the rows must belong to exactly that user.
+func owned(db *gorm.DB, ctx context.Context, column string) *gorm.DB {
+	if owner := identity.Owner(ctx); owner != "" {
+		return db.Where(column+" = ?", owner)
+	}
+	return db
 }
 
 func artifactFromRow(row *model.TaskArtifact) (a2a.Artifact, error) {

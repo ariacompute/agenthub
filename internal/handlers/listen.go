@@ -34,6 +34,7 @@ func Listeners() []Listener {
 		{"GET /api/grants", "admin: per-resource read/write grants"},
 		{"GET /api/backups", "admin: database checkpoints, schedule and restores"},
 		{"GET /api/api-keys", "admin: list, create, rotate and revoke API keys"},
+		{"GET /api/audit", "audit: the API trail, its summary and the hash chain verifier"},
 		{"GET /api/channels", "channels: external messaging surfaces bound to threads"},
 		{"POST /api/channels/{id}/webhook", "public inbound webhook for a channel (signed)"},
 		{"POST /api/channels/{id}/deliver", "channels: send a message out through a channel's target URL"},

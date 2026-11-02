@@ -73,31 +73,35 @@ export const a2aMethods = [
   {
     method: 'tasks/get',
     descKey: 'mTasksGet',
-    params: '{ id, historyLength?, metadata? }',
+    params: '{ id, taskId?, historyLength?, metadata? }',
     response: '{ jsonrpc: "2.0", id, result: Task }',
   },
   {
     method: 'tasks/cancel',
     descKey: 'mTasksCancel',
-    params: '{ id, historyLength?, metadata? }',
+    params: '{ id, taskId?, historyLength?, metadata? }',
     response: '{ jsonrpc: "2.0", id, result: Task }',
   },
   {
     method: 'tasks/resume',
     descKey: 'mTasksResume',
-    params: '{ id, message, metadata? }',
+    params: '{ id, taskId?, message, metadata? }',
     response: '{ jsonrpc: "2.0", id, result: Task }',
   },
   {
     method: 'tasks/pushNotification/set',
     descKey: 'mPushSet',
-    params: '{ taskId, pushNotificationConfig? }',
+    // `taskId` is the canonical field here; `id` is accepted so the same client
+    // code works across every task-scoped method. When both are present the
+    // canonical one wins.
+    params: '{ taskId, id?, pushNotificationConfig? }',
     response: '{ jsonrpc: "2.0", id, result: PushNotificationConfig }',
   },
   {
     method: 'tasks/pushNotification/get',
     descKey: 'mPushGet',
-    params: '{ id }',
+    // Mirror image: `id` is canonical for get, `taskId` is the alias.
+    params: '{ id, taskId? }',
     response: '{ jsonrpc: "2.0", id, result: PushNotificationConfig }',
   },
 ]
@@ -137,6 +141,7 @@ export const endpointGroups = [
   { id: 'collaboration', groupKey: 'groupCollaboration' },
   { id: 'capabilities', groupKey: 'groupCapabilities' },
   { id: 'router', groupKey: 'groupRouter' },
+  { id: 'audit', groupKey: 'groupAudit' },
 ]
 
 /**
@@ -1261,6 +1266,40 @@ export const httpEndpoints = [
     descKey: 'epRouterEvents',
     request: '?since=<seq>&subject=',
     response: 'text/event-stream, event name router_event',
+  },
+
+  // ---- audit trail ----
+  // Reading what every account did is its own permission (audit:read): an
+  // operator who may read the trail is not necessarily allowed to administer
+  // users. The verifier is listed before the wildcard so the literal wins.
+  {
+    group: 'audit',
+    method: 'GET',
+    path: '/api/audit',
+    permission: 'audit:read',
+    descKey: 'verbList',
+    nounKey: 'nounAuditEvents',
+    request: '?from=&to=&actor=&action=&resource=&source=&outcome=&q=&before=&limit=',
+    response: '{ events: AuditEvent[], stats: { total, failed, denied, written }, next }',
+  },
+  {
+    group: 'audit',
+    method: 'GET',
+    path: '/api/audit/verify',
+    permission: 'audit:read',
+    descKey: 'epAuditVerify',
+    request: '?from=&to=',
+    response: '{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link',
+  },
+  {
+    group: 'audit',
+    method: 'GET',
+    path: '/api/audit/{id}',
+    permission: 'audit:read',
+    descKey: 'verbGet',
+    nounKey: 'nounAuditEvents',
+    request: '',
+    response: 'AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }',
   },
 ]
 

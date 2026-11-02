@@ -19,6 +19,7 @@ const GROUPS = [
   'providerMode',
   'sourceAuth',
   'syncStatus',
+  'visibility',
 ]
 
 describe('enum copy', () => {

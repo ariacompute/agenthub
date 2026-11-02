@@ -290,7 +290,7 @@ func TestE2ESendAcrossEveryKind(t *testing.T) {
 		if len(task.Artifacts) == 0 {
 			t.Fatalf("%s: no artifacts", kind)
 		}
-		spans := h.h.Store().Spans(task.ID)
+		spans := h.h.Store().Spans(context.Background(), task.ID)
 		if len(spans) == 0 {
 			t.Fatalf("%s: no spans", kind)
 		}
@@ -323,7 +323,7 @@ func TestE2ETaskLifecycleGetCancel(t *testing.T) {
 	}
 
 	// A live task can be cancelled and reports the terminal state.
-	live := h.h.Store().Create(model, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+	live := h.h.Store().Create(context.Background(), model, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
 	canceled := h.task(h.rpc(a2a.MethodTasksCancel, `{"id":"`+live.ID+`"}`))
 	if canceled.Status.State != a2a.TaskStateCanceled {
 		t.Fatalf("state = %s, want canceled", canceled.Status.State)
@@ -348,7 +348,7 @@ func TestE2EInputRequiredAndResume(t *testing.T) {
 	if pending == nil || !strings.HasPrefix(pending.Prompt, "approval_required:") {
 		t.Fatalf("pending = %+v", pending)
 	}
-	if len(h.h.Store().Spans(parked.ID)) == 0 {
+	if len(h.h.Store().Spans(context.Background(), parked.ID)) == 0 {
 		t.Fatal("the parked run must still be traceable")
 	}
 
@@ -444,7 +444,7 @@ func TestE2EFlowBranchAndParallel(t *testing.T) {
 	if len(task.Artifacts) < 3 {
 		t.Fatalf("artifacts = %d, want the branch plus both parallel members", len(task.Artifacts))
 	}
-	spans := h.h.Store().Spans(task.ID)
+	spans := h.h.Store().Spans(context.Background(), task.ID)
 	if len(spans) < 4 {
 		t.Fatalf("spans = %d, want branch + member spans", len(spans))
 	}

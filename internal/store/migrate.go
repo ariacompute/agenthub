@@ -124,17 +124,27 @@ func applyMigration(db *gorm.DB, name string) error {
 // splitStatements splits SQL on line-ending semicolons, skipping comments and
 // blank lines. The migrations are plain DDL, so a line based split is enough
 // and keeps the files readable without a SQL parser dependency.
+//
+// Dollar quoted bodies ($$ ... $$) are tracked so a PL/pgSQL function or a DO
+// block stays one statement: its internal semicolons are part of the body, not
+// statement separators. Only the untagged form is supported, which is all the
+// migrations use.
 func splitStatements(content string) []string {
 	var out []string
 	var buf strings.Builder
+	inDollar := false
 	for _, raw := range strings.Split(content, "\n") {
 		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "--") {
+		if line == "" {
 			continue
 		}
+		if !inDollar && strings.HasPrefix(line, "--") {
+			continue
+		}
+		inDollar = toggleDollarQuote(inDollar, line)
 		buf.WriteString(line)
 		buf.WriteString(" ")
-		if strings.HasSuffix(line, ";") {
+		if !inDollar && strings.HasSuffix(line, ";") {
 			if stmt := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(buf.String()), ";")); stmt != "" {
 				out = append(out, stmt)
 			}
@@ -145,4 +155,13 @@ func splitStatements(content string) []string {
 		out = append(out, tail)
 	}
 	return out
+}
+
+// toggleDollarQuote flips the dollar quoting state when line carries an odd
+// number of $$ delimiters, i.e. when it opens or closes such a body.
+func toggleDollarQuote(in bool, line string) bool {
+	if strings.Count(line, "$$")%2 == 1 {
+		return !in
+	}
+	return in
 }

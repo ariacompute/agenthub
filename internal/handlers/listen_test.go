@@ -58,6 +58,7 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /api/users":              {http.MethodGet, "/api/users", ""},
 		"GET /api/roles":              {http.MethodGet, "/api/roles", ""},
 		"GET /api/grants":             {http.MethodGet, "/api/grants", ""},
+		"GET /api/audit":              {http.MethodGet, "/api/audit", ""},
 		// Backups answer "disabled" rather than 404 when no service is wired
 		// in, which is the state an instance without a backup volume is in.
 		"GET /api/backups": {http.MethodGet, "/api/backups", ""},

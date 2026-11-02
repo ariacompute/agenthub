@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"agenthub/internal/a2a"
+	"agenthub/internal/identity"
 )
 
 // TaskRunner is the slice of the hub the executor needs. The hub's *Hub value
@@ -14,7 +15,7 @@ import (
 type TaskRunner interface {
 	Send(ctx context.Context, params a2a.MessageSendParams) (*a2a.Task, error)
 	Resume(ctx context.Context, params a2a.TaskResumeParams) (*a2a.Task, error)
-	Cancel(id string) (*a2a.Task, error)
+	Cancel(ctx context.Context, id string) (*a2a.Task, error)
 }
 
 // ownedRunner is the optional half: a runner that can attribute a task to an
@@ -72,6 +73,14 @@ func (x *HubExecutor) Launch(ctx context.Context, t *Ticket, a *Assignment) (*As
 		task *a2a.Task
 		err  error
 	)
+	// The row scope travels with the call: the router launches tasks from a
+	// background beat that has no HTTP request behind it, so without an explicit
+	// identity the row level security policies would refuse the insert.
+	if t.OwnerID != "" {
+		ctx = identity.With(ctx, identity.Identity{OwnerID: t.OwnerID})
+	} else {
+		ctx = identity.With(ctx, identity.Identity{System: true})
+	}
 	if owned, ok := x.hub.(ownedRunner); ok && t.OwnerID != "" {
 		task, err = owned.SendAs(ctx, t.OwnerID, a2a.MessageSendParams{Message: msg})
 	} else {
@@ -104,7 +113,7 @@ func (x *HubExecutor) Cancel(ctx context.Context, t *Ticket) error {
 	if t.TaskID == "" {
 		return nil
 	}
-	_, err := x.hub.Cancel(t.TaskID)
+	_, err := x.hub.Cancel(ctx, t.TaskID)
 	return err
 }
 

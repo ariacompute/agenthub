@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
+	"agenthub/internal/audit"
 	"agenthub/internal/config"
 	"agenthub/internal/middleware"
 )
@@ -13,13 +14,28 @@ import (
 // that call Register directly stay fast and deterministic and are not throttled
 // or rejected by the guards.
 //
-// Order, outermost first: Recover → SecurityHeaders → CSRF → RateLimit → routes.
+// Order, outermost first:
+//
+//	Audit → Recover → SecurityHeaders → CSRF → RateLimit → routes
+//
+// Audit is outermost so that a panic, a CSRF rejection and a rate limit refusal
+// are all recorded: "who tried what and was refused" is the most useful half of
+// a trail. Recover runs inside it, so a panic is turned into a 500 before the
+// recorder observes the status.
 func Wrap(h http.Handler, cfg *config.Config) http.Handler {
+	return WrapWithAudit(h, cfg, nil)
+}
+
+// WrapWithAudit is Wrap with the audit trail attached.
+func WrapWithAudit(h http.Handler, cfg *config.Config, sink audit.Sink) http.Handler {
 	limiter := middleware.NewLimiter()
 	chain := middleware.SecurityHeaders(cfg.Env)(h)
 	chain = middleware.CSRF(chain)
 	chain = middleware.RateLimit(chain, limiter, isAuthPath)
 	chain = recoverPanic(chain)
+	if sink != nil {
+		chain = audit.Tap(sink, chain)
+	}
 	return chain
 }
 

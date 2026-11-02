@@ -4,13 +4,14 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useCopy } from '../lib/use-copy.js'
 import { useHubStore } from '../lib/store.js'
 import { useAuthStore } from '../lib/auth-store.js'
-import { BookOpen, Boxes, ChevronLeft, ChevronRight, Cloud, Library, Network, Shield, Terminal, Workflow } from 'lucide-vue-next'
+import { BookOpen, Boxes, ChevronLeft, ChevronRight, Cloud, Library, Network, ScrollText, Shield, Terminal, Workflow } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
 
 const route = useRoute()
 const store = useHubStore()
 const auth = useAuthStore()
 const { t } = useCopy('shell')
+const { t: auditT } = useCopy('audit')
 
 // Collapsing is a choice, not a breakpoint: it is remembered the same way the
 // theme is, and the width lives on <html> so the sidebar, the main column and
@@ -55,6 +56,11 @@ const items = computed(() => {
   // registries, and is gated on the same permission the route guard asks for.
   if (auth.can('tasks:write')) {
     base.push({ to: '/playground', label: t('navPlayground'), icon: Terminal })
+  }
+  // The audit trail is its own permission: an operator who may read every
+  // account's calls is not necessarily allowed to administer users.
+  if (auth.can('audit:read')) {
+    base.push({ to: '/audit', label: auditT('title'), icon: ScrollText })
   }
   if (auth.can('users:manage') || auth.can('roles:manage') || auth.can('grants:manage') || auth.can('backups:manage')) {
     base.push({ to: '/admin', label: t('navAdmin'), icon: Shield })

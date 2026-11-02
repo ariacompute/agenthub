@@ -119,6 +119,11 @@ func DemoResources() []*registry.Entry {
 	for _, e := range seeds {
 		e.CreatedAt = now
 		e.UpdatedAt = now
+		// Authorisation is fail closed, so the demo rows have to be published
+		// explicitly: a walkthrough and scripts/test-api.sh must keep working on
+		// a fresh instance, and "public" is now a decision rather than an
+		// absence of grants.
+		e.Visibility = registry.VisibilityPublic
 	}
 	return seeds
 }

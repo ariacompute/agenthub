@@ -8,6 +8,7 @@ import RegistriesView from './views/RegistriesView.vue'
 import SourcesView from './views/SourcesView.vue'
 import PlaygroundView from './views/PlaygroundView.vue'
 import DocsView from './views/DocsView.vue'
+import AuditView from './views/AuditView.vue'
 import { useAuthStore } from './lib/auth-store.js'
 
 const router = createRouter({
@@ -40,6 +41,9 @@ const router = createRouter({
       component: AdminView,
       meta: {},
     },
+    // The audit trail shows what every other account did, so it answers to its
+    // own permission rather than to tasks:read or users:manage.
+    { path: '/audit', name: 'audit', component: AuditView, meta: { permissions: ['audit:read'] } },
     // Documentation is deliberately ungated: it explains what the console does,
     // so anyone who can sign in should be able to read it. Leaving
     // meta.permissions off means the guard only checks for a session.

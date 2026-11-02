@@ -29,6 +29,10 @@ const (
 	CodeResourceNotFound             = -32006
 	CodeResourceUnreachable          = -32007
 	CodeTaskNotResumable             = -32008
+	// CodeUnauthenticated answers a method that needs a session when the
+	// caller sent none. message/send stays open to anonymous peers, but
+	// reading, cancelling or resuming a task is always somebody's act.
+	CodeUnauthenticated = -32009
 )
 
 // Messages carried by RPCError are stable identifiers, never prose, so a client
@@ -47,6 +51,7 @@ const (
 	MsgResourceNotFound             = "resource_not_found"
 	MsgResourceUnreachable          = "resource_unreachable"
 	MsgTaskNotResumable             = "task_not_resumable"
+	MsgUnauthenticated              = "unauthenticated"
 )
 
 // Request is an inbound JSON-RPC 2.0 request.

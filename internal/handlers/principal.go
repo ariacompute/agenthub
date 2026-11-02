@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"net/http"
 
+	"agenthub/internal/audit"
 	"agenthub/internal/authz"
 	"agenthub/internal/httputil"
+	"agenthub/internal/identity"
 	"agenthub/internal/registry"
 )
 
@@ -30,9 +32,55 @@ func PrincipalFrom(r *http.Request) *authz.Principal {
 // identify resolves the caller and attaches it, without rejecting anybody. It
 // is what makes public endpoints (Agent Card, MCP export) able to narrow their
 // answer for a logged in user while still serving anonymous discovery.
+//
+// It also attaches the database row scope (identity.Identity) to the request
+// context: everything downstream — every repository call — runs under it, so the
+// row level security policies and the Go side agree on who the caller is without
+// either having to re-resolve the session.
 func (d Deps) identify(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		next(w, withPrincipal(r, d.resolvePrincipal(r)))
+		p := d.resolvePrincipal(r)
+		r = withPrincipal(r, p)
+		notePrincipal(r, p)
+		next(w, r.WithContext(identity.With(r.Context(), identityOf(p))))
+	}
+}
+
+// notePrincipal records the resolved caller on the audit trace. It runs in the
+// identity middleware because that is the only place the session has already
+// been parsed: asking the recorder to resolve it again would double the cookie
+// work on every request for information we are holding.
+func notePrincipal(r *http.Request, p *authz.Principal) {
+	tr := audit.FromContext(r.Context())
+	if tr == nil {
+		return
+	}
+	if p == nil || p.UserID == "" {
+		tr.NotePrincipal(audit.ActorAnonymous, "", "", "")
+		return
+	}
+	label := p.Email
+	if label == "" {
+		label = p.Name
+	}
+	tr.NotePrincipal(audit.ActorUser, p.UserID, label, p.UserID)
+}
+
+// identityOf turns a principal into the row scope used by the database.
+//
+// Only the platform owner bypasses ownership: an administrator holding
+// tasks:read still sees its own tasks, because cross-tenant reading is exactly
+// what the ownership dimension exists to prevent.
+func identityOf(p *authz.Principal) identity.Identity {
+	if p == nil || p.UserID == "" {
+		return identity.Anonymous()
+	}
+	if p.IsOwner {
+		return identity.Identity{Bypass: true}
+	}
+	return identity.Identity{
+		OwnerID:   p.UserID,
+		AuditRead: p.Can(authz.PermAuditRead),
 	}
 }
 
@@ -103,11 +151,22 @@ func (d Deps) visibleEntries(r *http.Request, entries []*registry.Entry) []*regi
 	}
 	out := make([]*registry.Entry, 0, len(entries))
 	for _, e := range entries {
+		if e.IsPublic() {
+			// Published records need no grant: that is what public means.
+			out = append(out, e)
+			continue
+		}
 		if _, ok := visible[e.ID]; ok {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// canReadResource reports whether the caller may read one record: published, or
+// covered by a grant, or the caller is the platform owner.
+func (d Deps) canReadResource(r *http.Request, id string) bool {
+	return d.canAccess(r, id, false)
 }
 
 // canAccess reports whether the caller may read (or write) one resource. Write
@@ -120,6 +179,14 @@ func (d Deps) canAccess(r *http.Request, resourceID string, write bool) bool {
 	}
 	if d.Authz == nil || p.IsOwner {
 		return true
+	}
+	// A published record is readable and invocable by anybody — including an
+	// anonymous A2A peer. Publishing says nothing about writing, so that stays
+	// on the grant path below.
+	if !write && d.Reg != nil {
+		if e, ok := d.Reg.Get(resourceID); ok && e.IsPublic() {
+			return true
+		}
 	}
 	ok, err := d.Authz.CanAccessResource(r.Context(), p, resourceID, write)
 	if err != nil {

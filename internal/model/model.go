@@ -104,6 +104,9 @@ type Resource struct {
 	// Status is the curation state; 'approved' keeps pre-governance rows
 	// discoverable.
 	Status string `gorm:"size:32;index;not null;default:approved"`
+	// Visibility is 'public' or 'restricted'; the migration default is
+	// restricted so a new record is private until somebody publishes it.
+	Visibility string `gorm:"size:32;index;not null;default:restricted"`
 	// DisplayName is the optional human facing label.
 	DisplayName string `gorm:"size:256"`
 	// SourceID is set when the record arrived from an upstream registry.
@@ -164,11 +167,15 @@ func (RegistrySource) TableName() string { return "registry_sources" }
 // Task is the A2A unit of work. Artifacts, spans, the parked question and the
 // push configuration live in their own tables keyed by task id.
 type Task struct {
-	ID              string    `gorm:"primaryKey;size:64"`
-	Kind            string    `gorm:"size:32"`
-	ContextID       string    `gorm:"size:64;index"`
-	SessionID       string    `gorm:"size:64"`
-	ResourceID      string    `gorm:"size:64;index"`
+	ID         string `gorm:"primaryKey;size:64"`
+	Kind       string `gorm:"size:32"`
+	ContextID  string `gorm:"size:64;index"`
+	SessionID  string `gorm:"size:64"`
+	ResourceID string `gorm:"size:64;index"`
+	// OwnerID is the user that started the run. It is empty for a task started
+	// by an anonymous A2A peer or by the scheduler, which belong to the
+	// instance rather than to a person.
+	OwnerID         string    `gorm:"size:64;index;not null;default:''"`
 	State           string    `gorm:"size:32;index;not null"`
 	StatusMessage   JSONField `gorm:"type:jsonb"`
 	StatusTimestamp string    `gorm:"size:40"`

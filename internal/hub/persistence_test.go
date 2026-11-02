@@ -437,11 +437,11 @@ func TestTaskStoreDelegatesToRepository(t *testing.T) {
 	repo := newStubTaskRepo()
 	store := NewTaskStoreWithRepository(repo)
 
-	task := store.Create("res-1", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+	task := store.Create(context.Background(), "res-1", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
 	if task == nil || task.ID == "" {
 		t.Fatalf("Create = %+v", task)
 	}
-	if got := store.Get(task.ID); got == nil || got.ID != task.ID {
+	if got := store.Get(context.Background(), task.ID); got == nil || got.ID != task.ID {
 		t.Fatalf("Get = %+v", got)
 	}
 
@@ -464,13 +464,13 @@ func TestTaskStoreDelegatesToRepository(t *testing.T) {
 	if err := store.AppendHistory(task.ID, a2a.NewMessage(a2a.RoleAgent, a2a.NewTextPart("hi"))); err != nil {
 		t.Fatalf("AppendHistory: %v", err)
 	}
-	if len(store.Get(task.ID).History) != 2 {
-		t.Fatalf("history = %+v", store.Get(task.ID).History)
+	if len(store.Get(context.Background(), task.ID).History) != 2 {
+		t.Fatalf("history = %+v", store.Get(context.Background(), task.ID).History)
 	}
 
 	span := store.StartSpan(task.ID, "res-1", "", "invoke:res-1")
 	store.FinishSpan(span, SpanStatusOK, "")
-	if spans := store.Spans(task.ID); len(spans) != 1 {
+	if spans := store.Spans(context.Background(), task.ID); len(spans) != 1 {
 		t.Fatalf("spans = %+v", spans)
 	}
 
@@ -480,8 +480,8 @@ func TestTaskStoreDelegatesToRepository(t *testing.T) {
 	if err := store.SetPush(task.ID, &a2a.PushNotificationConfig{URL: "http://cb"}); err != nil {
 		t.Fatalf("SetPush: %v", err)
 	}
-	if len(store.List()) != 1 {
-		t.Fatalf("List = %+v", store.List())
+	if len(store.List(context.Background())) != 1 {
+		t.Fatalf("List = %+v", store.List(context.Background()))
 	}
 }
 
@@ -491,11 +491,11 @@ func TestTaskStoreSurvivesPersistenceFailures(t *testing.T) {
 	store := NewTaskStoreWithRepository(repo)
 
 	// A broken store must surface as an honest error, never as a silent no-op.
-	task := store.Create("res-1", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+	task := store.Create(context.Background(), "res-1", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
 	if task == nil {
 		t.Fatal("Create must still return the task it built")
 	}
-	if got := store.Get(task.ID); got != nil {
+	if got := store.Get(context.Background(), task.ID); got != nil {
 		t.Fatalf("Get after a failed write = %+v, want nil", got)
 	}
 	// A database failure is reported honestly: it is an internal error, not a
@@ -516,7 +516,7 @@ func TestHubEventsDelegatesToRepository(t *testing.T) {
 	// Without an event repository the replay is empty instead of failing.
 	h := New(cfg, nil, testOptions(), &MockNotifier{}, Persistence{})
 	defer h.Close()
-	if got := h.Events("task-1", 0, 10); got != nil {
+	if got := h.Events(context.Background(), "task-1", 0, 10); got != nil {
 		t.Fatalf("Events without a repository = %+v", got)
 	}
 
@@ -535,7 +535,7 @@ func TestHubEventsDelegatesToRepository(t *testing.T) {
 }
 
 func mustEvents(h *Hub, taskID string, since uint64) []Event {
-	return h.Events(taskID, since, 10)
+	return h.Events(context.Background(), taskID, since, 10)
 }
 
 func waitFor(t *testing.T, cond func() bool) {

@@ -2,6 +2,10 @@
 
 > 功能边界 / 协议契约 / 数据模型 / 接口 / 异常 / 多语言与视觉约束 / 验收标准。
 > 须经人工逐项审核后，方可据其生成 `task.md` 实施。当前实现对应 **M1（已落地）**。
+>
+> 子领域方案：安全加固 `requirements-security.md`（实施 `task-security.md`）、
+> 执行沙盒 `requirements-sandbox.md`（实施 `task-sandbox.md`）、
+> **数据隔离（RLS）与全 API 审计 `requirements-isolation.md`（实施 `task-isolation.md`）**。
 
 ## 1. 功能边界
 

@@ -12,6 +12,7 @@ import (
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
+	"agenthub/internal/identity"
 	"agenthub/internal/registry"
 )
 
@@ -38,6 +39,9 @@ type taskRecord struct {
 	spans   []Span
 	push    *a2a.PushNotificationConfig
 	pending *PendingInput
+	// ownerID mirrors tasks.owner_id in the in-memory implementation so both
+	// storage modes answer the same question: who may see this task.
+	ownerID string
 }
 
 // TaskStore owns every task known to agenthub.
@@ -62,10 +66,15 @@ func NewTaskStoreWithRepository(repo TaskRepository) *TaskStore {
 }
 
 // Create registers a submitted task for the inbound message.
-func (s *TaskStore) Create(resourceID string, msg a2a.Message) *a2a.Task {
+//
+// The owner comes from ctx: the request identity for a task a person started, an
+// empty owner for an anonymous A2A peer or a scheduler run. Persisting it is what
+// lets List and Get answer "yours" instead of "everything".
+func (s *TaskStore) Create(ctx context.Context, resourceID string, msg a2a.Message) *a2a.Task {
 	task := a2a.NewTask(registry.NewID("task"), msg, resourceID)
+	owner := identity.Owner(ctx)
 	if s.repo != nil {
-		if err := s.repo.Create(dbCtx(), task); err != nil {
+		if err := s.repo.Create(ctx, task); err != nil {
 			// The task is still returned so the caller can report a coherent
 			// failure; the next transition surfaces the missing row.
 			slog.Error("hub: persist task", "task", task.ID, "error", err)
@@ -79,14 +88,16 @@ func (s *TaskStore) Create(resourceID string, msg a2a.Message) *a2a.Task {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tasks[task.ID] = &taskRecord{task: task}
+	s.tasks[task.ID] = &taskRecord{task: task, ownerID: owner}
 	return &cp
 }
 
-// Get returns a copy of a task, or nil when unknown.
-func (s *TaskStore) Get(id string) *a2a.Task {
+// Get returns a copy of a task the caller may see, or nil when unknown or owned
+// by somebody else. The two cases are deliberately indistinguishable: a distinct
+// "forbidden" answer would turn the endpoint into an id oracle.
+func (s *TaskStore) Get(ctx context.Context, id string) *a2a.Task {
 	if s.repo != nil {
-		task, err := s.repo.Get(dbCtx(), id)
+		task, err := s.repo.Get(ctx, id)
 		if err != nil {
 			if !errors.Is(err, ErrTaskNotFound) {
 				slog.Error("hub: load task", "task", id, "error", err)
@@ -95,32 +106,48 @@ func (s *TaskStore) Get(id string) *a2a.Task {
 		}
 		return task
 	}
+	owner := identity.Owner(ctx)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rec, ok := s.tasks[id]
-	if !ok {
+	if !ok || !ownedBy(rec.ownerID, owner) {
 		return nil
 	}
 	return cloneTask(rec.task)
 }
 
-// List returns every task, newest first.
-func (s *TaskStore) List() []*a2a.Task {
+// List returns the tasks the caller may see, newest first.
+func (s *TaskStore) List(ctx context.Context) []*a2a.Task {
 	if s.repo != nil {
-		tasks, err := s.repo.List(dbCtx())
+		tasks, err := s.repo.List(ctx)
 		if err != nil {
 			slog.Error("hub: list tasks", "error", err)
 			return nil
 		}
 		return tasks
 	}
+	owner := identity.Owner(ctx)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*a2a.Task, 0, len(s.tasks))
 	for _, rec := range s.tasks {
+		if !ownedBy(rec.ownerID, owner) {
+			continue
+		}
 		out = append(out, cloneTask(rec.task))
 	}
 	return out
+}
+
+// ownedBy reports whether a row owned by rowOwner is visible to a caller whose
+// owner scope is scope. An empty scope means "no owner restriction" (system or
+// bypass); an empty row owner is an instance owned row and stays hidden from
+// everybody else.
+func ownedBy(rowOwner, scope string) bool {
+	if scope == "" {
+		return true
+	}
+	return rowOwner != "" && rowOwner == scope
 }
 
 // SetState advances the lifecycle, rejecting illegal transitions.
@@ -281,19 +308,20 @@ func (s *TaskStore) Push(id string) *a2a.PushNotificationConfig {
 }
 
 // Spans returns the recorded span timeline of a task.
-func (s *TaskStore) Spans(id string) []Span {
+func (s *TaskStore) Spans(ctx context.Context, id string) []Span {
 	if s.repo != nil {
-		spans, err := s.repo.Spans(dbCtx(), id)
+		spans, err := s.repo.Spans(ctx, id)
 		if err != nil {
 			slog.Error("hub: load spans", "task", id, "error", err)
 			return nil
 		}
 		return spans
 	}
+	owner := identity.Owner(ctx)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rec, ok := s.tasks[id]
-	if !ok {
+	if !ok || !ownedBy(rec.ownerID, owner) {
 		return nil
 	}
 	out := make([]Span, len(rec.spans))
@@ -333,10 +361,12 @@ var ErrNoResource = errors.New(string(CodeNoResource))
 // nowUTC is the single clock helper used for event timestamps.
 func nowUTC() time.Time { return time.Now().UTC() }
 
-// dbCtx is the context every persistence call uses. Task state must be written
-// even when the caller hangs up, so persistence is deliberately detached from
-// the request context.
-func dbCtx() context.Context { return context.Background() }
+// dbCtx is the context every internal persistence call uses. Task state must be
+// written even when the caller hangs up, so persistence is deliberately detached
+// from the request context — and it carries the system identity, because a
+// detached write has no caller to attribute it to. Reads that answer a client
+// use the request context instead, so row level security applies to them.
+func dbCtx() context.Context { return identity.System() }
 
 // taskErr normalises a repository failure: driver text never reaches the
 // caller, only a machine readable code.

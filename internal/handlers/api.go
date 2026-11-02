@@ -98,6 +98,10 @@ func (d Deps) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteErr(w, err)
 		return
 	}
+	if err := normalizeVisibility(&entry); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, registry.CodeInvalidVisibility)
+		return
+	}
 	stored, err := d.Reg.Register(&entry)
 	if err != nil {
 		writeDomainErr(w, err)
@@ -131,6 +135,10 @@ func (d Deps) handleUpdateResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry.ID = id
+	if err := normalizeVisibility(&entry); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, registry.CodeInvalidVisibility)
+		return
+	}
 	stored, err := d.Reg.Upsert(&entry)
 	if err != nil {
 		writeDomainErr(w, err)
@@ -229,11 +237,11 @@ func (d Deps) adapterOptions() adapter.Options {
 }
 
 func (d Deps) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"tasks": d.Hub.Store().List()})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"tasks": d.Hub.Store().List(r.Context())})
 }
 
 func (d Deps) handleGetTask(w http.ResponseWriter, r *http.Request) {
-	task := d.Hub.Store().Get(r.PathValue("id"))
+	task := d.Hub.Store().Get(r.Context(), r.PathValue("id"))
 	if task == nil {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
 		return
@@ -243,11 +251,11 @@ func (d Deps) handleGetTask(w http.ResponseWriter, r *http.Request) {
 
 func (d Deps) handleTaskSpans(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if d.Hub.Store().Get(id) == nil {
+	if d.Hub.Store().Get(r.Context(), id) == nil {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"spans": d.Hub.Store().Spans(id)})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"spans": d.Hub.Store().Spans(r.Context(), id)})
 }
 
 // handleTaskEventStream exposes the broker feed for one task.
@@ -256,7 +264,7 @@ func (d Deps) handleTaskEventStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleCancelTask(w http.ResponseWriter, r *http.Request) {
-	task, err := d.Hub.Cancel(r.PathValue("id"))
+	task, err := d.Hub.Cancel(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeDomainErr(w, err)
 		return
@@ -309,7 +317,7 @@ func (d Deps) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = r.PathValue("id")
 	}
-	task := d.Hub.Store().Get(id)
+	task := d.Hub.Store().Get(r.Context(), id)
 	if task == nil {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeNotFound)
 		return
@@ -321,7 +329,7 @@ func (d Deps) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	since := sinceSeq(r.URL.Query().Get("since"))
-	replayed := d.Hub.Events(id, since, 0)
+	replayed := d.Hub.Events(r.Context(), id, since, 0)
 	if len(replayed) > 0 {
 		for i := range replayed {
 			if err := writeEventFrame(w, flusher, &replayed[i]); err != nil {
@@ -332,7 +340,7 @@ func (d Deps) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if since == 0 {
-		for _, span := range d.Hub.Store().Spans(id) {
+		for _, span := range d.Hub.Store().Spans(r.Context(), id) {
 			if err := httputil.WriteSSE(w, flusher, a2a.EventTaskSpan, span); err != nil {
 				return
 			}
@@ -429,4 +437,22 @@ func statusFrame(task *a2a.Task) a2a.TaskStatusUpdateEvent {
 
 func isFinished(task *a2a.Task) bool {
 	return task.Status.State.IsTerminal() || task.Status.State == a2a.TaskStateInputRequired
+}
+
+// normalizeVisibility validates the publication state a client sent.
+//
+// An empty value is accepted and left empty: the store and the domain both read
+// empty as restricted, so an update that omits the field cannot silently
+// publish a record. Anything else must be one of the two known states — a typo
+// here decides who can invoke a resource, which is not a place for a guess.
+func normalizeVisibility(entry *registry.Entry) error {
+	if entry.Visibility == "" {
+		return nil
+	}
+	parsed, err := registry.ParseVisibility(string(entry.Visibility))
+	if err != nil {
+		return err
+	}
+	entry.Visibility = parsed
+	return nil
 }

@@ -71,8 +71,14 @@ type MessageSendParams struct {
 }
 
 // TaskQueryParams is the payload of tasks/get and tasks/cancel.
+//
+// TaskID is an accepted alias of ID. The A2A specification names this field `id`
+// on the task methods and `taskId` on the push notification methods, which made
+// a client that reused one payload struct fail on the other half of the pair.
+// Both spellings are read everywhere and ID wins when a caller sends both.
 type TaskQueryParams struct {
 	ID            string         `json:"id"`
+	TaskID        string         `json:"taskId,omitempty"`
 	HistoryLength *int           `json:"historyLength,omitempty"`
 	Metadata      map[string]any `json:"metadata,omitempty"`
 }
@@ -80,6 +86,7 @@ type TaskQueryParams struct {
 // TaskResumeParams continues a task parked in input-required.
 type TaskResumeParams struct {
 	ID       string         `json:"id"`
+	TaskID   string         `json:"taskId,omitempty"`
 	Message  Message        `json:"message"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
@@ -87,8 +94,30 @@ type TaskResumeParams struct {
 // TaskPushNotificationConfigParams is the payload of tasks/pushNotification/set.
 type TaskPushNotificationConfigParams struct {
 	TaskID                string                  `json:"taskId"`
+	ID                    string                  `json:"id,omitempty"`
 	PushNotification      *PushNotificationConfig `json:"pushNotificationConfig,omitempty"`
 	PushNotificationAlias *PushNotificationConfig `json:"pushNotification,omitempty"`
+}
+
+// ResolveTaskID returns the task a params object addresses, accepting both
+// spellings. canonical is preferred and the alias is the fallback, so a client
+// that sends both can never be surprised by which one wins.
+func ResolveTaskID(canonical, alias string) string {
+	if canonical != "" {
+		return canonical
+	}
+	return alias
+}
+
+// ResolveTaskID returns the task id of a tasks/get or tasks/cancel payload.
+func (p TaskQueryParams) ResolveTaskID() string { return ResolveTaskID(p.ID, p.TaskID) }
+
+// ResolveTaskID returns the task id of a tasks/resume payload.
+func (p TaskResumeParams) ResolveTaskID() string { return ResolveTaskID(p.ID, p.TaskID) }
+
+// ResolveTaskID returns the task id of a pushNotification payload.
+func (p TaskPushNotificationConfigParams) ResolveTaskID() string {
+	return ResolveTaskID(p.TaskID, p.ID)
 }
 
 // PushNotification resolves either accepted field name for the config.

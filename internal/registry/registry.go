@@ -172,6 +172,10 @@ type Entry struct {
 	// Status is the curation state. Empty is read as approved so an upgrade
 	// never hides resources that were registered before curation existed.
 	Status Status `json:"status,omitempty"`
+	// Visibility decides who may see and invoke the record. Empty is read as
+	// restricted, so a record is private until somebody publishes it: that is
+	// the fail-closed replacement for the old "no grant means public" rule.
+	Visibility Visibility `json:"visibility,omitempty"`
 	// DisplayName is the optional human facing label AWS calls displayName.
 	DisplayName string `json:"display_name,omitempty"`
 	// SourceID is set when the record arrived from an upstream registry.

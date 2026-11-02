@@ -130,11 +130,11 @@ func TestCanTransition(t *testing.T) {
 
 func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 	store := NewTaskStore()
-	task := store.Create("res-1", userMessage("hello"))
+	task := store.Create(context.Background(), "res-1", userMessage("hello"))
 	if task.Status.State != a2a.TaskStateSubmitted {
 		t.Fatalf("new task state = %s, want submitted", task.Status.State)
 	}
-	if store.Get(task.ID) == nil {
+	if store.Get(context.Background(), task.ID) == nil {
 		t.Fatal("expected the task to be retrievable")
 	}
 
@@ -167,7 +167,7 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 			t.Fatalf("%s: code = %s, want %s", name, errCode(t, err), CodeTaskNotFound)
 		}
 	}
-	if store.Get(unknown) != nil || store.Pending(unknown) != nil || store.Push(unknown) != nil || store.Spans(unknown) != nil {
+	if store.Get(context.Background(), unknown) != nil || store.Pending(unknown) != nil || store.Push(unknown) != nil || store.Spans(context.Background(), unknown) != nil {
 		t.Fatal("unknown tasks must read back as empty")
 	}
 
@@ -178,14 +178,14 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 	if err := store.AppendHistory(task.ID, a2a.NewMessage(a2a.RoleAgent, a2a.NewTextPart("y"))); err != nil {
 		t.Fatalf("append history: %v", err)
 	}
-	got := store.Get(task.ID)
+	got := store.Get(context.Background(), task.ID)
 	if len(got.Artifacts) != 1 || len(got.History) != 2 {
 		t.Fatalf("artifacts=%d history=%d, want 1 and 2", len(got.Artifacts), len(got.History))
 	}
 
 	// Reading a task returns a copy: mutating it must not corrupt the store.
 	got.Artifacts = append(got.Artifacts, a2a.Artifact{Name: "injected"})
-	if len(store.Get(task.ID).Artifacts) != 1 {
+	if len(store.Get(context.Background(), task.ID).Artifacts) != 1 {
 		t.Fatal("store returned a shared slice instead of a copy")
 	}
 
@@ -212,7 +212,7 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 	if _, err := store.SetState(task.ID, a2a.TaskStateCompleted, nil); err != nil {
 		t.Fatalf("working -> completed: %v", err)
 	}
-	if got := store.Get(task.ID); got.Status.State != a2a.TaskStateCompleted {
+	if got := store.Get(context.Background(), task.ID); got.Status.State != a2a.TaskStateCompleted {
 		t.Fatalf("state = %s, want completed", got.Status.State)
 	}
 
@@ -224,8 +224,8 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 	if got := store.Push(task.ID); got == nil || got.URL != cfg.URL {
 		t.Fatalf("push = %+v, want %+v", got, cfg)
 	}
-	if len(store.List()) != 1 {
-		t.Fatalf("list = %d tasks, want 1", len(store.List()))
+	if len(store.List(context.Background())) != 1 {
+		t.Fatalf("list = %d tasks, want 1", len(store.List(context.Background())))
 	}
 }
 
@@ -235,13 +235,13 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 
 func TestSpansRecordTimeline(t *testing.T) {
 	store := NewTaskStore()
-	task := store.Create("res-1", userMessage("hello"))
+	task := store.Create(context.Background(), "res-1", userMessage("hello"))
 
 	span := store.StartSpan(task.ID, "res-1", string(registry.KindModel), "invoke:res-1")
 	if span.ID == "" || span.TaskID != task.ID || span.Status != SpanStatusOK {
 		t.Fatalf("span = %+v", span)
 	}
-	if len(store.Spans(task.ID)) != 0 {
+	if len(store.Spans(context.Background(), task.ID)) != 0 {
 		t.Fatal("a started span must not be visible before it finishes")
 	}
 
@@ -253,20 +253,20 @@ func TestSpansRecordTimeline(t *testing.T) {
 		t.Fatalf("finished span has no duration: %+v", finished)
 	}
 
-	spans := store.Spans(task.ID)
+	spans := store.Spans(context.Background(), task.ID)
 	if len(spans) != 1 || spans[0].ID != span.ID {
 		t.Fatalf("spans = %+v, want one span", spans)
 	}
 	// The returned span is a copy: mutating it must not rewrite the timeline.
 	spans[0].Status = "tampered"
-	if store.Spans(task.ID)[0].Status != SpanStatusError {
+	if store.Spans(context.Background(), task.ID)[0].Status != SpanStatusError {
 		t.Fatal("Spans must return copies")
 	}
 
 	// A span for an unknown task is dropped instead of panicking.
 	orphan := store.StartSpan("task_missing", "", "", "orphan")
 	store.FinishSpan(orphan, SpanStatusOK, "")
-	if store.Spans("task_missing") != nil {
+	if store.Spans(context.Background(), "task_missing") != nil {
 		t.Fatal("spans of unknown tasks must be dropped")
 	}
 }
@@ -410,7 +410,7 @@ func TestParseSteps(t *testing.T) {
 
 func TestRunnerThenBranchParallel(t *testing.T) {
 	store := NewTaskStore()
-	task := store.Create("res-1", userMessage("hello"))
+	task := store.Create(context.Background(), "res-1", userMessage("hello"))
 
 	var calls []string
 	var mu sync.Mutex
@@ -454,7 +454,7 @@ func TestRunnerThenBranchParallel(t *testing.T) {
 
 	// then:a, branch:route, then:b (inside the matched arm), parallel:fan-out
 	// and one span per parallel member (c, d).
-	spans := store.Spans(task.ID)
+	spans := store.Spans(context.Background(), task.ID)
 	if len(spans) != 6 {
 		t.Fatalf("spans = %d, want 6: %+v", len(spans), spans)
 	}
@@ -478,7 +478,7 @@ func TestRunnerThenBranchParallel(t *testing.T) {
 
 func TestRunnerParallelRespectsMaxParallelAndPropagatesErrors(t *testing.T) {
 	store := NewTaskStore()
-	task := store.Create("res-1", userMessage("hello"))
+	task := store.Create(context.Background(), "res-1", userMessage("hello"))
 
 	var mu sync.Mutex
 	calls := map[string]int{}
@@ -516,7 +516,7 @@ func TestRunnerParallelRespectsMaxParallelAndPropagatesErrors(t *testing.T) {
 		t.Fatalf("code = %s, want resource_unreachable", errCode(t, err))
 	}
 
-	spans := store.Spans(task.ID)
+	spans := store.Spans(context.Background(), task.ID)
 	var errored, coded int
 	for _, s := range spans {
 		if s.Status == SpanStatusError {
@@ -533,7 +533,7 @@ func TestRunnerParallelRespectsMaxParallelAndPropagatesErrors(t *testing.T) {
 
 func TestRunnerStopsAtInputRequired(t *testing.T) {
 	store := NewTaskStore()
-	task := store.Create("res-1", userMessage("hello"))
+	task := store.Create(context.Background(), "res-1", userMessage("hello"))
 
 	var mu sync.Mutex
 	calls := 0
@@ -564,13 +564,13 @@ func TestRunnerStopsAtInputRequired(t *testing.T) {
 		t.Fatalf("invocations = %d, want 1 (the flow must stop at input-required)", got)
 	}
 	var parked bool
-	for _, s := range store.Spans(task.ID) {
+	for _, s := range store.Spans(context.Background(), task.ID) {
 		if s.Status == SpanStatusInputRequired {
 			parked = true
 		}
 	}
 	if !parked {
-		t.Fatalf("expected an input-required span, got %+v", store.Spans(task.ID))
+		t.Fatalf("expected an input-required span, got %+v", store.Spans(context.Background(), task.ID))
 	}
 }
 
@@ -615,7 +615,7 @@ func TestHubSendCompletesAndAccumulatesArtifacts(t *testing.T) {
 	if len(task.History) != 2 || task.History[1].Role != a2a.RoleAgent {
 		t.Fatalf("history = %+v, want user + agent", task.History)
 	}
-	if len(h.Store().Spans(task.ID)) == 0 {
+	if len(h.Store().Spans(context.Background(), task.ID)) == 0 {
 		t.Fatal("expected a span timeline")
 	}
 }
@@ -684,7 +684,7 @@ func TestHubParksForApprovalAndResumes(t *testing.T) {
 	}
 
 	// A completed task cannot be resumed.
-	other := h.Store().Create(agent.ID, userMessage("x"))
+	other := h.Store().Create(context.Background(), agent.ID, userMessage("x"))
 	if _, err := h.Resume(context.Background(), a2a.TaskResumeParams{ID: other.ID}); rpcCode(t, err) != a2a.CodeTaskNotResumable {
 		t.Fatalf("code = %d, want task_not_resumable", rpcCode(t, err))
 	}
@@ -729,18 +729,18 @@ func TestHubCancel(t *testing.T) {
 	skill := &registry.Entry{Kind: registry.KindSkill, Name: "demo-skill"}
 	h, _, _ := newTestHub(t, skill)
 
-	task := h.Store().Create(skill.ID, userMessage("hello"))
-	canceled, err := h.Cancel(task.ID)
+	task := h.Store().Create(context.Background(), skill.ID, userMessage("hello"))
+	canceled, err := h.Cancel(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	if canceled.Status.State != a2a.TaskStateCanceled {
 		t.Fatalf("state = %s, want canceled", canceled.Status.State)
 	}
-	if _, err := h.Cancel(task.ID); rpcCode(t, err) != a2a.CodeTaskNotCancelable {
+	if _, err := h.Cancel(context.Background(), task.ID); rpcCode(t, err) != a2a.CodeTaskNotCancelable {
 		t.Fatalf("code = %d, want task_not_cancelable", rpcCode(t, err))
 	}
-	if _, err := h.Cancel("task_missing"); rpcCode(t, err) != a2a.CodeTaskNotFound {
+	if _, err := h.Cancel(context.Background(), "task_missing"); rpcCode(t, err) != a2a.CodeTaskNotFound {
 		t.Fatalf("code = %d, want task_not_found", rpcCode(t, err))
 	}
 }
@@ -749,7 +749,7 @@ func TestHubGetTrimsHistory(t *testing.T) {
 	skill := &registry.Entry{Kind: registry.KindSkill, Name: "demo-skill"}
 	h, _, _ := newTestHub(t, skill)
 
-	if _, err := h.Get("task_missing", nil); rpcCode(t, err) != a2a.CodeTaskNotFound {
+	if _, err := h.Get(context.Background(), "task_missing", nil); rpcCode(t, err) != a2a.CodeTaskNotFound {
 		t.Fatalf("code = %d, want task_not_found", rpcCode(t, err))
 	}
 
@@ -757,7 +757,7 @@ func TestHubGetTrimsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	full, err := h.Get(task.ID, nil)
+	full, err := h.Get(context.Background(), task.ID, nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -765,7 +765,7 @@ func TestHubGetTrimsHistory(t *testing.T) {
 		t.Fatalf("history = %d, want 2", len(full.History))
 	}
 	one := 1
-	trimmed, err := h.Get(task.ID, &one)
+	trimmed, err := h.Get(context.Background(), task.ID, &one)
 	if err != nil {
 		t.Fatalf("get trimmed: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestHubConcurrentSends(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("concurrent send failed: %v", err)
 	}
-	if got := len(h.Store().List()); got != 16 {
+	if got := len(h.Store().List(context.Background())); got != 16 {
 		t.Fatalf("tasks = %d, want 16", got)
 	}
 }
@@ -892,8 +892,8 @@ func TestHubFlowBranchAndParallel(t *testing.T) {
 	if len(task.Artifacts) < 3 {
 		t.Fatalf("artifacts = %d, want the branch plus both parallel members", len(task.Artifacts))
 	}
-	if len(h.Store().Spans(task.ID)) < 4 {
-		t.Fatalf("spans = %+v, want branch + member spans", h.Store().Spans(task.ID))
+	if len(h.Store().Spans(context.Background(), task.ID)) < 4 {
+		t.Fatalf("spans = %+v, want branch + member spans", h.Store().Spans(context.Background(), task.ID))
 	}
 
 	// A malformed flow fails the task instead of silently running the default.
@@ -913,30 +913,30 @@ func TestHubPushNotifications(t *testing.T) {
 	skill := &registry.Entry{Kind: registry.KindSkill, Name: "demo-skill"}
 	h, _, notifier := newTestHub(t, skill)
 
-	task := h.Store().Create(skill.ID, userMessage("hello"))
+	task := h.Store().Create(context.Background(), skill.ID, userMessage("hello"))
 
-	if _, err := h.SetPush(a2a.TaskPushNotificationConfigParams{TaskID: task.ID}); rpcCode(t, err) != a2a.CodeInvalidParams {
+	if _, err := h.SetPush(context.Background(), a2a.TaskPushNotificationConfigParams{TaskID: task.ID}); rpcCode(t, err) != a2a.CodeInvalidParams {
 		t.Fatalf("code = %d, want invalid_params", rpcCode(t, err))
 	}
-	if _, err := h.SetPush(a2a.TaskPushNotificationConfigParams{TaskID: "task_missing", PushNotification: &a2a.PushNotificationConfig{URL: "http://x"}}); rpcCode(t, err) != a2a.CodeTaskNotFound {
+	if _, err := h.SetPush(context.Background(), a2a.TaskPushNotificationConfigParams{TaskID: "task_missing", PushNotification: &a2a.PushNotificationConfig{URL: "http://x"}}); rpcCode(t, err) != a2a.CodeTaskNotFound {
 		t.Fatalf("code = %d, want task_not_found", rpcCode(t, err))
 	}
-	if _, err := h.GetPush(task.ID); rpcCode(t, err) != a2a.CodeTaskNotFound {
+	if _, err := h.GetPush(context.Background(), task.ID); rpcCode(t, err) != a2a.CodeTaskNotFound {
 		t.Fatalf("code = %d, want task_not_found", rpcCode(t, err))
 	}
 
-	cfg, err := h.SetPush(a2a.TaskPushNotificationConfigParams{TaskID: task.ID, PushNotificationAlias: &a2a.PushNotificationConfig{URL: "http://callback", Token: "t"}})
+	cfg, err := h.SetPush(context.Background(), a2a.TaskPushNotificationConfigParams{TaskID: task.ID, PushNotificationAlias: &a2a.PushNotificationConfig{URL: "http://callback", Token: "t"}})
 	if err != nil {
 		t.Fatalf("set push: %v", err)
 	}
 	if cfg.URL != "http://callback" {
 		t.Fatalf("url = %q", cfg.URL)
 	}
-	if got, err := h.GetPush(task.ID); err != nil || got.URL != "http://callback" {
+	if got, err := h.GetPush(context.Background(), task.ID); err != nil || got.URL != "http://callback" {
 		t.Fatalf("get push = %+v, %v", got, err)
 	}
 
-	if _, err := h.Cancel(task.ID); err != nil {
+	if _, err := h.Cancel(context.Background(), task.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	records := notifier.Records()
@@ -946,7 +946,7 @@ func TestHubPushNotifications(t *testing.T) {
 
 	// Push disabled is reported as unsupported instead of silently dropping.
 	h.cfg.PushEnabled = false
-	if _, err := h.SetPush(a2a.TaskPushNotificationConfigParams{TaskID: task.ID, PushNotification: &a2a.PushNotificationConfig{URL: "http://x"}}); rpcCode(t, err) != a2a.CodePushNotificationNotSupported {
+	if _, err := h.SetPush(context.Background(), a2a.TaskPushNotificationConfigParams{TaskID: task.ID, PushNotification: &a2a.PushNotificationConfig{URL: "http://x"}}); rpcCode(t, err) != a2a.CodePushNotificationNotSupported {
 		t.Fatalf("code = %d, want push_notification_not_supported", rpcCode(t, err))
 	}
 }

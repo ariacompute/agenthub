@@ -3,6 +3,9 @@
 > 由 `requirements.md` 生成的分步清单（M1 已全部落地）。
 > 统一验收基线：`go vet ./...` 无告警、`go test -race ./...` 全绿、`bunx vitest run` 全绿、
 > `make build` 产出前端产物与二进制。
+>
+> 子领域实施记录：安全加固 `task-security.md`、执行沙盒 `task-sandbox.md`、
+> **数据隔离与全 API 审计 `task-isolation.md`**（方案 `requirements-isolation.md`）。
 
 ## M1 — A2A 互连平台首版（已完成）
 

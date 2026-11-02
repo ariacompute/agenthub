@@ -18,6 +18,7 @@ import (
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
+	"agenthub/internal/identity"
 	"agenthub/internal/model"
 	"agenthub/internal/registry"
 	"agenthub/internal/store"
@@ -33,7 +34,11 @@ func openDBReal(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set: skipping DB-backed integration test (make db-up)")
 	}
-	db, err := store.Open(dsn, false)
+	// Opened with RLS relaxed: these cases exercise repository behaviour and
+	// clean up with raw SQL, which a row level security policy would (correctly)
+	// refuse for a connection that carries no identity. The policies themselves
+	// are covered by rls_test.go, which enforces them.
+	db, err := store.OpenWithOptions(dsn, store.OpenOptions{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -228,11 +233,14 @@ func TestIntegrationResourceCRUD(t *testing.T) {
 
 func TestIntegrationTaskLifecyclePersists(t *testing.T) {
 	db := openDBReal(t)
-	ctx := context.Background()
+	// The system identity is what the task state machine uses in production and
+	// what lets this case see the row it just wrote through a row level security
+	// policy.
+	ctx := identity.System()
 	repo := store.NewTaskRepository(db)
 	tasks := hub.NewTaskStoreWithRepository(repo)
 
-	task := tasks.Create("res-it", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+	task := tasks.Create(ctx, "res-it", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
 	if task == nil {
 		t.Fatal("create returned no task")
 	}
@@ -293,7 +301,7 @@ func TestIntegrationTaskLifecyclePersists(t *testing.T) {
 	}
 
 	// Everything above must be readable back from the database.
-	reloaded := tasks.Get(task.ID)
+	reloaded := tasks.Get(ctx, task.ID)
 	if reloaded == nil {
 		t.Fatal("reload: task vanished")
 	}
@@ -313,7 +321,7 @@ func TestIntegrationTaskLifecyclePersists(t *testing.T) {
 		t.Fatalf("history = %+v", reloaded.History)
 	}
 
-	spans := tasks.Spans(task.ID)
+	spans := tasks.Spans(ctx, task.ID)
 	if len(spans) != 1 || spans[0].ID != span.ID || spans[0].Status != hub.SpanStatusOK {
 		t.Fatalf("spans = %+v", spans)
 	}
@@ -343,7 +351,7 @@ func TestIntegrationTaskLifecyclePersists(t *testing.T) {
 		t.Fatalf("pending row after completion = %+v (%v)", gone, err)
 	}
 
-	all := tasks.List()
+	all := tasks.List(ctx)
 	var listed *a2a.Task
 	for _, c := range all {
 		if c.ID == task.ID {
@@ -546,11 +554,11 @@ func TestIntegrationHubRunPersistsEveryLayer(t *testing.T) {
 	}
 
 	// Task + spans landed in the database.
-	spans := h.Store().Spans(task.ID)
+	spans := h.Store().Spans(ctx, task.ID)
 	if len(spans) == 0 {
 		t.Fatal("expected at least one persisted span")
 	}
-	listed := h.Store().List()
+	listed := h.Store().List(ctx)
 	found := false
 	for _, c := range listed {
 		if c.ID == task.ID {
@@ -565,7 +573,7 @@ func TestIntegrationHubRunPersistsEveryLayer(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	var replayed []hub.Event
 	for time.Now().Before(deadline) {
-		replayed = h.Events(task.ID, 0, 100)
+		replayed = h.Events(ctx, task.ID, 0, 100)
 		if len(replayed) > 0 {
 			break
 		}
@@ -590,7 +598,7 @@ func TestIntegrationHubRunPersistsEveryLayer(t *testing.T) {
 	if err := h.Store().SetPush(task.ID, pushCfg); err != nil {
 		t.Fatalf("set push: %v", err)
 	}
-	reloaded := h.Store().Get(task.ID)
+	reloaded := h.Store().Get(ctx, task.ID)
 	if reloaded == nil {
 		t.Fatal("task vanished after the run")
 	}

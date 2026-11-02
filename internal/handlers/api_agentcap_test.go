@@ -148,12 +148,15 @@ type memKnowledge struct {
 	items []*knowledge.Knowledge
 }
 
-func (m *memKnowledge) List(_ context.Context, agentID string) ([]*knowledge.Knowledge, error) {
+func (m *memKnowledge) List(_ context.Context, q knowledge.Query) ([]*knowledge.Knowledge, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*knowledge.Knowledge, 0, len(m.items))
 	for _, k := range m.items {
-		if agentID != "" && k.AgentID != agentID {
+		if q.AgentID != "" && k.AgentID != q.AgentID {
+			continue
+		}
+		if q.OwnerID != "" && k.OwnerID != q.OwnerID {
 			continue
 		}
 		out = append(out, k)

@@ -49,11 +49,11 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | --- | --- | --- | --- |
 | `message/send` | 跑一轮并等到终态。 | `{ message, configuration?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
 | `message/stream` | 同一轮，但过程中以帧的形式流出。 | `{ message, configuration?, metadata? }` | `text/event-stream: task_status_update \| task_artifact_update \| message \| task_span_update` |
-| `tasks/get` | 读取一个任务及其历史。 | `{ id, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
-| `tasks/cancel` | 取消仍在运行的任务。 | `{ id, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
-| `tasks/resume` | 回答停在等待输入的任务。 | `{ id, message, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
-| `tasks/pushNotification/set` | 登记任务要通知的回调。 | `{ taskId, pushNotificationConfig? }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
-| `tasks/pushNotification/get` | 读取任务已登记的回调。 | `{ id }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
+| `tasks/get` | 读取一个任务及其历史。 | `{ id, taskId?, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
+| `tasks/cancel` | 取消仍在运行的任务。 | `{ id, taskId?, historyLength?, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
+| `tasks/resume` | 回答停在等待输入的任务。 | `{ id, taskId?, message, metadata? }` | `{ jsonrpc: "2.0", id, result: Task }` |
+| `tasks/pushNotification/set` | 登记任务要通知的回调。 | `{ taskId, id?, pushNotificationConfig? }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
+| `tasks/pushNotification/get` | 读取任务已登记的回调。 | `{ id, taskId? }` | `{ jsonrpc: "2.0", id, result: PushNotificationConfig }` |
 
 流在终态状态帧处结束，其后没有哨兵帧。
 
@@ -285,6 +285,14 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `PUT` | `/api/router/policies/{source}` | `tasks:write` — 取消与恢复任务 | 整体替换其中一条路由规则 | `{ mode(off\|candidate\|request_only), allow?, keywords?, quietStart?, quietEnd?, resource? }` | `Policy \| 400 router_policy_invalid` |
 | `POST` | `/api/router/passes` | `tasks:write` — 取消与恢复任务 | 不等下一个节拍，立即推进一轮调度。 | — | `{ kicked: true } — 202` |
 | `GET` | `/api/router/events` | `tasks:read` — 查看任务 | SSE：先从 `since` 回放，再实时跟随调度器。 | `?since=<seq>&subject=` | `text/event-stream, event name router_event` |
+
+### 审计
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/audit` | `audit:read` — audit:read | 列出全部审计事件 | `?from=&to=&actor=&action=&resource=&source=&outcome=&q=&before=&limit=` | `{ events: AuditEvent[], stats: { total, failed, denied, written }, next }` |
+| `GET` | `/api/audit/verify` | `audit:read` — audit:read | 重算该时间窗的哈希链，并指出第一处断链的行。 | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
+| `GET` | `/api/audit/{id}` | `audit:read` — audit:read | 按 id 读取其中一条审计事件 | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
 
 展开一行即可看到它的请求与响应。
 

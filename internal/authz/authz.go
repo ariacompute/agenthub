@@ -6,10 +6,11 @@
 // storage it needs is declared here as AuthzStore and implemented by
 // internal/store, so this package never imports GORM.
 //
-// A resource is unrestricted while it has no grant rows at all: anyone holding
-// resources:read sees it. The first grant makes it restricted, and from then on
-// only the granted users/groups (and the owner) can see or change it. That rule
-// is what makes existing registries keep working after the grants table appears.
+// Authorization is fail closed. A resource is visible only to the platform owner,
+// to a principal a grant covers, or — for reads and invocation — when the record
+// itself was explicitly published (registry.Visibility=public). The earlier rule
+// ("no grant rows means everybody holding resources:read") made every new record
+// world readable, which is exactly the default this layer no longer takes.
 package authz
 
 import (
@@ -77,6 +78,11 @@ const (
 	// API keys. Issuing or revoking a key is its own permission so a key can
 	// read and act but never silently mint more keys with powers it lacks.
 	PermAPIKeysManage = "apikeys:manage"
+	// Audit. Reading the trail is the one capability that shows what everybody
+	// else did, so it is deliberately not folded into tasks:read or
+	// users:manage. The bootstrap owner holds it implicitly; the admin role gets
+	// it from migration 027.
+	PermAuditRead = "audit:read"
 )
 
 // AllPermissions is the full grantable set, in the order the admin matrix shows
@@ -95,6 +101,7 @@ var AllPermissions = []string{
 	PermRegistryCurate,
 	PermSourcesManage,
 	PermAPIKeysManage,
+	PermAuditRead,
 }
 
 // Principal kinds and grant levels of a ResourceGrant.
@@ -157,9 +164,9 @@ func DevPrincipal() *Principal {
 	return &Principal{UserID: "dev", Email: "dev@localhost", Name: "dev", IsOwner: true, Permissions: perms}
 }
 
-// AnonymousPrincipal is an unauthenticated caller. It may read the public
-// catalogue (the Agent Card and MCP export), which is what an agent that has
-// never logged in is allowed to discover: resources without grants are public.
+// AnonymousPrincipal is an unauthenticated caller. It may read the published
+// catalogue (the Agent Card and MCP export) and invoke public records: what an
+// agent that has never logged in is allowed to discover, and nothing else.
 func AnonymousPrincipal() *Principal {
 	return &Principal{Permissions: map[string]bool{PermResourcesRead: true}}
 }
@@ -320,9 +327,13 @@ func (s *Service) CanAccessResource(ctx context.Context, p *Principal, resourceI
 	if err != nil {
 		return false, err
 	}
-	// No grants recorded: the resource is unrestricted.
+	// No grants recorded: nobody but the owner may touch it. The old rule was
+	// the opposite ("no grants means open"), which made every freshly
+	// registered resource world readable until somebody remembered to restrict
+	// it. Publication is now an explicit registry.Visibility=public act,
+	// applied by the caller before asking this question.
 	if len(grants) == 0 {
-		return true, nil
+		return false, nil
 	}
 	level := LevelRead
 	if write {
@@ -345,9 +356,12 @@ func (s *Service) CanAccessResource(ctx context.Context, p *Principal, resourceI
 	return false, nil
 }
 
-// VisibleResourceIDs returns the resources p may see, as resourceID → level. A
-// resource without grants is visible to anyone with resources:read; otherwise it
-// appears only when a grant covers the principal.
+// VisibleResourceIDs returns the resources p may see, as resourceID → level.
+//
+// The answer is the grants that cover the principal and nothing else: a record
+// without a grant is no longer visible just because the caller holds
+// resources:read. Publication is a separate, explicit act (registry.Visibility),
+// and handlers union the two.
 func (s *Service) VisibleResourceIDs(ctx context.Context, p *Principal, all []string) (map[string]string, error) {
 	out := make(map[string]string, len(all))
 	if !p.Can(PermResourcesRead) {
@@ -358,10 +372,6 @@ func (s *Service) VisibleResourceIDs(ctx context.Context, p *Principal, all []st
 			out[id] = LevelWrite
 		}
 		return out, nil
-	}
-	restricted, err := s.store.RestrictedResourceIDs(ctx, all)
-	if err != nil {
-		return nil, err
 	}
 	grants, err := s.store.GrantsForPrincipal(ctx, p.UserID, p.Groups)
 	if err != nil {
@@ -375,10 +385,6 @@ func (s *Service) VisibleResourceIDs(ctx context.Context, p *Principal, all []st
 		}
 	}
 	for _, id := range all {
-		if !restricted[id] {
-			out[id] = LevelWrite // unrestricted: whatever the permission allows
-			continue
-		}
 		if lvl, ok := allowed[id]; ok {
 			out[id] = lvl
 		}

@@ -365,6 +365,11 @@ func authTestDepsWith(t *testing.T, staticDir string, tweak func(*auth.Options),
 	cfg.CookieSecure = false
 	reg := registry.New()
 	for _, e := range entries {
+		// Fixtures are published by default: authorisation is fail closed, and a
+		// case that wants a private record says so explicitly.
+		if e.Visibility == "" {
+			e.Visibility = registry.VisibilityPublic
+		}
 		stored, err := reg.Upsert(e)
 		if err != nil {
 			t.Fatalf("seed %q: %v", e.Name, err)
@@ -749,7 +754,10 @@ func TestLogoutRevokesTheSession(t *testing.T) {
 // a direct write to it is refused even though the caller has resources:write.
 func TestResourceGrantHidesAndProtects(t *testing.T) {
 	open := &registry.Entry{Kind: registry.KindModel, Name: "open-model"}
-	secret := &registry.Entry{Kind: registry.KindMCP, Name: "team-mcp"}
+	// Explicitly restricted: this is the default for a new record, and the
+	// fixture states it instead of relying on the absence of grants meaning
+	// anything.
+	secret := &registry.Entry{Kind: registry.KindMCP, Name: "team-mcp", Visibility: registry.VisibilityRestricted}
 	d, az := authTestDeps(t, "", open, secret)
 	h := Register(d)
 
@@ -768,15 +776,17 @@ func TestResourceGrantHidesAndProtects(t *testing.T) {
 	az.rolePerm["role-viewer"] = []string{authz.PermResourcesRead, authz.PermResourcesWrite}
 	az.mu.Unlock()
 
-	// Before any grant exists the resource is unrestricted: everybody with
-	// resources:read sees it.
+	// A published record is listed for everybody; a restricted one is not,
+	// until a grant covers the caller.
 	if w := do(t, h, http.MethodGet, "/api/resources", "", authHeader(member)); w.Code != http.StatusOK {
 		t.Fatalf("list: status = %d", w.Code)
-	} else if !strings.Contains(w.Body.String(), secret.ID) {
-		t.Fatal("unrestricted resource must be listed")
+	} else if !strings.Contains(w.Body.String(), open.ID) {
+		t.Fatal("a public resource must be listed")
+	} else if strings.Contains(w.Body.String(), secret.ID) {
+		t.Fatal("a restricted resource with no grant must not be listed")
 	}
 
-	// One grant turns it into a restricted resource.
+	// A grant to somebody else changes nothing for this caller.
 	az.grant("somebody-else", secret.ID, authz.LevelRead)
 
 	w = do(t, h, http.MethodGet, "/api/resources", "", authHeader(member))

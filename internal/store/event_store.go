@@ -35,44 +35,50 @@ func (s *eventRepository) Append(ctx context.Context, e hub.Event) error {
 	}
 	// A replayed or retried frame carries the same seq: ignore it instead of
 	// failing the writer.
-	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "task_id"}, {Name: "seq"}},
-		DoNothing: true,
-	}).Create(row).Error
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "task_id"}, {Name: "seq"}},
+			DoNothing: true,
+		}).Create(row).Error
+	})
 }
 
 func (s *eventRepository) Since(ctx context.Context, taskID string, after uint64, limit int) ([]hub.Event, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	var rows []model.Event
-	err := s.db.WithContext(ctx).
-		Where("task_id = ? AND seq > ?", taskID, after).
-		Order("seq ASC").Limit(limit).Find(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	out := make([]hub.Event, 0, len(rows))
-	for i := range rows {
-		ev, err := eventFromRow(&rows[i])
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]hub.Event, error) {
+		var rows []model.Event
+		err := owned(db, ctx, "owner_id").
+			Where("task_id = ? AND seq > ?", taskID, after).
+			Order("seq ASC").Limit(limit).Find(&rows).Error
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ev)
-	}
-	return out, nil
+		out := make([]hub.Event, 0, len(rows))
+		for i := range rows {
+			ev, err := eventFromRow(&rows[i])
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ev)
+		}
+		return out, nil
+	})
 }
 
 func (s *eventRepository) MaxSeq(ctx context.Context) (uint64, error) {
-	var max sql.NullInt64
-	if err := s.db.WithContext(ctx).Model(&model.Event{}).
-		Select("COALESCE(MAX(seq), 0)").Scan(&max).Error; err != nil {
-		return 0, err
-	}
-	if !max.Valid || max.Int64 < 0 {
-		return 0, nil
-	}
-	return uint64(max.Int64), nil
+	return scoped(ctx, s.db, func(db *gorm.DB) (uint64, error) {
+		var max sql.NullInt64
+		if err := db.Model(&model.Event{}).
+			Select("COALESCE(MAX(seq), 0)").Scan(&max).Error; err != nil {
+			return 0, err
+		}
+		if !max.Valid || max.Int64 < 0 {
+			return 0, nil
+		}
+		return uint64(max.Int64), nil
+	})
 }
 
 func eventFromRow(row *model.Event) (hub.Event, error) {

@@ -12,6 +12,7 @@ import (
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/adapter"
+	"agenthub/internal/audit"
 	"agenthub/internal/auth"
 	"agenthub/internal/authz"
 	"agenthub/internal/backup"
@@ -85,6 +86,9 @@ type Deps struct {
 	// while sandbox_unsupported means "wired in, but this host cannot run the
 	// configured provider".
 	Sandboxes *sandbox.Service
+	// Audit is the API audit trail: the middleware feeds it and /api/audit reads
+	// it back. Nil disables both, which is what unit tests want.
+	Audit *audit.Recorder
 }
 
 // Register builds the router.
@@ -99,6 +103,12 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /a2a/agent-card", d.identify(d.handleAgentCard))
 	mux.HandleFunc("POST /a2a", d.identify(d.handleJSONRPC))
 	mux.HandleFunc("GET /a2a/stream", d.requirePermission(authz.PermTasksRead, d.handleA2AStream))
+
+	// Audit trail. Reading what everybody did is its own permission, and the
+	// verifier is listed before the wildcard so the literal wins.
+	mux.HandleFunc("GET /api/audit", d.requirePermission(authz.PermAuditRead, d.handleListAudit))
+	mux.HandleFunc("GET /api/audit/verify", d.requirePermission(authz.PermAuditRead, d.handleVerifyAudit))
+	mux.HandleFunc("GET /api/audit/{id}", d.requirePermission(authz.PermAuditRead, d.handleGetAudit))
 
 	// Identity. These are the only control plane routes an anonymous caller may
 	// reach: without them nobody could obtain a session in the first place.
@@ -403,7 +413,7 @@ func (d Deps) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		Mode:            "mock",
 		Resources:       d.Reg.CountsByKind(),
 		Health:          d.Reg.HealthCounts(),
-		Tasks:           len(d.Hub.Store().List()),
+		Tasks:           len(d.Hub.Store().List(r.Context())),
 		Methods:         a2a.Methods,
 		LegacyMethods:   d.Cfg.LegacyMethods,
 		PushEnabled:     d.Cfg.PushEnabled,

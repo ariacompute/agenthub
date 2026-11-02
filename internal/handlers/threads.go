@@ -199,7 +199,7 @@ func (d Deps) handleThreadEventStream(w http.ResponseWriter, r *http.Request) {
 	}
 	ids := taskIDsOf(msgs)
 	for _, tid := range ids {
-		for _, ev := range d.Hub.Events(tid, 0, 0) {
+		for _, ev := range d.Hub.Events(r.Context(), tid, 0, 0) {
 			if m := d.applyTaskEvent(r.Context(), id, ev, ridByTask); m != nil {
 				if err := httputil.WriteSSE(w, flusher, "thread.agent", m); err != nil {
 					return

@@ -59,7 +59,7 @@ var resourceUpdateColumns = []string{
 	"kind", "name", "description", "endpoint", "version", "repository",
 	"tags", "capabilities", "auth_schemes", "env", "metadata", "kind_config",
 	"transport", "health", "namespace", "status", "display_name", "source_id",
-	"persona",
+	"persona", "visibility",
 	"updated_at",
 }
 
@@ -224,6 +224,11 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 		// domain, so the row and the in-memory copy can never disagree.
 		status = registry.StatusApproved
 	}
+	visibility := e.Visibility
+	if !visibility.Valid() {
+		// Fail closed: an entry without an explicit visibility is private.
+		visibility = registry.VisibilityRestricted
+	}
 	return &model.Resource{
 		ID:           e.ID,
 		Kind:         string(e.Kind),
@@ -243,6 +248,7 @@ func resourceFromEntry(e *registry.Entry) (*model.Resource, error) {
 		Health:       string(health),
 		Namespace:    e.EffectiveNamespace(),
 		Status:       string(status),
+		Visibility:   string(visibility),
 		DisplayName:  e.DisplayName,
 		SourceID:     e.SourceID,
 		CreatedAt:    createdAt,
@@ -263,6 +269,7 @@ func entryFromResource(row *model.Resource) (*registry.Entry, error) {
 		Health:      registry.Health(row.Health),
 		Namespace:   row.Namespace,
 		Status:      registry.Status(row.Status),
+		Visibility:  registry.Visibility(row.Visibility),
 		DisplayName: row.DisplayName,
 		SourceID:    row.SourceID,
 		CreatedAt:   row.CreatedAt,

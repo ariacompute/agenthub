@@ -243,9 +243,54 @@ mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`
 缺失时回退到会话密钥并告警。API key 以 `token_hash` 哈希存储，OAuth 客户端密钥为环境变量引用、绝不入库——
 注入审计确认全部 SQL 已参数化。
 
-**数据库**：运行期建议用最小权限角色；迁移在启动期的同一连接上执行。`scripts/provision-db-roles.sql` 生成
-`app` / `readonly` 两角色。连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` /
-`_CONN_MAX_LIFETIME` 调优。
+**数据库**：运行期须用最小权限角色，且**该角色不得是表属主、不得有 `BYPASSRLS`**——任一条件成立都会
+静默跳过隔离策略。`scripts/provision-db-roles.sql` 生成三个角色（`migrator` 拥有 schema 并执行 DDL、
+`app` 只有 DML、`readonly` 只有 SELECT），且末尾断言：八张受保护表缺 `ENABLE`+`FORCE ROW LEVEL SECURITY`
+就 `RAISE EXCEPTION`。DDL 用 `AGENTHUB_MIGRATE_DATABASE_URL` 指向 migrator；未设置时回退到
+`DATABASE_URL` 并在启动日志告警，因为单角色部署的边界更弱。连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` /
+`_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME` 调优。
+
+**数据隔离（行级安全）**：任务及其 artifact/span/pending/push 行与事件、以及知识块都带 `owner_id`。
+PostgreSQL 策略（`migrations/026`）按三个事务内设置判定可见性——`app.owner_id`（登录用户）、
+`app.bypass`（管理员）、`app.system`（进程内路径：任务状态机、事件扇出、seed、迁移、备份、审计写入）。
+未设置的设置读作 NULL，比较一律为假，因此**忘记注入身份的请求什么也看不到**，而不是看到全部。每次仓储
+调用开一个短事务（`internal/store.scoped`）并用 `set_config(..., true)` 注入身份，请求不持连接。
+
+`AGENTHUB_RLS=enforce` 是默认值。`AGENTHUB_RLS=off` 让全部策略通过（在 DSN 追加
+`options=-c app.system=on`）并打印醒目告警；`AGENTHUB_ENV=prod` 下会被拒绝，除非同时设
+`AGENTHUB_RLS_ACK=1`。
+
+资源可见性是**显式**的：`resources.visibility` 默认 `restricted`，需要时标 `public`。判定为
+`public || 有 grant`，因此既无 grant 又未标 `public` 的资源既不可见也不可调用（匿名 A2A 对端同样如此）。
+**这是破坏性变更**——升级步骤与三种恢复方式见 `requirements-isolation.md` §3.1；演示数据
+（`AGENTHUB_SEED_DEMO=true`）以 `public` 写入。
+
+**全 API 审计**：每次 `/api` 与 `/a2a` 调用向 `audit_log` 追加一行，字段沿用 CloudTrail 词汇：
+`event_id`/`ts`/`source`/`action`/`read_only`/`actor_*`/`ip`/`method`/`path`/`resource_*`/`status`/
+`error_code`/`latency_ms`/`user_agent`。路径脱敏（query 值置 `REDACTED`），绝不存请求体与响应体。
+该表被两道关锁成只追加：触发器对 `UPDATE`/`DELETE`/`TRUNCATE` 一律拒绝（**包括表属主**），运行角色只被
+授予 `INSERT`/`SELECT`。行之间哈希链接（`hash = sha256(prev_hash ‖ canonical(event))`），篡改或删除任一行
+都会断开其后所有链接，`GET /api/audit/verify` 会指出第一个断点。单写者串行维护链：有界队列 + 批量插入
+（默认 8192 / 64 条 / 500 ms），队列满则丢帧并计数告警，**绝不阻塞业务请求**。
+
+| 变量 | 默认 | 含义 |
+| --- | --- | --- |
+| `AGENTHUB_AUDIT_ENABLED` | `true` | 是否记录审计 |
+| `AGENTHUB_AUDIT_RETENTION` | `2160h` | 单行最长存活时间；清理动作本身也留痕 |
+| `AGENTHUB_AUDIT_QUEUE` | `8192` | 有界队列深度（超出部分计数后丢弃） |
+| `AGENTHUB_AUDIT_BATCH` | `64` | 每次插入行数（`1..AGENTHUB_AUDIT_QUEUE`） |
+| `AGENTHUB_RLS` | `enforce` | `off` 放开全部策略（仅开发；prod 下需 `AGENTHUB_RLS_ACK=1`） |
+| `AGENTHUB_MIGRATE_DATABASE_URL` | 未设 | DDL 连接；缺省回退 `DATABASE_URL` 并告警 |
+
+读取审计需要独立权限 `audit:read`：`GET /api/audit`（过滤 `from`、`to`、`actor`、`action`、`resource`、
+`source`、`outcome`、`q`、`before`、`limit`）、`GET /api/audit/{id}`、`GET /api/audit/verify?from=&to=`。
+控制台对应 **审计** 页。
+
+审计行只带调用者、IP、HTTP 方法、脱敏后的路径、结果与哈希——**绝不含**密码、令牌、Cookie 或请求/响应体。
+
+**CLI 资源（回归加固）**：执行的是**记录里声明的命令**，绝不取提示词里的词；白名单按命令名精确匹配
+（不认前缀、不认路径）；调用者参数默认拒绝，除非记录的 `args_policy` 放行。
+`internal/adapter/cli_test.go` 把这两条钉成回归用例——被允许的二进制不能再退化成一个 shell。
 
 **备份**：配置 `AGENTHUB_ENCRYPTION_KEY` 时检查点归档以 AES-256-GCM 静态加密为 `<file>.tar.gz.enc` 并写
 `<file>.enc.sha256` 清单，明文绝不落盘。定期用 `scripts/backup-restore-drill.sh` 验证可恢复性。

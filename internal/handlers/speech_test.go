@@ -182,7 +182,7 @@ func TestThreadAudioTranscribesDelegatesAndAnswers(t *testing.T) {
 	}
 
 	// And the task it opened belongs to the participant the thread names.
-	task, err := d.Hub.Get(out.TaskID, nil)
+	task, err := d.Hub.Get(context.Background(), out.TaskID, nil)
 	if err != nil || task == nil {
 		t.Fatalf("the delegated task must exist, got %v (err=%v)", task, err)
 	}
