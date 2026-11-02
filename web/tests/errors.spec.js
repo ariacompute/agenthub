@@ -21,6 +21,7 @@ describe('errorMessage', () => {
       'backup_schema_mismatch',
       'backup_schedule_invalid',
       'backup_invalid_archive',
+      'backup_table_guarded',
       'backup_failed',
       'restore_confirm_required',
       'restore_busy',

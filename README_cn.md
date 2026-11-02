@@ -438,7 +438,9 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | 复用 | 命中即续租，超过 `AGENTHUB_SANDBOX_IDLE_TTL` 回收；匿名调用不复用 |
 | 上限 | `AGENTHUB_SANDBOX_MAX_PER_OWNER` / `_MAX_TOTAL`，与 `AGENTHUB_ROUTER_MAX_TICKETS` 交叉校验；取不到租约返回**可重试**的 `sandbox_limit_reached`，交由调度器退避消化 |
 | 审计 | 命令摘要、退出码、耗时与输出的 sha256——从不落全量输出 |
-| 控制台 | `/api/sandboxes`、`/api/sandboxes/{id}`、`/api/sandboxes/stats`、`/api/sandbox-providers`、`/api/sandbox-nodes`、`/api/sandboxes/events`（SSE，支持 `since`） |
+| API | `/api/sandboxes`、`/api/sandboxes/{id}`、`/api/sandboxes/stats`、`/api/sandbox-providers`、`/api/sandbox-nodes`、`/api/sandboxes/events`（SSE，支持 `since`） |
+| 控制台 | 可交互的沙盒屏在 **agentbuddy**（`ComputersView`）；本仓只提供 API 与 `/docs` 里的那张表 |
+| 网络 | `none` / `egress_allowlist` 在**两种后端上都**断网，`bridge` / `platform` 放行；白名单本身仍需出网 sidecar，因此按 `none`（fail-closed）读 |
 
 一类后端是**目录条目**，不是代码分支。不改控制面即可新增：
 
@@ -518,6 +520,7 @@ curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
 | `push_records` | mock notifier 捕获的每次回调（task/url/state/config 快照），按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留 |
 | `schema_migrations` | 已执行的迁移文件，启动时跳过 |
 | `backup_checkpoints` / `backup_schedules` | 检查点目录与定时策略——两者**不参与**任何导出与恢复，因此操作员在恢复之后仍能看到自己所用的那个归档 |
+| `audit_log` | 只追加审计账本（见「全 API 审计」）；同样**不参与**任何导出与恢复：`025` 对任何角色都拒绝 `TRUNCATE`，而「把账本回滚」正是它的哈希链要防的事 |
 | `api_keys` / `api_key_scopes` | 长效 bearer 凭证；只存令牌的 `sha256`（`token_hash`，唯一索引）与展示用 `prefix`（绝不存明文），含可选 `expires_at` 与软 `revoked_at`；`api_key_scopes` 是 key → 权限 的边表 |
 
 - 迁移：`migrations/*.sql` 经 `//go:embed` 内嵌，启动时按文件名**单事务**顺序执行；SQL 自身幂等。
@@ -541,6 +544,14 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
   文件的 sha256 记在目录行里，下载与恢复前都会重新校验——卷上损坏的归档会被拒绝，而不是被交出去。
 - **引擎**：运行时镜像里装了 PostgreSQL 客户端就用 `pg_dump -Fc`；否则回落到纯 Go 引擎，直接流式
   `COPY … TO STDOUT` / `COPY … FROM STDIN`。引擎名随归档一起保存；归档只能由写出它的引擎读回。
+- **归档里有什么**：只有应用表。检查点目录（`backup_checkpoints` / `backup_schedules`）与只追加账本
+  （`audit_log`）都不在内，因此一次回退既不会抹掉「归档自身的记录」，也不会回滚审计证据——哈希链跨
+  恢复保持连续。`pg_dump` 归档因此由**正向 `--table` 清单**构建，而不是按名排除：按名排除一张表时，
+  它的序列与触发器函数仍会进归档，`pg_restore --clean` 随后会试图把它们从仍在使用它们的表下面删掉。
+- **受保护的表**：纯 Go 引擎用一条 `TRUNCATE` 清空 schema，所以只要它要携带的表上带 `BEFORE TRUNCATE`
+  触发器，它在 **dump 与 restore 两处**都按表名以 `backup_table_guarded` 拒绝。一份读不回去的检查点
+  比没有更糟，而且这个失败应当在「还来得及换到带 pg_dump 的镜像」时暴露，而不是在真正需要它的那天。
+  只认 `BEFORE TRUNCATE`：`TRUNCATE` 不会触发行触发器。
 - **定时**（控制台内编辑并落库）：关闭 / 每 N 分钟 / 每日固定时刻（带时区）/ 五段 cron 表达式。
   调度器重启后会补跑一次；进程死掉留下的 `running` 行在下一次启动时被结清。
 - **保留策略**：保留最近 N 个、删除超过 M 天的归档。最新那份永不被清理；恢复前自动打的回滚点

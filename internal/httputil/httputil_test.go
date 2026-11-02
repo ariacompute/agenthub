@@ -162,6 +162,7 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeBackupChecksum, http.StatusConflict},
 		{CodeBackupSchemaMismatch, http.StatusConflict},
 		{CodeBackupInvalidArchive, http.StatusConflict},
+		{CodeBackupTableGuarded, http.StatusConflict},
 		{CodeRouterTicketClosed, http.StatusConflict},
 		{CodeRouterHandbackExhausted, http.StatusConflict},
 		{CodeRouterResourceUnset, http.StatusConflict},

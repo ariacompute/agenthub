@@ -131,6 +131,13 @@ func TestIntegrationPgDumpEngineRoundTrips(t *testing.T) {
 	ctx := context.Background()
 	db := openDBReal(t)
 
+	// Same reason as the COPY engine case: a restore resurrects rows its
+	// checkpoint captured, and the next run would then collide on the dedup
+	// index.
+	if err := db.Exec("DELETE FROM resources WHERE name LIKE 'it-%'").Error; err != nil {
+		t.Fatalf("clear leftover test rows: %v", err)
+	}
+
 	survivor := integrationResource(t, db, "model", "it-pgdump-survivor")
 	marker := "pgdump-" + time.Now().Format("150405.000000")
 	t.Cleanup(func() {
@@ -159,6 +166,14 @@ func TestIntegrationPgDumpEngineRoundTrips(t *testing.T) {
 	// Move the database on, then hand the payload back to pg_restore.
 	if err := db.Exec("DELETE FROM resources WHERE id = ?", survivor).Error; err != nil {
 		t.Fatalf("delete survivor: %v", err)
+	}
+	// A ledger row written after the archive was taken: the checkpoint does not
+	// carry the ledger, so this row must still be there afterwards.
+	auditID := "it-pgdump-audit-" + time.Now().Format("150405.000000")
+	if err := db.Exec(
+		`INSERT INTO audit_log (event_id, source, action) VALUES (?, 'api', 'integration.pgdump')`, auditID,
+	).Error; err != nil {
+		t.Fatalf("insert audit row: %v", err)
 	}
 	payload, err := os.CreateTemp(dir, "payload-*.data")
 	if err != nil {
@@ -190,6 +205,45 @@ func TestIntegrationPgDumpEngineRoundTrips(t *testing.T) {
 	}
 	if kept != 1 {
 		t.Fatal("the backup catalogue must survive a restore")
+	}
+	// The archive is built from a positive list of tables, so nothing the
+	// excluded ledger owns is in it — neither the rows nor the trigger that
+	// keeps them append-only.
+	var auditKept, auditGuard int64
+	if err := db.Raw("SELECT count(*) FROM audit_log WHERE event_id = ?", auditID).Scan(&auditKept).Error; err != nil {
+		t.Fatalf("count audit row: %v", err)
+	}
+	if auditKept != 1 {
+		t.Fatal("the restore must leave the audit ledger alone")
+	}
+	if err := db.Raw(`
+		SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+		WHERE c.relname = 'audit_log' AND t.tgname = 'audit_log_no_truncate'`).Scan(&auditGuard).Error; err != nil {
+		t.Fatalf("count the ledger trigger: %v", err)
+	}
+	if auditGuard != 1 {
+		t.Fatal("the restore dropped the ledger's append-only trigger")
+	}
+	// A table's policies and triggers travel with it in the archive. Losing
+	// them would be a security regression no row count could show: the rows
+	// would come back and the rules that hide them would not.
+	var policies int64
+	if err := db.Raw(`
+		SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+		WHERE c.relname = 'tasks'`).Scan(&policies).Error; err != nil {
+		t.Fatalf("count policies: %v", err)
+	}
+	if policies == 0 {
+		t.Fatal("the restore dropped the row level security policies")
+	}
+	var ownerTriggers int64
+	if err := db.Raw(`
+		SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+		WHERE c.relname = 'events' AND NOT t.tgisinternal`).Scan(&ownerTriggers).Error; err != nil {
+		t.Fatalf("count triggers: %v", err)
+	}
+	if ownerTriggers == 0 {
+		t.Fatal("the restore dropped the owner triggers")
 	}
 	// fixSequences runs after pg_restore, and a sequence left at zero is what
 	// breaks the next insert. One insert proves the sequence moved.

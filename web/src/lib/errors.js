@@ -66,6 +66,7 @@ export const CODE_KEYS = {
   backup_schema_mismatch: 'backupSchemaMismatch',
   backup_schedule_invalid: 'backupScheduleInvalid',
   backup_invalid_archive: 'backupInvalidArchive',
+  backup_table_guarded: 'backupTableGuarded',
   backup_failed: 'backupFailed',
   restore_confirm_required: 'restoreConfirmRequired',
   restore_busy: 'restoreBusy',

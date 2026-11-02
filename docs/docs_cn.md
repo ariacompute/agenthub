@@ -413,7 +413,7 @@ network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发
 | `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled, channel_disabled, connector_policy_off, sandbox_disabled, sandbox_policy_denied` |
 | `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, backup_table_guarded, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost` |
 | `413` | Payload Too Large | `payload_too_large, audio_too_large` |
 | `415` | Unsupported Media Type | `audio_unsupported` |
 | `422` | Unprocessable Entity | `audio_transcribe_failed` |

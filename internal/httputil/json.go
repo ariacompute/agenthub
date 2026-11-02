@@ -63,6 +63,7 @@ const (
 	CodeBackupSchemaMismatch  Code = "backup_schema_mismatch"
 	CodeBackupScheduleInvalid Code = "backup_schedule_invalid"
 	CodeBackupInvalidArchive  Code = "backup_invalid_archive"
+	CodeBackupTableGuarded    Code = "backup_table_guarded"
 	CodeBackupFailed          Code = "backup_failed"
 	CodeRestoreConfirm        Code = "restore_confirm_required"
 	CodeRestoreBusy           Code = "restore_busy"
@@ -209,7 +210,7 @@ func WriteErr(w http.ResponseWriter, err error) {
 	// Backups. "backups_disabled" is a 409 rather than a 404: the endpoint
 	// exists, it is the instance that has no backup volume mounted.
 	case CodeBackupsDisabled, CodeBackupInProgress, CodeBackupChecksum,
-		CodeBackupSchemaMismatch, CodeBackupInvalidArchive:
+		CodeBackupSchemaMismatch, CodeBackupInvalidArchive, CodeBackupTableGuarded:
 		WriteError(w, http.StatusConflict, e.Code)
 	case CodeBackupNotFound:
 		WriteError(w, http.StatusNotFound, e.Code)

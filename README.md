@@ -623,6 +623,7 @@ curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
 | `push_records` | Every callback the mock notifier captures (task / url / state / config snapshot), capped by `AGENTHUB_PUSH_RECORD_LIMIT` |
 | `schema_migrations` | Migration files already applied, skipped at startup |
 | `backup_checkpoints` / `backup_schedules` | The checkpoint catalogue and the schedule — **excluded** from every dump and restore, so an operator can still see the archive they restored from |
+| `audit_log` | The append-only ledger (see **API audit trail**). Also **excluded** from every dump and restore: `025` refuses `TRUNCATE` for every role, and rewinding the trail is exactly what its hash chain exists to prevent |
 | `api_keys` / `api_key_scopes` | Long-lived bearer credentials; only the `sha256` of the token (`token_hash`) and a display `prefix` are stored (never the secret), with an optional `expires_at` and a soft `revoked_at`; `api_key_scopes` is the key → permission edge |
 
 - Migrations: `migrations/*.sql` embedded with `//go:embed`, executed in filename order, one
@@ -655,6 +656,17 @@ schema into one `tar.gz` on disk and can rewind the database to any of them.
 - **Engines**: `pg_dump -Fc` when the PostgreSQL client is installed in the runtime image, otherwise
   a pure-Go engine that streams `COPY … TO STDOUT` / `COPY … FROM STDIN`. The engine travels with the
   archive; an archive can only be loaded by the engine that wrote it.
+- **What a checkpoint carries**: application tables only. The catalogue (`backup_checkpoints` /
+  `backup_schedules`) and the append-only ledger (`audit_log`) are excluded, so a rewind neither
+  erases the archive's own record nor rewinds evidence — the hash chain stays continuous across a
+  restore. `pg_dump` archives are therefore built from a positive `--table` list, not by exclusion:
+  excluding a table by name would still leave its sequence and its trigger functions in the archive,
+  and `pg_restore --clean` would then try to drop them out from under the table that still uses them.
+- **Guarded tables**: the pure-Go engine empties the schema with one `TRUNCATE`, so it refuses — at
+  dump *and* at restore, by table name, with `backup_table_guarded` — when a table it would carry has
+  a `BEFORE TRUNCATE` trigger. A checkpoint that could not be loaded back is worse than none, and the
+  failure should surface while a `pg_dump`-capable image can still be deployed, not on the day the
+  archive is needed. Only `BEFORE TRUNCATE` counts: `TRUNCATE` fires no row trigger.
 - **Schedule** (edited in the console, persisted): off, every N minutes, daily at a fixed time in a
   timezone, or a five-field cron expression. The scheduler catches up once after a restart, and rows
   left `running` by a process that died are closed at the next boot.

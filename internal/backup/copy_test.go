@@ -183,6 +183,60 @@ func TestOrderTablesIsStableAndIgnoresWhatIsNotInTheArchive(t *testing.T) {
 	}
 }
 
+// What a restore does with one block of the payload. Getting this wrong either
+// drops rows silently or refuses an archive that would have loaded.
+func TestFrameDispositionClassifiesEveryTable(t *testing.T) {
+	known := map[string]bool{"resources": true, "tasks": true}
+	cases := []struct {
+		table string
+		want  frameAction
+		why   string
+	}{
+		{"resources", frameLoad, "a dumped table is part of the rewrite"},
+		{"audit_log", frameDrop, "the ledger is excluded, so an old block is dropped"},
+		{"backup_checkpoints", frameDrop, "the catalogue is excluded too"},
+		{"agent_sessions", frameRefuse, "a table this build lacks means another schema"},
+	}
+	for _, c := range cases {
+		if got := frameDisposition(c.table, known); got != c.want {
+			t.Errorf("frameDisposition(%q) = %d, want %d (%s)", c.table, got, c.want, c.why)
+		}
+	}
+}
+
+// Only a BEFORE TRUNCATE trigger can stop the rewrite: TRUNCATE fires no row
+// trigger, so a table that guards DELETE or UPDATE alone stays restorable and
+// must not be refused.
+func TestRefusesTruncateReadsTheTriggerTypeMask(t *testing.T) {
+	const (
+		row      = 1 << 0
+		before   = 1 << 1
+		insert   = 1 << 2
+		del      = 1 << 3
+		update   = 1 << 4
+		truncate = 1 << 5
+		instead  = 1 << 6
+	)
+	cases := []struct {
+		name   string
+		tgtype int16
+		want   bool
+	}{
+		{"before truncate, the ledger's guard", before | truncate, true},
+		{"before every event", before | insert | del | update | truncate, true},
+		{"before insert", before | insert, false},
+		{"before delete row", before | del | row, false},
+		{"before update row", before | update | row, false},
+		{"after truncate", truncate, false},
+		{"instead of truncate", instead | truncate, false},
+	}
+	for _, c := range cases {
+		if got := refusesTruncate(c.tgtype); got != c.want {
+			t.Errorf("%s: refusesTruncate(%d) = %v, want %v", c.name, c.tgtype, got, c.want)
+		}
+	}
+}
+
 // A cycle cannot be satisfied; the loader still has to write every block it
 // was given, because losing rows silently is worse than a database error.
 func TestOrderTablesKeepsEveryTableInACycle(t *testing.T) {

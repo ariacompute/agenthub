@@ -301,8 +301,15 @@ RAG 检索保持确定性 mock 并标 `TODO(real)`。
 | `threads` / `thread_messages` | 协作线程与消息（`012` / `015`） |
 | `channels` / `channel_messages` | 外部消息通道绑定与入站/出站留痕（`014`） |
 | `sandbox_leases` / `sandbox_execs` / `sandbox_nodes` / `sandbox_jobs` / `sandbox_events` | 执行租约、执行摘要、节点、作业与事件（`021`） |
-| `audit_log` | 只追加审计账本（哈希链；`025`，`audit:read` 授权见 `027`） |
+| `audit_log` | 只追加审计账本（哈希链；`025`，`audit:read` 授权见 `027`）；**不进检查点、不被恢复改写** |
 | `schema_migrations` | 已执行的迁移文件 |
+
+检查点范围（与故障恢复的边界）：`backup_checkpoints` / `backup_schedules` / `audit_log` 三张表**既不进归档也不被恢复改写**。
+前两张是不可回滚的检查点清单；`audit_log` 则因 `025` 的触发器对 `TRUNCATE` / `DELETE` / `UPDATE`
+一律拒绝（含 owner 与 superuser），把它写回等于回滚审计证据——因此归档既不带它、恢复也不清空它，
+哈希链在回滚前后保持连续。内建引擎（`gonative`）另有**类级预检**：任何将被 dump 的表若带
+`BEFORE TRUNCATE` 触发器，dump 与 restore 都以 `backup_table_guarded`（409）按表名拒绝，
+并提示改用 `pg_dump` 引擎（后者按表名白名单构建归档，能安全应对受触发器保护的表）。
 
 共 47 张表（含关联表）；归属列、`resources.visibility` 与 RLS 策略见 §1.7。
 
@@ -478,7 +485,7 @@ API Key 码：`api_key_not_found` → 404、`api_key_expired`·`api_key_revoked`
 `sandbox_node_offline` → 503、`sandbox_timeout` → 504；未注入 `Deps.Sandboxes` 时 503 `feature_unavailable`。
 
 备份码：`backup_not_found` → 404；`backups_disabled`·`backup_in_progress`·`backup_checksum_mismatch`·
-`backup_schema_mismatch`·`backup_invalid_archive` → 409；`backup_schedule_invalid`·`restore_confirm_required` → 400；
+`backup_schema_mismatch`·`backup_invalid_archive`·`backup_table_guarded` → 409；`backup_schedule_invalid`·`restore_confirm_required` → 400；
 `backup_engine_unavailable`·`restore_busy`·`restore_in_progress` → 503；
 `backup_engine_failed`·`backup_failed`·`backup_interrupted`·`restore_failed` → 500。
 

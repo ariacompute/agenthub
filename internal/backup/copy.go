@@ -36,10 +36,19 @@ const columnSeparator = "\x1f"
 
 // excludedTables are never dumped and never truncated.
 //
-// They hold the backup catalogue, not application state: dropping them on a
-// restore would erase the record of the checkpoint the operator is restoring
-// from — including the one taken seconds earlier as a way back.
+// The catalogue rows are here because they are not application state: dropping
+// them on a restore would erase the record of the checkpoint the operator is
+// restoring from — including the one taken seconds earlier as a way back.
+//
+// audit_log is here because it is an append-only ledger, not state: 025 refuses
+// UPDATE and TRUNCATE for every role, owner and superuser included, and the
+// hash chain only means something if the rows it covers cannot be rewound.
+// Carrying it in a checkpoint would leave the restore with two bad answers —
+// rewrite the evidence or fail — so it is neither dumped nor truncated. An
+// operator who needs the ledger elsewhere exports it; it is deliberately not
+// something a rewind can take away.
 var excludedTables = map[string]bool{
+	"audit_log":          true,
 	"backup_checkpoints": true,
 	"backup_schedules":   true,
 }
@@ -59,6 +68,12 @@ func (e *copyEngine) Dump(ctx context.Context, w io.Writer) (DumpResult, error) 
 
 	tables, err := discoverTables(ctx, conn)
 	if err != nil {
+		return DumpResult{}, err
+	}
+	// A checkpoint this engine cannot load back is worse than none: the operator
+	// would only find out when they need it. So the guard runs on the way in as
+	// well, while there is still time to switch engines.
+	if err := ensureRewritable(ctx, conn, tables); err != nil {
 		return DumpResult{}, err
 	}
 	res := DumpResult{Tables: tables, RowCounts: map[string]int64{}}
@@ -145,9 +160,18 @@ func (e *copyEngine) Restore(ctx context.Context, r io.Reader, m Manifest) error
 		knownSet[t] = true
 	}
 	for _, t := range m.Tables {
-		if !knownSet[t] {
+		// A table the manifest names but this build keeps out of the checkpoint
+		// is an archive from before the exclusion: readable, not an error.
+		if frameDisposition(t, knownSet) == frameRefuse {
 			return fmt.Errorf("%w: %q", ErrUnknownTable, t)
 		}
+	}
+	// This engine empties the schema with one TRUNCATE. A table that refuses to
+	// be truncated would fail that statement with a database error the operator
+	// cannot act on, so the refusal happens here, by name, before anything is
+	// staged or locked.
+	if err := ensureRewritable(ctx, conn, known); err != nil {
+		return err
 	}
 
 	// The payload arrives in the dump's order, but a reload has to write
@@ -172,8 +196,17 @@ func (e *copyEngine) Restore(ctx context.Context, r io.Reader, m Manifest) error
 		if err != nil {
 			return err
 		}
-		if !knownSet[table] {
+		switch frameDisposition(table, knownSet) {
+		case frameRefuse:
 			return fmt.Errorf("%w: %q", ErrUnknownTable, table)
+		case frameDrop:
+			// The archive was written while this table was still part of the
+			// checkpoint. Its block is consumed and dropped, so yesterday's
+			// archive stays loadable after the table was taken out.
+			if _, err := io.Copy(io.Discard, io.LimitReader(br, size)); err != nil {
+				return err
+			}
+			continue
 		}
 		// Staged as a plain temporary file: this one has to survive until the
 		// table's turn comes, unlike the staging a dump uses.
@@ -407,6 +440,33 @@ func readFrame(r *bufio.Reader) (table string, cols []string, size int64, err er
 	return table, cols, int64(payloadLen), nil
 }
 
+// frameAction is what a restore does with one block of a native payload.
+type frameAction int
+
+const (
+	// frameLoad is a table that is part of the rewrite.
+	frameLoad frameAction = iota
+	// frameDrop is a table this build keeps out of the checkpoint. An archive
+	// written before the exclusion still carries a block for it.
+	frameDrop
+	// frameRefuse is a table this build does not have at all, which means the
+	// archive came from another schema and nothing in it can be trusted.
+	frameRefuse
+)
+
+// frameDisposition decides what happens to one table named by an archive. It is
+// kept apart from the connection so the rule can be tested without a database:
+// getting it wrong either drops rows silently or refuses a loadable archive.
+func frameDisposition(table string, known map[string]bool) frameAction {
+	if excludedTables[table] {
+		return frameDrop
+	}
+	if !known[table] {
+		return frameRefuse
+	}
+	return frameLoad
+}
+
 // ---------------------------------------------------------------------------
 // metadata helpers, shared with the pg_dump engine
 // ---------------------------------------------------------------------------
@@ -534,6 +594,108 @@ func rowCounts(ctx context.Context, conn *pgx.Conn, tables []string) (map[string
 		counts[table] = n
 	}
 	return counts, nil
+}
+
+// refusesTruncate reports whether a pg_trigger.tgtype describes a BEFORE
+// TRUNCATE trigger. PostgreSQL packs the timing and the events into one bit
+// mask: BEFORE is bit 1, TRUNCATE is bit 5. Only that pair matters here —
+// TRUNCATE fires no row trigger, so a BEFORE DELETE or BEFORE UPDATE guard does
+// not stop the rewrite and must not become a refusal.
+func refusesTruncate(tgtype int16) bool {
+	const before, truncate = 1 << 1, 1 << 5
+	return tgtype&before != 0 && tgtype&truncate != 0
+}
+
+// ensureRewritable refuses the checkpoint when a table it would empty is
+// guarded against being emptied, naming the tables so the operator knows what
+// stopped them. The check is discovered rather than hard coded: a migration
+// that adds such a trigger shows up here without a change to this file.
+func ensureRewritable(ctx context.Context, conn *pgx.Conn, tables []string) error {
+	guarded, err := guardedTables(ctx, conn, tables)
+	if err != nil {
+		return err
+	}
+	if len(guarded) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrTableGuarded, strings.Join(guarded, ", "))
+}
+
+// guardedTables lists the given tables that carry a BEFORE TRUNCATE trigger.
+func guardedTables(ctx context.Context, conn *pgx.Conn, tables []string) ([]string, error) {
+	if len(tables) == 0 {
+		return nil, nil
+	}
+	wanted := make(map[string]bool, len(tables))
+	for _, t := range tables {
+		wanted[t] = true
+	}
+	rows, err := conn.Query(ctx, `
+		SELECT c.relname, t.tgtype
+		FROM pg_trigger t
+		JOIN pg_class c ON c.oid = t.tgrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE NOT t.tgisinternal AND n.nspname = current_schema()`)
+	if err != nil {
+		return nil, fmt.Errorf("backup: list triggers: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		var tgtype int16
+		if err := rows.Scan(&name, &tgtype); err != nil {
+			return nil, fmt.Errorf("backup: read trigger: %w", err)
+		}
+		if wanted[name] && refusesTruncate(tgtype) {
+			out = append(out, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: read trigger: %w", err)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// archiveSequences lists every sequence in the schema except the ones owned by
+// an excluded table. A pg_dump built from a positive list of tables does not
+// pick a SERIAL's sequence up on its own, so they are named too; the ones
+// belonging to a table kept out of the checkpoint stay out with it.
+func archiveSequences(ctx context.Context, conn *pgx.Conn) ([]string, error) {
+	names := make([]string, 0, len(excludedTables))
+	for name := range excludedTables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	rows, err := conn.Query(ctx, `
+		SELECT DISTINCT s.relname
+		FROM pg_class s
+		JOIN pg_namespace n ON n.oid = s.relnamespace
+		LEFT JOIN pg_depend d ON d.objid = s.oid AND d.deptype IN ('a', 'i')
+		LEFT JOIN pg_class t ON t.oid = d.refobjid
+		WHERE s.relkind = 'S' AND n.nspname = current_schema()
+		  AND (t.relname IS NULL OR t.relname <> ALL($1))
+		ORDER BY s.relname`, names)
+	if err != nil {
+		return nil, fmt.Errorf("backup: list sequences: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("backup: read sequence name: %w", err)
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: list sequences: %w", err)
+	}
+	return out, nil
 }
 
 // truncateAll empties the application tables so the archive can be written back

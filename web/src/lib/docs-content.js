@@ -171,7 +171,13 @@ export const a2aShapes = [
   },
 ]
 
-/** Endpoint groups, in the order the route table registers them. */
+/**
+ * Endpoint groups, in the order the route table registers them.
+ *
+ * `noteKey` is optional and carries the one thing a route table cannot show:
+ * what a call does *not* touch. Only the backups group needs it — the archive's
+ * scope is the point of the feature and invisible from a path.
+ */
 export const endpointGroups = [
   { id: 'protocol', groupKey: 'groupProtocol' },
   { id: 'auth', groupKey: 'groupAuth' },
@@ -182,7 +188,7 @@ export const endpointGroups = [
   { id: 'export', groupKey: 'groupExport' },
   { id: 'users', groupKey: 'groupUsers' },
   { id: 'roles', groupKey: 'groupRoles' },
-  { id: 'backups', groupKey: 'groupBackups' },
+  { id: 'backups', groupKey: 'groupBackups', noteKey: 'groupBackupsNote' },
   { id: 'apikeys', groupKey: 'groupApiKeys' },
   { id: 'ops', groupKey: 'groupOps' },
   { id: 'collaboration', groupKey: 'groupCollaboration' },
@@ -1532,7 +1538,7 @@ export const errorGroups = [
   { status: '403', reason: 'Forbidden', codes: 'forbidden, user_disabled, builtin_role, skill_distill_disabled, channel_disabled, connector_policy_off, sandbox_disabled, sandbox_policy_denied' },
   { status: '404', reason: 'Not Found', codes: 'not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found' },
   { status: '405', reason: 'Method Not Allowed', codes: 'method_not_allowed' },
-  { status: '409', reason: 'Conflict', codes: 'email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost' },
+  { status: '409', reason: 'Conflict', codes: 'email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, backup_table_guarded, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost' },
   { status: '413', reason: 'Payload Too Large', codes: 'payload_too_large, audio_too_large' },
   { status: '415', reason: 'Unsupported Media Type', codes: 'audio_unsupported' },
   { status: '422', reason: 'Unprocessable Entity', codes: 'audio_transcribe_failed' },

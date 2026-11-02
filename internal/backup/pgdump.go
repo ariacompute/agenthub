@@ -67,6 +67,22 @@ func (e *pgDumpEngine) Dump(ctx context.Context, w io.Writer) (DumpResult, error
 		return DumpResult{}, err
 	}
 	archive := filepath.Join(dir, "dump.pgc")
+
+	conn, err := connect(ctx, e.dsn)
+	if err != nil {
+		return DumpResult{}, err
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	tables, err := discoverTables(ctx, conn)
+	if err != nil {
+		return DumpResult{}, err
+	}
+	seqs, err := archiveSequences(ctx, conn)
+	if err != nil {
+		return DumpResult{}, err
+	}
+
 	args := []string{
 		"--format=custom",
 		"--no-owner",
@@ -75,10 +91,17 @@ func (e *pgDumpEngine) Dump(ctx context.Context, w io.Writer) (DumpResult, error
 		// than block a scheduler forever.
 		"--no-password",
 		"--file", archive,
-		"--schema", schema,
 	}
-	for table := range excludedTables {
-		args = append(args, "--exclude-table", table)
+	// The checkpoint is built from a positive list, not by exclusion. Excluding
+	// a table by name still leaves what it owns in the archive — its sequence,
+	// the function its trigger calls — and pg_restore --clean then tries to drop
+	// those out from under the table that still uses them. Naming what belongs
+	// in the checkpoint is the only way "excluded" can mean excluded.
+	for _, table := range tables {
+		args = append(args, "--table", qualified(schema, table))
+	}
+	for _, seq := range seqs {
+		args = append(args, "--table", qualified(schema, seq))
 	}
 	args = append(args, connArgs(cfg)...)
 
@@ -100,16 +123,6 @@ func (e *pgDumpEngine) Dump(ctx context.Context, w io.Writer) (DumpResult, error
 
 	// pg_dump reports nothing about what it wrote, so the manifest is filled in
 	// from the database itself.
-	conn, err := connect(ctx, e.dsn)
-	if err != nil {
-		return DumpResult{}, err
-	}
-	defer func() { _ = conn.Close(ctx) }()
-
-	tables, err := discoverTables(ctx, conn)
-	if err != nil {
-		return DumpResult{}, err
-	}
 	counts, err := rowCounts(ctx, conn, tables)
 	if err != nil {
 		return DumpResult{}, err
@@ -120,6 +133,11 @@ func (e *pgDumpEngine) Dump(ctx context.Context, w io.Writer) (DumpResult, error
 	}
 	return DumpResult{Tables: tables, RowCounts: counts, Schema: schemaFiles}, nil
 }
+
+// qualified names a relation the way --table expects it: schema dot relation.
+// Every name here comes from the catalogue of a schema agenthub created, so it
+// is a plain lower-case identifier and needs no pattern escaping.
+func qualified(schema, name string) string { return schema + "." + name }
 
 // Restore rewrites the database from a custom format archive.
 //

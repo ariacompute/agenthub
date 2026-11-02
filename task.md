@@ -882,3 +882,46 @@ CRD 另补主服务有而 operator 缺的旋钮：`spec.rls{ mode, acknowledged 
   不是端口、auth 的用户仓储在测试 helper 内部构造无法替换、`httputil.Stream` 的「writer 不支持
   Flush」分支需要非 `httptest` 的 ResponseWriter。补它们要么改生产代码加端口，要么写绕过入口的
   假用例，两者都比留白更糟。
+
+## M14 — 检查点不得回滚只追加账本（bug fix，2026-11-02）
+
+**现象**：门控套件全绿，但一旦打开 `AGENTHUB_TEST_BACKUP_RESTORE=true`，
+`TestIntegrationBackupRestoreRewindsTheDatabase` 必挂：
+
+```
+backup: the dump engine failed: truncate: ERROR: audit_log is append-only: TRUNCATE is not allowed
+```
+
+**根因**：`internal/backup` 的 `excludedTables` 只排除检查点清单两张表，`audit_log` 仍在范围里；
+`copyEngine.Restore` 用一条 `TRUNCATE TABLE … CASCADE` 清空全部表，而 `025_audit_log.sql` 的
+`BEFORE TRUNCATE` 触发器对任何角色（含 owner / superuser）一律 `RAISE`。更深一层：`pg_dump`
+引擎的 `--clean` 靠 `DROP` 绕过触发器，等于**默认引擎也在回滚审计历史**——恢复后
+`audit.Recorder` 的 `prev` 仍指向已不存在的行，`/api/audit/verify` 会一直报断链。
+
+**方案**（A + 类级防线）：账本不进检查点，也不被恢复改写。
+
+- `excludedTables` 增 `audit_log`：dump 不收、`truncateAll` 不清、manifest 不列、`fixSequences` 跳过。
+- `copyEngine.Restore` 对旧归档里残留的 `audit_log` 帧**丢弃而非报错**（`frameDisposition`
+  返回 `frameDrop`），昨天写的归档今天仍可读。
+- **类级预检**（`ensureRewritable` / `guardedTables` / `refusesTruncate`）：被 dump 的表若带
+  `BEFORE TRUNCATE` 触发器，dump 与 restore 都按表名以新码 `backup_table_guarded`（409）拒绝，
+  并提示改用 `pg_dump` 引擎。只认 `BEFORE TRUNCATE`——`TRUNCATE` 不触发行触发器，把
+  `BEFORE DELETE`/`BEFORE UPDATE` 也算进来会误拒本可恢复的表。
+- `pgDumpEngine.Dump` 改为**白名单**（`--table <schema>.<name>` + `archiveSequences`），不再用
+  `--exclude-table`：按名排除表时，它的序列与触发器函数仍会进归档，`pg_restore --clean` 随后
+  试图删掉它们（实测报 `cannot drop sequence public.audit_log_id_seq` 与
+  `cannot drop function public.audit_log_append_only()`）。
+- 错误码 `backup_table_guarded` 登记三处：`httputil.Code*` + `WriteErr` 状态码 + `codeOf`
+  + handler 映射 + 前端 `CODE_KEYS` / `errors-copy.js` 13 语 / `docs-content.js` 409 组。
+
+**验证**（WSL + `postgres:16-alpine`，scratch 库 `agenthub_ci`）：
+
+- `go test -race ./tests/ ./internal/store/ ./internal/backup/`：三包 ok；恢复三例（含破坏性）
+  连跑两轮均 PASS，`TestIntegrationBackupRestoreRewindsTheDatabase` 从必挂转绿。
+- `TestIntegrationPgDumpEngineRoundTrips` 追加断言：恢复后账本行仍在、`audit_log_no_truncate`
+  仍在、`tasks` 的 RLS 策略与 `events` 的 owner 触发器仍在（白名单 dump 不能丢安全对象）。
+- `TestIntegrationBackupRefusesAGuardedTable`：建一张带 `BEFORE TRUNCATE` 的探针表，Dump 与
+  Restore 都返回 `ErrTableGuarded` 且错误里带表名。
+- 两条破坏性用例加前置清理（`DELETE FROM resources WHERE name LIKE 'it-%'`）：恢复会把检查点
+  捕获的行写回，否则同一库第二次跑会撞 dedup 唯一索引。
+- web：21 文件 / 413 用例全绿。

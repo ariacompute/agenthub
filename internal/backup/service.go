@@ -790,6 +790,8 @@ func codeOf(err error) string {
 		return ""
 	case errors.Is(err, ErrEngineUnavailable):
 		return "backup_engine_unavailable"
+	case errors.Is(err, ErrTableGuarded):
+		return "backup_table_guarded"
 	case errors.Is(err, ErrEngineFailed):
 		return "backup_engine_failed"
 	case errors.Is(err, ErrChecksumMismatch):

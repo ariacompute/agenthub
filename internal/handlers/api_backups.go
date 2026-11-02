@@ -418,6 +418,8 @@ func backupCode(err error, busy httputil.Code) httputil.Code {
 		return httputil.CodeBackupInvalidArchive
 	case errors.Is(err, backup.ErrEngineUnavailable):
 		return httputil.CodeBackupEngineUnavail
+	case errors.Is(err, backup.ErrTableGuarded):
+		return httputil.CodeBackupTableGuarded
 	case errors.Is(err, backup.ErrEngineFailed):
 		return httputil.CodeBackupEngineFailed
 	case errors.Is(err, backup.ErrRestoreFailed):

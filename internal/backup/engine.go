@@ -24,6 +24,12 @@ var (
 	ErrEngineUnavailable = errors.New("backup: no dump engine is available")
 	ErrEngineFailed      = errors.New("backup: the dump engine failed")
 	ErrUnknownTable      = errors.New("backup: archive names a table this database does not have")
+	// ErrTableGuarded reports a table the built-in engine cannot rewrite. It
+	// empties the schema with one TRUNCATE, so a BEFORE TRUNCATE trigger — the
+	// audit ledger has one — refuses the whole restore. The client engine drops
+	// and recreates instead, which is why the answer is "use that engine" and
+	// not "retry".
+	ErrTableGuarded = errors.New("backup: a table refuses to be truncated")
 )
 
 // Manifest describes one checkpoint. It lives inside the archive, so a file

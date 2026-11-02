@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,8 +58,11 @@ func TestIntegrationBackupDumpDescribesTheDatabase(t *testing.T) {
 		}
 	}
 	// The backup catalogue is not application state and must stay out of it:
-	// restoring would otherwise erase the very record the operator needs.
-	for _, table := range []string{"backup_checkpoints", "backup_schedules"} {
+	// restoring would otherwise erase the very record the operator needs. The
+	// audit ledger is the same idea from the other side: 025 refuses TRUNCATE
+	// for every role, so a checkpoint that carried it could never be written
+	// back at all.
+	for _, table := range []string{"backup_checkpoints", "backup_schedules", "audit_log"} {
 		if _, ok := m.RowCounts[table]; ok {
 			t.Fatalf("%s must be excluded from the dump", table)
 		}
@@ -101,6 +105,14 @@ func TestIntegrationBackupRestoreRewindsTheDatabase(t *testing.T) {
 	}
 	dsn := os.Getenv("DATABASE_URL")
 	ctx := context.Background()
+
+	// A restore puts back whatever its checkpoint captured, so a run that failed
+	// halfway leaves rows behind that the next run would collide with on the
+	// dedup index. Clearing the test's own rows first keeps this case re-runnable
+	// against the same database.
+	if err := db.Exec("DELETE FROM resources WHERE name LIKE 'it-%'").Error; err != nil {
+		t.Fatalf("clear leftover test rows: %v", err)
+	}
 
 	// State as it exists now: one row that must survive the round trip, and a
 	// catalogue row that must survive because it is not application state.
@@ -145,6 +157,16 @@ func TestIntegrationBackupRestoreRewindsTheDatabase(t *testing.T) {
 	}
 	if gone != 0 {
 		t.Fatal("the survivor should be gone before the restore")
+	}
+
+	// Evidence that exists when the restore runs must still exist afterwards,
+	// and because the ledger is append-only this row cannot be cleaned up at the
+	// end — which is the point.
+	auditID := "it-restore-audit-" + time.Now().Format("150405.000000")
+	if err := db.Exec(
+		`INSERT INTO audit_log (event_id, source, action) VALUES (?, 'api', 'integration.restore')`, auditID,
+	).Error; err != nil {
+		t.Fatalf("insert audit row: %v", err)
 	}
 
 	// Restore: verify the archive, then hand the payload to the engine.
@@ -200,6 +222,21 @@ func TestIntegrationBackupRestoreRewindsTheDatabase(t *testing.T) {
 	}
 	if kept != 1 {
 		t.Fatal("the backup catalogue must survive a restore")
+	}
+
+	// The ledger is neither carried nor rewound: the archive does not name it,
+	// and the row written a moment ago survives.
+	for _, table := range m.Tables {
+		if table == "audit_log" {
+			t.Fatal("the manifest must not carry the append-only audit ledger")
+		}
+	}
+	var auditKept int64
+	if err := db.Raw("SELECT count(*) FROM audit_log WHERE event_id = ?", auditID).Scan(&auditKept).Error; err != nil {
+		t.Fatalf("count audit row: %v", err)
+	}
+	if auditKept != 1 {
+		t.Fatal("the restore must leave the audit ledger alone")
 	}
 
 	// The archive on disk is untouched by the restore, so it can be replayed.
@@ -376,6 +413,62 @@ func TestIntegrationBackupCatalogueSurvivesTheDatabase(t *testing.T) {
 	}
 	if _, err := svc.Get(ctx, c.ID); !errors.Is(err, backup.ErrNotFound) {
 		t.Fatalf("get after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestIntegrationBackupRefusesAGuardedTable is the class-level guard. The
+// built-in engine empties the schema with one TRUNCATE, so any table carrying a
+// BEFORE TRUNCATE trigger stops it; the audit ledger's trigger is the first
+// instance, and the point of this case is that the next one cannot arrive
+// silently. It runs without the destructive opt-in, because the refusal happens
+// before a row is touched.
+func TestIntegrationBackupRefusesAGuardedTable(t *testing.T) {
+	db := openDBReal(t)
+	dsn := os.Getenv("DATABASE_URL")
+	ctx := context.Background()
+
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS it_guarded_probe (id INT PRIMARY KEY)`).Error; err != nil {
+		t.Fatalf("create probe table: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec(`DROP TABLE IF EXISTS it_guarded_probe CASCADE`).Error
+		_ = db.Exec(`DROP FUNCTION IF EXISTS it_guarded_probe_no_truncate()`).Error
+	})
+	if err := db.Exec(`
+		CREATE OR REPLACE FUNCTION it_guarded_probe_no_truncate() RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'it_guarded_probe is guarded';
+		END $$ LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatalf("create guard function: %v", err)
+	}
+	if err := db.Exec(`DROP TRIGGER IF EXISTS it_guarded_probe_truncate ON it_guarded_probe`).Error; err != nil {
+		t.Fatalf("drop stale trigger: %v", err)
+	}
+	if err := db.Exec(`
+		CREATE TRIGGER it_guarded_probe_truncate BEFORE TRUNCATE ON it_guarded_probe
+		FOR EACH STATEMENT EXECUTE FUNCTION it_guarded_probe_no_truncate()`).Error; err != nil {
+		t.Fatalf("create guard trigger: %v", err)
+	}
+
+	engine, err := backup.SelectEngine(dsn, backup.EngineNative)
+	if err != nil {
+		t.Fatalf("select engine: %v", err)
+	}
+	// The dump refuses first: a checkpoint this engine could not load back is
+	// worse than no checkpoint, because the failure would surface on the day the
+	// archive is needed.
+	if _, err := engine.Dump(ctx, io.Discard); !errors.Is(err, backup.ErrTableGuarded) {
+		t.Fatalf("Dump = %v, want ErrTableGuarded", err)
+	}
+	// And a restore refuses by name, before it stages or locks anything.
+	err = engine.Restore(ctx, strings.NewReader("agenthub-checkpoint-1\n"), backup.Manifest{
+		Engine: backup.EngineNative,
+	})
+	if !errors.Is(err, backup.ErrTableGuarded) {
+		t.Fatalf("Restore = %v, want ErrTableGuarded", err)
+	}
+	if !strings.Contains(err.Error(), "it_guarded_probe") {
+		t.Fatalf("error = %v, want it to name the guarded table", err)
 	}
 }
 

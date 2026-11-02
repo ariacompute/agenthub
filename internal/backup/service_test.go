@@ -278,6 +278,22 @@ func TestServiceCheckpointFailureLeavesNoArchive(t *testing.T) {
 	}
 }
 
+// A guarded table is a property of the schema, not a transient fault. The row
+// has to say which guardrail stopped it: "engine failed" sends the operator
+// hunting for a bug instead of at a trigger.
+func TestServiceCheckpointRecordsAGuardedTable(t *testing.T) {
+	engine := &fakeEngine{name: "fake", fail: ErrTableGuarded}
+	s := newTestService(t, engine, &memStore{})
+
+	c, err := s.Checkpoint(context.Background(), KindManual, "", "tester")
+	if !errors.Is(err, ErrTableGuarded) {
+		t.Fatalf("checkpoint = %v, want ErrTableGuarded", err)
+	}
+	if c == nil || c.Status != StatusFailed || c.ErrorCode != "backup_table_guarded" {
+		t.Fatalf("row = %+v, want a failed row coded backup_table_guarded", c)
+	}
+}
+
 func TestServiceRestoreInsistsOnConfirmation(t *testing.T) {
 	engine := &fakeEngine{name: "fake", body: "resources\n"}
 	store := &memStore{}
