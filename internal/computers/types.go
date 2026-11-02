@@ -52,12 +52,17 @@ type Computer struct {
 }
 
 // Store persists computers. Implemented in internal/store.
+//
+// Ownership is part of the key (see channels.Store). The delete path already
+// compared owner ids in the handler while the get path did not, which is the
+// asymmetry that exposed every card to every signed in user.
 type Store interface {
 	List(ctx context.Context, ownerID string) ([]*Computer, error)
-	Get(ctx context.Context, id string) (*Computer, error)
+	Get(ctx context.Context, id, ownerID string) (*Computer, error)
 	Create(ctx context.Context, c *Computer) (*Computer, error)
 	// Update writes back the fields a lease changes (status, last action, expiry).
-	Update(ctx context.Context, c *Computer) (*Computer, error)
+	// ownerID scopes the row it is allowed to touch.
+	Update(ctx context.Context, c *Computer, ownerID string) (*Computer, error)
 	// Delete removes the row; the caller terminates the lease first.
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id, ownerID string) error
 }

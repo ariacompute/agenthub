@@ -529,6 +529,9 @@ func TestAFailedExecIsLoggedWithoutItsCommandLine(t *testing.T) {
 		execFailer{providerFunc: providerFunc{name: "lost", desc: Descriptor{Layer: LayerProcess}}, err: Error(CodeTimeout)},
 	), NewMemoryStore(), func(o *ManagerOptions) {
 		o.Log = slog.New(slog.NewTextHandler(&logged, nil))
+		// The arguments have to reach the provider for it to fail: Exec checks
+		// every one of them against the profile first.
+		o.Defaults.ArgsPolicy = ArgsPassthrough
 	})
 	ctx := context.Background()
 	lease, err := manager.Acquire(ctx, LeaseRequest{OwnerID: "u1", ResourceID: "a", Provider: "lost"})
@@ -544,5 +547,44 @@ func TestAFailedExecIsLoggedWithoutItsCommandLine(t *testing.T) {
 	}
 	if strings.Contains(line, "top-secret-command") || strings.Contains(line, "abc") {
 		t.Fatalf("the log line must never carry the command line: %q", line)
+	}
+}
+
+// Arguments are checked one at a time, inside Exec, against the profile the
+// lease was created with.
+//
+// The adapter path already asked ArgsAllowed before it built a lease, but Exec
+// is the funnel every caller shares — POST /api/sandboxes/{id}/exec included —
+// and it used to hand caller supplied argv straight to the provider. "The
+// command is on the allowlist, the arguments are not" is how an allowed binary is
+// talked into running something else.
+func TestExecRefusesArgumentsThePolicyForbids(t *testing.T) {
+	manager, _ := newManager(t, testRegistry(t, NewMockProvider()), NewMemoryStore(), func(o *ManagerOptions) {
+		o.Defaults.ArgsPolicy = ArgsNone
+	})
+	ctx := context.Background()
+	lease, err := manager.Acquire(ctx, LeaseRequest{OwnerID: "u1", ResourceID: "a", Provider: ProviderMock})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// A bare command is what "no arguments from the caller" leaves room for.
+	if _, err := manager.Exec(ctx, lease.ID, ExecRequest{Command: "ls"}); err != nil {
+		t.Fatalf("a bare command must still run: %v", err)
+	}
+
+	// An argument that would rewrite the command is refused before any provider
+	// sees it, and the refusal is not recorded as an execution receipt.
+	if _, err := manager.Exec(ctx, lease.ID, ExecRequest{Command: "ls", Args: []string{"-c", "rm -rf /"}}); err == nil {
+		t.Fatal("an argument must not slip past a none policy")
+	} else if code := codeOf(t, err); code != CodePolicyDenied {
+		t.Fatalf("code = %q, want %q", code, CodePolicyDenied)
+	}
+	execs, err := manager.Execs(ctx, lease.ID, 50)
+	if err != nil {
+		t.Fatalf("read receipts: %v", err)
+	}
+	if len(execs) != 1 {
+		t.Fatalf("receipts = %d, want only the bare run: a refused command never ran", len(execs))
 	}
 }

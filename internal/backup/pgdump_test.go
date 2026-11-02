@@ -6,8 +6,11 @@ package backup
 // how that child's output is made safe to log.
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -106,5 +109,54 @@ func TestNewPgDumpEngineIsHonestAboutAMissingClient(t *testing.T) {
 func TestPgDumpEngineNameIsTheOneTheManifestStores(t *testing.T) {
 	if (&pgDumpEngine{}).Name() != EnginePgDump {
 		t.Fatal("Name must be the identifier the restore side looks for")
+	}
+}
+
+// The engine is constructed with a binary path rather than looked up here: the
+// point of these cases is what happens once the tools exist and the database does
+// not answer, which is the state of a freshly deployed instance at 3am.
+func engineFor(dsn string) *pgDumpEngine {
+	return &pgDumpEngine{dsn: dsn, dumpBin: "pg_dump", restoreBin: "pg_restore"}
+}
+
+func TestPgDumpEngineReportsAnUnparseableDSN(t *testing.T) {
+	// A DSN the driver cannot parse must be ErrEngineUnavailable — the caller's
+	// signal for "this engine cannot serve you" — and it must be reported before
+	// anything is staged on disk.
+	for _, dsn := range []string{":// not a dsn", "postgres://user@:not-a-port/db"} {
+		engine := engineFor(dsn)
+		if _, err := engine.Dump(context.Background(), io.Discard); !errors.Is(err, ErrEngineUnavailable) {
+			t.Errorf("Dump(%q) = %v, want ErrEngineUnavailable", dsn, err)
+		}
+		if err := engine.Restore(context.Background(), strings.NewReader("x"), Manifest{}); !errors.Is(err, ErrEngineUnavailable) {
+			t.Errorf("Restore(%q) = %v, want ErrEngineUnavailable", dsn, err)
+		}
+	}
+}
+
+func TestPgDumpEngineStopsWhenTheDatabaseDoesNotAnswer(t *testing.T) {
+	// Port 1 on the loopback: the connection is refused immediately, so the case
+	// costs no wall clock and depends on no service being installed.
+	engine := engineFor("postgres://agenthub:secret@127.0.0.1:1/agenthub")
+	if _, err := engine.Dump(context.Background(), io.Discard); err == nil {
+		t.Fatal("a dump of an unreachable database must fail")
+	}
+	if err := engine.Restore(context.Background(), strings.NewReader("x"), Manifest{}); err == nil {
+		t.Fatal("a restore into an unreachable database must fail")
+	}
+}
+
+func TestPgDumpEngineStopsWhenItCannotStageItsArchive(t *testing.T) {
+	// Both halves stage a file in the temporary directory because neither client
+	// can stream. A read-only or missing TMP has to surface as an error rather
+	// than as an empty dump that the manifest would then describe.
+	t.Setenv("TMP", filepath.Join(t.TempDir(), "no-such-dir"))
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "no-such-dir"))
+	engine := engineFor("postgres://agenthub:secret@127.0.0.1:1/agenthub")
+	if _, err := engine.Dump(context.Background(), io.Discard); err == nil {
+		t.Fatal("a dump that cannot stage its archive must fail")
+	}
+	if err := engine.Restore(context.Background(), strings.NewReader("x"), Manifest{}); err == nil {
+		t.Fatal("a restore that cannot stage its payload must fail")
 	}
 }

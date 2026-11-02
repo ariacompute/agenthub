@@ -34,11 +34,11 @@ func (m *memComputers) List(_ context.Context, ownerID string) ([]*computers.Com
 	return out, nil
 }
 
-func (m *memComputers) Get(_ context.Context, id string) (*computers.Computer, error) {
+func (m *memComputers) Get(_ context.Context, id, ownerID string) (*computers.Computer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, c := range m.items {
-		if c.ID == id {
+		if c.ID == id && c.OwnerID == ownerID {
 			return c, nil
 		}
 	}
@@ -55,11 +55,11 @@ func (m *memComputers) Create(_ context.Context, c *computers.Computer) (*comput
 	return c, nil
 }
 
-func (m *memComputers) Update(_ context.Context, c *computers.Computer) (*computers.Computer, error) {
+func (m *memComputers) Update(_ context.Context, c *computers.Computer, ownerID string) (*computers.Computer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, existing := range m.items {
-		if existing.ID == c.ID {
+		if existing.ID == c.ID && existing.OwnerID == ownerID {
 			m.items[i] = c
 			return c, nil
 		}
@@ -67,12 +67,12 @@ func (m *memComputers) Update(_ context.Context, c *computers.Computer) (*comput
 	return nil, nil
 }
 
-func (m *memComputers) Delete(_ context.Context, id string) error {
+func (m *memComputers) Delete(_ context.Context, id, ownerID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	kept := m.items[:0]
 	for _, existing := range m.items {
-		if existing.ID != id {
+		if existing.ID != id || existing.OwnerID != ownerID {
 			kept = append(kept, existing)
 		}
 	}
@@ -98,11 +98,11 @@ func (m *memSchedules) List(_ context.Context, ownerID string) ([]*schedules.Sch
 	return out, nil
 }
 
-func (m *memSchedules) Get(_ context.Context, id string) (*schedules.Schedule, error) {
+func (m *memSchedules) Get(_ context.Context, id, ownerID string) (*schedules.Schedule, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, s := range m.items {
-		if s.ID == id {
+		if s.ID == id && s.OwnerID == ownerID {
 			return s, nil
 		}
 	}
@@ -119,11 +119,11 @@ func (m *memSchedules) Create(_ context.Context, s *schedules.Schedule) (*schedu
 	return s, nil
 }
 
-func (m *memSchedules) Update(_ context.Context, s *schedules.Schedule) (*schedules.Schedule, error) {
+func (m *memSchedules) Update(_ context.Context, s *schedules.Schedule, ownerID string) (*schedules.Schedule, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, x := range m.items {
-		if x.ID == s.ID {
+		if x.ID == s.ID && x.OwnerID == ownerID {
 			m.items[i] = s
 			return s, nil
 		}
@@ -131,11 +131,11 @@ func (m *memSchedules) Update(_ context.Context, s *schedules.Schedule) (*schedu
 	return s, nil
 }
 
-func (m *memSchedules) Delete(_ context.Context, id string) error {
+func (m *memSchedules) Delete(_ context.Context, id, ownerID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, x := range m.items {
-		if x.ID == id {
+		if x.ID == id && x.OwnerID == ownerID {
 			m.items = append(m.items[:i], m.items[i+1:]...)
 			return nil
 		}

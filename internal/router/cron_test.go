@@ -22,9 +22,9 @@ func (f *fakeSchedules) List(ctx context.Context, ownerID string) ([]*schedules.
 	return out, nil
 }
 
-func (f *fakeSchedules) Get(ctx context.Context, id string) (*schedules.Schedule, error) {
+func (f *fakeSchedules) Get(ctx context.Context, id, ownerID string) (*schedules.Schedule, error) {
 	for _, r := range f.rows {
-		if r.ID == id {
+		if r.ID == id && r.OwnerID == ownerID {
 			cp := *r
 			return &cp, nil
 		}
@@ -37,9 +37,9 @@ func (f *fakeSchedules) Create(ctx context.Context, s *schedules.Schedule) (*sch
 	return s, nil
 }
 
-func (f *fakeSchedules) Update(ctx context.Context, s *schedules.Schedule) (*schedules.Schedule, error) {
+func (f *fakeSchedules) Update(ctx context.Context, s *schedules.Schedule, ownerID string) (*schedules.Schedule, error) {
 	for i, r := range f.rows {
-		if r.ID == s.ID {
+		if r.ID == s.ID && r.OwnerID == ownerID {
 			cp := *s
 			f.rows[i] = &cp
 			return &cp, nil
@@ -48,7 +48,7 @@ func (f *fakeSchedules) Update(ctx context.Context, s *schedules.Schedule) (*sch
 	return nil, nil
 }
 
-func (f *fakeSchedules) Delete(ctx context.Context, id string) error { return nil }
+func (f *fakeSchedules) Delete(ctx context.Context, id, ownerID string) error { return nil }
 
 func TestCronSourceFiresADueScheduleOnce(t *testing.T) {
 	e, _, c := newTestEngine(t)

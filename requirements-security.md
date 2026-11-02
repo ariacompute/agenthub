@@ -46,7 +46,9 @@
 - `DATABASE_URL` 不再强制 `sslmode`：是否对数据库连接启用 TLS 由部署方自行决定（如需传输加密，可在 DSN 中设置 `sslmode=require|verify-ca|verify-full`）。
 - 连接池可配置：`AGENTHUB_DB_MAX_OPEN_CONNS`（默认 25）/`AGENTHUB_DB_MAX_IDLE_CONNS`（10）/`AGENTHUB_DB_CONN_MAX_LIFETIME`（30m），见 `store/db.go`。
 - **角色分离（本轮变更）**：运行期 `DATABASE_URL` 使用 `app` 角色——只有 DML、**不是表属主、无 `BYPASSRLS`**；DDL 由 `migrator` 角色在启动期通过 `AGENTHUB_MIGRATE_DATABASE_URL` 执行；另有 `readonly` 供运维与恢复校验。`scripts/provision-db-roles.sql` 幂等生成三角色并在末尾断言策略齐备。旧的「迁移与运行同一连接」只在未配置 DDL 连接时作为回退，且启动日志告警。
-- **行级安全（本轮新增）**：`tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` / `events` / `knowledge` / `audit_log` 全部 `ENABLE` + `FORCE ROW LEVEL SECURITY`，策略按事务内设置 `app.owner_id` / `app.bypass` / `app.system` 判定，未注入身份即拒绝（fail-closed）。`AGENTHUB_RLS=off` 仅供本地/测试，`env=prod` 下需 `AGENTHUB_RLS_ACK=1` 才放行。完整的身份模型、覆盖范围与降级语义见 `requirements-isolation.md` §2。
+- **行级安全（本轮新增）**：`tasks` / `task_artifacts` / `task_spans` / `task_pending` / `task_push` / `events` / `knowledge` / `audit_log`（`026`）+ `channels` / `schedules` / `computers`（`028`）全部 `ENABLE` + `FORCE ROW LEVEL SECURITY`，策略按事务内设置 `app.owner_id` / `app.bypass` / `app.system` 判定，未注入身份即拒绝（fail-closed）。`AGENTHUB_RLS=off` 仅供本地/测试，`env=prod` 下需 `AGENTHUB_RLS_ACK=1` 才放行。完整的身份模型、覆盖范围（11 表）与降级语义见 `requirements-isolation.md` §2。
+- **应用层与数据库层同规则**：按 id 取行一律带 owner（越权 404）；唯一无归属读是 `channels.GetUnscoped`（webhook，带进程身份）。后台节拍必须带 `app.system`，否则 FORCE RLS 下静默读到 0 行。
+- **两层 RBAC 正交**：K8s RBAC（operator 的 `+kubebuilder:rbac` / chart `Role`）与应用层 RBAC（`authz` 的 14 个权限码 + 组/角色/授予）互不替代。CRD 不建模应用层 RBAC，应用层权限只能在控制台配置；operator 侧的评估结论与已修缺口（PVC / core events 授权缺失）见 `operator/README.md`「RBAC: what the operator grants, and what it does not」。
 - **全 API 审计（本轮新增）**：`audit_log` 只追加（触发器 + 角色双重约束）并逐行哈希链接，读需 `audit:read`。字段、脱敏与保留期见 `requirements-isolation.md` §4。
 - 备份静态加密：`internal/backup/crypto.go`（AES-256-GCM，nonce‖密文）+ `service.go` 在落盘时加密为 `*.tar.gz.enc` 并写 `<file>.sha256` 清单；恢复时透明解密。`scripts/backup-restore-drill.sh` 定期演练。
 

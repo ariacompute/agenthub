@@ -225,6 +225,18 @@ func (m *Manager) Exec(ctx context.Context, leaseID string, req ExecRequest) (Ex
 	if req.MaxOutputBytes <= 0 {
 		req.MaxOutputBytes = lease.Profile.OutputCap()
 	}
+	// The arguments are checked one by one, here, against the profile the lease
+	// was created with. The CLI connector already asks ArgsAllowed before it
+	// builds a lease, but Exec is the single funnel every caller goes through —
+	// including POST /api/sandboxes/{id}/exec, which used to hand caller supplied
+	// arguments straight to the provider. "The command is on the allowlist, the
+	// arguments are not" is how an allowed binary gets talked into running
+	// something else.
+	for _, arg := range req.Args {
+		if err := Argument(lease.Profile, arg); err != nil {
+			return ExecResult{}, err
+		}
+	}
 
 	res, execErr := provider.Exec(ctx, handle, req)
 	now := m.opts.Clock()

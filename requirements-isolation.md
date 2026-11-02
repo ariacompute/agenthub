@@ -77,6 +77,24 @@ OR (owner_id <> '' AND owner_id = current_setting('app.owner_id', true))
 覆盖表：`tasks`、`task_artifacts`、`task_spans`、`task_pending`、`task_push`、`events`、
 `knowledge`、`audit_log`，全部 `ENABLE` + `FORCE ROW LEVEL SECURITY`（`FORCE` 让表属主也受约束）。
 
+**第二批（028 `028_rls_policies_owned_surfaces.sql`）**：`schedules`、`channels`、`computers`
+三张已有 `owner_id TEXT NOT NULL DEFAULT ''` 的表同样 `ENABLE` + `FORCE`，策略名
+`schedules_owner_access` / `channels_owner_access` / `computers_owner_access`，
+`USING` 与 `WITH CHECK` 都走 `agenthub_row_visible(owner_id)`——于是跨 owner 的
+`INSERT`/`UPDATE` 也会被数据库拒绝，而不只是查不到。共 **11 张表**。
+
+两条配套要求（缺一即静默回归）：
+
+- **后台节拍必须带系统身份**：`router` 的 cron/扫描 ctx 由 `identity.System()` 派生。否则
+  在 `FORCE RLS` 下后台读到 0 行，表现是「定时任务再也不触发」而不是报错。
+- **公开回调必须显式走无归属读**：渠道 webhook 在验签之前就要按 id 取通道，此时还没有任何
+  用户身份。这里用 `channels.GetUnscoped` + `identity.System()`，语义上写明「这条读不属于
+  任何用户」；其余所有路径一律 `Get(ctx, id, ownerID)`。`GetUnscoped` 是显式命名的范式，
+  不允许用「空 owner 即通配」代替。
+
+未覆盖：`channel_messages`（投递明细没有 `owner_id`）与 `threads`（webhook 循环依赖），
+这两处仍只有应用层 owner 校验，属已知残余。
+
 `audit_log` 单独三条策略：`SELECT` 需 `app.system` / `app.bypass` / `app.audit_read`；
 `INSERT` 只允许 `app.system` / `app.bypass`；`DELETE` 只允许 `app.retention`。
 
@@ -88,8 +106,9 @@ OR (owner_id <> '' AND owner_id = current_setting('app.owner_id', true))
 | `agenthub_app` | DML（`audit_log` 仅 `INSERT, SELECT`）、`NOBYPASSRLS`、**非表属主** | `DATABASE_URL` |
 | `agenthub_readonly` | `SELECT`、`NOBYPASSRLS` | 运维 / 分析 / 恢复校验 |
 
-`scripts/provision-db-roles.sql` 幂等，末尾有一条断言：八张表的 `relrowsecurity` 与
+`scripts/provision-db-roles.sql` 幂等，末尾有一条断言：受保护表的 `relrowsecurity` 与
 `relforcerowsecurity` 必须都为真，否则 `RAISE EXCEPTION` —— 不允许「配了一半」的实例上线。
+该断言与 `tests/rls_test.go` 的表清单同步为 **11 张**（加 `schedules` / `channels` / `computers`）。
 
 ### 2.5 降级开关
 

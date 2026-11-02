@@ -158,3 +158,127 @@ func TestReconcileProdMissingEncryptionKey(t *testing.T) {
 		t.Fatalf("expected Available reason WeakEncryptionKey, got %q", reason)
 	}
 }
+
+func int32p(v int32) *int32 { return &v }
+func boolp(v bool) *bool    { return &v }
+
+// Every knob added to the CR has to reach the process under the exact name the
+// server reads. A typo here is invisible in production: the Pod starts with the
+// default and the setting silently does nothing, which is worse than a refusal.
+func TestBuildConfigRendersTheGovernanceKnobs(t *testing.T) {
+	cr := baseCR()
+	cr.Spec.RLS = RLSModeOff
+	cr.Spec.RLSAck = boolp(true)
+	cr.Spec.AgentTimeout = "90s"
+	cr.Spec.A2ALegacyMethods = boolp(true)
+	cr.Spec.AdminToken = agenthubv1alpha1.SecretOrValue{Value: "inline-token"}
+	cr.Spec.MigrateDatabaseURL = &agenthubv1alpha1.DatabaseSpec{
+		ExistingSecret: "agenthub-migrate", SecretKey: "MIGRATE_URL",
+	}
+	cr.Spec.Audit = &agenthubv1alpha1.AuditSpec{
+		Enabled: boolp(true), Retention: "720h", Queue: int32p(1024), Batch: int32p(64),
+	}
+	cr.Spec.Sandbox = &agenthubv1alpha1.SandboxSpec{
+		Enabled: boolp(true), Provider: "docker", DefaultImage: "alpine:3",
+		IdleTTL: "10m", MaxTTL: "1h", SweepInterval: "30s",
+		MaxPerOwner: int32p(2), MaxTotal: int32p(8),
+		EgressAllowlist: []string{"a.example.test", "b.example.test"},
+	}
+	cr.Spec.Router = &agenthubv1alpha1.RouterSpec{
+		Enabled: boolp(true), Interval: "15s", MaxTickets: int32p(4),
+		AssessMode: "llm", AssessResource: "model-1", Resource: "agent-1",
+	}
+
+	cm, secret, extra := buildConfig(cr)
+	for key, want := range map[string]string{
+		envRLS:            "off",
+		envRLSAck:         "true",
+		envAgentTimeout:   "90s",
+		envA2ALegacy:      "true",
+		envAuditEnabled:   "true",
+		envAuditRetention: "720h",
+		envAuditQueue:     "1024",
+		envAuditBatch:     "64",
+		envSandboxEnabled: "true",
+		envSandboxProv:    "docker",
+		envSandboxImage:   "alpine:3",
+		envSandboxIdle:    "10m",
+		envSandboxMaxTTL:  "1h",
+		envSandboxSweep:   "30s",
+		envSandboxPerOwn:  "2",
+		envSandboxTotal:   "8",
+		envSandboxEgress:  "a.example.test,b.example.test",
+		envRouterEnabled:  "true",
+		envRouterInterval: "15s",
+		envRouterTickets:  "4",
+		envRouterAssess:   "llm",
+		envRouterAssessR:  "model-1",
+		envRouterResource: "agent-1",
+	} {
+		if got := cm.Data[key]; got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+
+	// An inline token goes to the Secret, never the ConfigMap.
+	if _, leaked := cm.Data[envAdminToken]; leaked {
+		t.Fatalf("%s must never be rendered into a ConfigMap", envAdminToken)
+	}
+	if got := string(secret.Data[envAdminToken]); got != "inline-token" {
+		t.Errorf("secret %s = %q, want the inline value", envAdminToken, got)
+	}
+
+	// A referenced Secret becomes a secretKeyRef, so the value never enters the
+	// CR-managed objects at all.
+	ref := lookupEnv(extra, envMigrateDBURL)
+	if ref == nil || ref.ValueFrom == nil || ref.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("%s must come from a secretKeyRef, got %+v", envMigrateDBURL, ref)
+	}
+	if ref.ValueFrom.SecretKeyRef.Name != "agenthub-migrate" || ref.ValueFrom.SecretKeyRef.Key != "MIGRATE_URL" {
+		t.Errorf("secretKeyRef = %+v, want agenthub-migrate/MIGRATE_URL", ref.ValueFrom.SecretKeyRef)
+	}
+}
+
+func lookupEnv(env []corev1.EnvVar, name string) *corev1.EnvVar {
+	for i := range env {
+		if env[i].Name == name {
+			return &env[i]
+		}
+	}
+	return nil
+}
+
+// The controller refuses the same combination the server refuses, one layer
+// earlier: a CR that cannot produce a running Pod is a worse experience than a
+// condition that says why.
+func TestValidateRefusesRLSOffWithoutAcknowledgement(t *testing.T) {
+	prod := baseCR()
+	prod.Spec.Env = "prod"
+	prod.Spec.EncryptionKey = agenthubv1alpha1.SecretOrValue{Value: "0123456789012345678901234567890123"}
+	prod.Spec.RLS = RLSModeOff
+	if reason, _ := validate(prod); reason != "RLSOffNotAcknowledged" {
+		t.Fatalf("prod + rls=off = %q, want RLSOffNotAcknowledged", reason)
+	}
+
+	// Acknowledged: the same spec is accepted.
+	prod.Spec.RLSAck = boolp(true)
+	if reason, msg := validate(prod); reason != "" {
+		t.Fatalf("acknowledged rls=off = %q (%s), want accepted", reason, msg)
+	}
+
+	// Outside production the acknowledgement is not demanded: it exists to stop
+	// a staging value being carried into production, not to block a lab.
+	dev := baseCR()
+	dev.Spec.RLS = RLSModeOff
+	if reason, msg := validate(dev); reason != "" {
+		t.Fatalf("dev + rls=off = %q (%s), want accepted", reason, msg)
+	}
+
+	// An unknown mode is refused everywhere, rather than being passed to a Pod
+	// that would exit at boot.
+	bad := baseCR()
+	bad.Spec.RLS = "maybe"
+	if reason, _ := validate(bad); reason != "InvalidRLSMode" {
+		t.Fatalf("rls=maybe = %q, want InvalidRLSMode", reason)
+	}
+}

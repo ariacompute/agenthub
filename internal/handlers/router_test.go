@@ -228,6 +228,9 @@ func TestRouterRunScheduleNow(t *testing.T) {
 	store := &memSchedules{}
 	created, err := store.Create(context.Background(), &schedules.Schedule{
 		Goal: "weekly rollup", Trigger: string(schedules.TriggerCron), CronExpr: "0 9 * * 1", Enabled: true,
+		// The harness runs as the dev principal, and a manual firing is scoped to
+		// the caller: a row without that owner is somebody else's goal.
+		OwnerID: "dev",
 	})
 	if err != nil {
 		t.Fatalf("seed schedule: %v", err)

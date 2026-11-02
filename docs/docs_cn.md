@@ -261,6 +261,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `GET` | `/api/computers` | `resources:read` — 查看资源 | 列出全部计算机 | — | `Computer[] { id, ownerId, agentId, kind(browser\|shell\|screen), sessionRef, status, lastAction, createdAt }` |
 | `POST` | `/api/computers` | `resources:write` — 变更资源 | 在计算机中新建一条 | `{ agentId, kind?(browser\|shell\|screen), sessionRef?, status?, lastAction? } — unknown kind falls back to browser` | `Computer — 201` |
 | `GET` | `/api/computers/{id}` | `resources:read` — 查看资源 | 按 id 读取其中一条计算机 | — | `Computer \| 404 computer_not_found` |
+| `DELETE` | `/api/computers/{id}` | `resources:write` — 变更资源 | 删除其中一条计算机 | — | `204 — terminates the sandbox lease first, then drops the card \| 404 computer_not_found` |
 | `GET` | `/api/schedules` | `tasks:read` — 查看任务 | 列出全部调度 | — | `Schedule[] { id, goal, trigger(manual\|cron\|event), cronExpr, enabled, nextRun, lastRunAt, lastStatus }` |
 | `POST` | `/api/schedules` | `tasks:write` — 取消与恢复任务 | 在调度中新建一条 | `{ goal(required), trigger?(manual\|cron\|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid` | `Schedule — 201` |
 | `GET` | `/api/schedules/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条调度 | — | `Schedule \| 404 schedule_not_found` |

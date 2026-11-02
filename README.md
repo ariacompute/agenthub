@@ -300,13 +300,22 @@ startup log warns, because a single-role deployment weakens the boundary. The co
 tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME`).
 
 **Data isolation (row level security).** Tasks, their artifacts/spans/pending/push rows and their
-events, plus knowledge chunks, all carry `owner_id`. PostgreSQL policies (`migrations/026`) decide
-visibility from three per-transaction settings — `app.owner_id` (the signed-in user), `app.bypass`
-(administrator) and `app.system` (in-process paths: the task state machine, the event broker, seed,
-migrations, backups, the audit writer). An unset setting reads as NULL and every comparison is false,
-so **a request that forgets to scope itself sees nothing** rather than everything. Each repository
-call opens a short transaction (`internal/store.scoped`) and injects the identity with
-`set_config(..., true)`; a request never holds a connection.
+events, plus knowledge chunks, schedules, channels and computers all carry `owner_id`. PostgreSQL
+policies (`migrations/026` for the task pipeline, `028` for the three per-owner surfaces — **eleven
+tables** in total) decide visibility from three per-transaction settings — `app.owner_id` (the
+signed-in user), `app.bypass` (administrator) and `app.system` (in-process paths: the task state
+machine, the event broker, the cron scan, seed, migrations, backups, the audit writer). An unset
+setting reads as NULL and every comparison is false, so **a request that forgets to scope itself sees
+nothing** rather than everything. Each repository call opens a short transaction
+(`internal/store.scoped`) and injects the identity with `set_config(..., true)`; a request never holds
+a connection.
+
+The application layer states the same rule in its port signatures: by-id reads are
+`Get(ctx, id, ownerID)` (or `Delete`/`Update` with the owner), and a row belonging to somebody else
+answers `404`, never `403` — existence is not leaked. The single unnamed-owner read is
+`channels.GetUnscoped`, used by the inbound webhook, which has to read the row to learn which secret
+verifies the body before any session exists; it runs under the process identity. That endpoint's
+signature check, replay window and de-duplication are unchanged.
 
 `AGENTHUB_RLS=enforce` is the default. `AGENTHUB_RLS=off` makes every policy pass (it appends
 `options=-c app.system=on` to the DSN) and logs a loud warning; with `AGENTHUB_ENV=prod` it is refused

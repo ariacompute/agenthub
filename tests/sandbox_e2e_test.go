@@ -98,9 +98,12 @@ func sandboxTestService(t *testing.T, cfg *config.Config) *sandbox.Service {
 	store := sandbox.NewMemoryStore()
 	bus := sandbox.NewBus(store, time.Now)
 	manager := sandbox.NewManager(sandbox.ManagerOptions{
-		Registry:    registryStore,
-		Store:       store,
-		Defaults:    sandbox.Defaults{Provider: cfg.SandboxProvider, Network: sandbox.NetworkNone, TimeoutMS: 1000, MaxOutputBytes: 4096, ArgsPolicy: sandbox.ArgsNone, IdleTTL: cfg.SandboxIdleTTL},
+		Registry: registryStore,
+		Store:    store,
+		// Passthrough because the console's try-it endpoint sends argv and the
+		// case below runs one. Exec enforces the profile on every argument, so a
+		// "none" policy would refuse the request before the provider runs.
+		Defaults:    sandbox.Defaults{Provider: cfg.SandboxProvider, Network: sandbox.NetworkNone, TimeoutMS: 1000, MaxOutputBytes: 4096, ArgsPolicy: sandbox.ArgsPassthrough, IdleTTL: cfg.SandboxIdleTTL},
 		IdleTTL:     cfg.SandboxIdleTTL,
 		MaxTTL:      cfg.SandboxMaxTTL,
 		MaxPerOwner: cfg.SandboxMaxPerOwner,

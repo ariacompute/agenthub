@@ -53,7 +53,19 @@ func (f *fakeChannels) List(_ context.Context, ownerID string) ([]*channels.Chan
 	return out, nil
 }
 
-func (f *fakeChannels) Get(_ context.Context, id string) (*channels.Channel, error) {
+func (f *fakeChannels) Get(_ context.Context, id, ownerID string) (*channels.Channel, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.byID[id]
+	if c == nil || c.OwnerID != ownerID {
+		// Ownership is part of the key: another account's row is reported as
+		// absent, exactly like the GORM implementation's WHERE clause.
+		return nil, nil
+	}
+	return c, nil
+}
+
+func (f *fakeChannels) GetUnscoped(_ context.Context, id string) (*channels.Channel, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.byID[id], nil
@@ -66,17 +78,23 @@ func (f *fakeChannels) Create(_ context.Context, c *channels.Channel) (*channels
 	return c, nil
 }
 
-func (f *fakeChannels) Update(_ context.Context, c *channels.Channel) (*channels.Channel, error) {
+func (f *fakeChannels) Update(_ context.Context, c *channels.Channel, ownerID string) (*channels.Channel, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	old := f.byID[c.ID]
+	if old == nil || old.OwnerID != ownerID {
+		return nil, nil
+	}
 	f.byID[c.ID] = c
 	return c, nil
 }
 
-func (f *fakeChannels) Delete(_ context.Context, id string) error {
+func (f *fakeChannels) Delete(_ context.Context, id, ownerID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.byID, id)
+	if c := f.byID[id]; c != nil && c.OwnerID == ownerID {
+		delete(f.byID, id)
+	}
 	return nil
 }
 
@@ -414,7 +432,8 @@ func TestChannelDeliverRecordsFailureReceipt(t *testing.T) {
 
 	if _, err := fake.Create(context.Background(), &channels.Channel{
 		ID: "c1", Kind: channels.KindSlack, Name: "sl", Enabled: true,
-		Config: map[string]any{"target_url": "https://example.test/hook"},
+		Config:  map[string]any{"target_url": "https://example.test/hook"},
+		OwnerID: "dev",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +483,8 @@ func TestChannelRetryDelivery(t *testing.T) {
 	defer srv.Close()
 
 	for _, c := range []*channels.Channel{
-		{ID: "c1", Kind: channels.KindSlack, Name: "sl", Enabled: true, Config: map[string]any{"target_url": "https://example.test/hook"}},
-		{ID: "off", Kind: channels.KindSlack, Name: "off", Enabled: false, Config: map[string]any{"target_url": "https://example.test/hook"}},
+		{ID: "c1", OwnerID: "dev", Kind: channels.KindSlack, Name: "sl", Enabled: true, Config: map[string]any{"target_url": "https://example.test/hook"}},
+		{ID: "off", OwnerID: "dev", Kind: channels.KindSlack, Name: "off", Enabled: false, Config: map[string]any{"target_url": "https://example.test/hook"}},
 	} {
 		if _, err := fake.Create(context.Background(), c); err != nil {
 			t.Fatal(err)

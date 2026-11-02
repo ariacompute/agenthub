@@ -13,6 +13,11 @@ import (
 )
 
 // schedulesStore implements schedules.Store over GORM.
+//
+// schedules is one of the tables under forced row level security
+// (migrations/028_rls_policies_owned_surfaces.sql), so every method runs through
+// scoped/withIdentity: the cron scan states the process identity, every request
+// path states the caller's, and neither works without one.
 type schedulesStore struct{ db *gorm.DB }
 
 // NewSchedulesStore returns a schedules.Store backed by the shared GORM handle.
@@ -41,30 +46,34 @@ func toDomainSchedule(r *model.Schedule) *schedules.Schedule {
 }
 
 func (s *schedulesStore) List(ctx context.Context, ownerID string) ([]*schedules.Schedule, error) {
-	var rows []model.Schedule
-	q := s.db.WithContext(ctx).Order("created_at DESC")
-	if ownerID != "" {
-		q = q.Where("owner_id = ?", ownerID)
-	}
-	if err := q.Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*schedules.Schedule, 0, len(rows))
-	for i := range rows {
-		out = append(out, toDomainSchedule(&rows[i]))
-	}
-	return out, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]*schedules.Schedule, error) {
+		var rows []model.Schedule
+		q := db.Order("created_at DESC")
+		if ownerID != "" {
+			q = q.Where("owner_id = ?", ownerID)
+		}
+		if err := q.Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]*schedules.Schedule, 0, len(rows))
+		for i := range rows {
+			out = append(out, toDomainSchedule(&rows[i]))
+		}
+		return out, nil
+	})
 }
 
-func (s *schedulesStore) Get(ctx context.Context, id string) (*schedules.Schedule, error) {
-	var r model.Schedule
-	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&r).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+func (s *schedulesStore) Get(ctx context.Context, id, ownerID string) (*schedules.Schedule, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (*schedules.Schedule, error) {
+		var r model.Schedule
+		if err := ownedWhere(db, id, ownerID).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	return toDomainSchedule(&r), nil
+		return toDomainSchedule(&r), nil
+	})
 }
 
 func (s *schedulesStore) Create(ctx context.Context, in *schedules.Schedule) (*schedules.Schedule, error) {
@@ -87,7 +96,9 @@ func (s *schedulesStore) Create(ctx context.Context, in *schedules.Schedule) (*s
 	if next := nextRunAt(in, now); !next.IsZero() {
 		row.NextRun = &next
 	}
-	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return db.Create(&row).Error
+	}); err != nil {
 		return nil, err
 	}
 	return toDomainSchedule(&row), nil
@@ -105,7 +116,7 @@ func nextRunAt(in *schedules.Schedule, from time.Time) time.Time {
 	return next
 }
 
-func (s *schedulesStore) Update(ctx context.Context, in *schedules.Schedule) (*schedules.Schedule, error) {
+func (s *schedulesStore) Update(ctx context.Context, in *schedules.Schedule, ownerID string) (*schedules.Schedule, error) {
 	updates := map[string]any{
 		"goal":        in.Goal,
 		"trigger":     in.Trigger,
@@ -130,12 +141,24 @@ func (s *schedulesStore) Update(ctx context.Context, in *schedules.Schedule) (*s
 	} else {
 		updates["next_run"] = t
 	}
-	if err := s.db.WithContext(ctx).Model(&model.Schedule{}).Where("id = ?", in.ID).Updates(updates).Error; err != nil {
-		return nil, err
-	}
-	return s.Get(ctx, in.ID)
+	return scoped(ctx, s.db, func(db *gorm.DB) (*schedules.Schedule, error) {
+		if err := ownedWhere(db.Model(&model.Schedule{}), in.ID, ownerID).
+			Updates(updates).Error; err != nil {
+			return nil, err
+		}
+		var r model.Schedule
+		if err := ownedWhere(db, in.ID, ownerID).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return toDomainSchedule(&r), nil
+	})
 }
 
-func (s *schedulesStore) Delete(ctx context.Context, id string) error {
-	return s.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Schedule{}).Error
+func (s *schedulesStore) Delete(ctx context.Context, id, ownerID string) error {
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return ownedWhere(db, id, ownerID).Delete(&model.Schedule{}).Error
+	})
 }

@@ -261,6 +261,7 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `GET` | `/api/computers` | `resources:read` — Read resources | List all computers | — | `Computer[] { id, ownerId, agentId, kind(browser\|shell\|screen), sessionRef, status, lastAction, createdAt }` |
 | `POST` | `/api/computers` | `resources:write` — Change resources | Create a new entry among the computers | `{ agentId, kind?(browser\|shell\|screen), sessionRef?, status?, lastAction? } — unknown kind falls back to browser` | `Computer — 201` |
 | `GET` | `/api/computers/{id}` | `resources:read` — Read resources | Read one of the computers by id | — | `Computer \| 404 computer_not_found` |
+| `DELETE` | `/api/computers/{id}` | `resources:write` — Change resources | Delete one of the computers | — | `204 — terminates the sandbox lease first, then drops the card \| 404 computer_not_found` |
 | `GET` | `/api/schedules` | `tasks:read` — Read tasks | List all schedules | — | `Schedule[] { id, goal, trigger(manual\|cron\|event), cronExpr, enabled, nextRun, lastRunAt, lastStatus }` |
 | `POST` | `/api/schedules` | `tasks:write` — Cancel and resume tasks | Create a new entry among the schedules | `{ goal(required), trigger?(manual\|cron\|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid` | `Schedule — 201` |
 | `GET` | `/api/schedules/{id}` | `tasks:read` — Read tasks | Read one of the schedules by id | — | `Schedule \| 404 schedule_not_found` |

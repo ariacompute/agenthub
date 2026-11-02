@@ -39,8 +39,12 @@ func newTestService(t *testing.T, tune func(*ManagerOptions, *ServiceOptions)) (
 			Network:        NetworkNone,
 			TimeoutMS:      1000,
 			MaxOutputBytes: 4096,
-			ArgsPolicy:     ArgsNone,
-			IdleTTL:        10 * time.Minute,
+			// Passthrough, because the console's try-it endpoint is the caller:
+			// it sends argv and expects it to arrive. The default policy is
+			// still none, and TestExecRefusesArgumentsThePolicyForbids pins the
+			// enforcement that happens inside Exec.
+			ArgsPolicy: ArgsPassthrough,
+			IdleTTL:    10 * time.Minute,
 		},
 		IdleTTL:     10 * time.Minute,
 		MaxTTL:      time.Hour,

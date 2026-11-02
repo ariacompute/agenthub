@@ -270,6 +270,11 @@ type Config struct {
 	SandboxMaxTotal    int
 	// SandboxEgressAllowlist is the host allowlist a profile may reference when it
 	// asks for egress_allowlist networking. Empty means "no egress".
+	//
+	// It is advisory today: it is recorded on every profile, and no provider
+	// filters hosts, so sandbox.GrantsNetwork reads egress_allowlist as "no
+	// network". Setting it is not an access control, and the server says so in a
+	// startup warning rather than letting the setting look like one.
 	SandboxEgressAllowlist []string
 	// SandboxNodePollTimeout bounds a node's long poll. It has to stay under the
 	// idle timeout of whatever proxy sits in front of agenthub.

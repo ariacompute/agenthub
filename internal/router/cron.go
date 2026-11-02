@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"agenthub/internal/identity"
 	"agenthub/internal/schedules"
 )
 
@@ -33,6 +34,12 @@ func NewCronSource(store schedules.Store, e *Engine) *CronSource {
 }
 
 // Scan emits one trigger per schedule that came due and advances the row.
+//
+// The scan runs under the process identity, not under whoever happens to own
+// the beat's context: it reads every owner's due rows on purpose, and it writes
+// them back as the instance (advancing next_run, marking a broken expression).
+// Row level security has no way to know that from an empty owner id alone, so
+// the identity is stated here, in the one place that needs it.
 func (c *CronSource) Scan(ctx context.Context, now time.Time) (int, error) {
 	if c == nil || c.Schedules == nil || c.Engine == nil {
 		return 0, nil
@@ -41,6 +48,7 @@ func (c *CronSource) Scan(ctx context.Context, now time.Time) (int, error) {
 		return 0, nil
 	}
 	c.lastScan = now
+	ctx = identity.With(ctx, identity.Identity{System: true})
 
 	list, err := c.Schedules.List(ctx, "")
 	if err != nil {
@@ -58,7 +66,9 @@ func (c *CronSource) Scan(ctx context.Context, now time.Time) (int, error) {
 			slog.Warn("router: schedule has an unusable cron expression", "schedule", s.ID, "expr", s.CronExpr, "error", derr)
 			if s.LastStatus != "invalid_cron" {
 				s.LastStatus = "invalid_cron"
-				if _, uerr := c.Schedules.Update(ctx, s); uerr != nil {
+				// The row is written back under its own owner: the scan acts as
+				// the instance, but it never rewrites ownership.
+				if _, uerr := c.Schedules.Update(ctx, s, s.OwnerID); uerr != nil {
 					slog.Warn("router: mark schedule invalid", "schedule", s.ID, "error", uerr)
 				}
 			}
@@ -95,7 +105,7 @@ func (c *CronSource) Scan(ctx context.Context, now time.Time) (int, error) {
 		s.LastRunAt = now.UTC().Format(time.RFC3339)
 		s.LastStatus = "triggered"
 		s.NextRun = due.UTC().Format(time.RFC3339)
-		if _, uerr := c.Schedules.Update(ctx, s); uerr != nil {
+		if _, uerr := c.Schedules.Update(ctx, s, s.OwnerID); uerr != nil {
 			slog.Warn("router: advance schedule", "schedule", s.ID, "error", uerr)
 		}
 	}

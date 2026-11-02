@@ -386,6 +386,18 @@ func newSandboxStack(cfg *config.Config, db *gorm.DB) (*sandbox.Service, error) 
 		}
 	}
 
+	// A host allowlist with nobody to enforce it is a promise the instance cannot
+	// keep, so it is said out loud at boot instead of sitting in the config
+	// looking like a control. The value still reaches every profile (an operator
+	// can read it back from the catalogue), and GrantsNetwork keeps reading it as
+	// "no network" until a provider actually filters hosts.
+	if len(cfg.SandboxEgressAllowlist) > 0 {
+		slog.Warn("sandbox: AGENTHUB_SANDBOX_EGRESS_ALLOWLIST is recorded but not enforced",
+			"hosts", len(cfg.SandboxEgressAllowlist),
+			"effect", "no provider filters egress yet, so egress_allowlist still means no network",
+			"hint", "use the docker provider with an egress sidecar, or leave the setting unset")
+	}
+
 	sbStore := store.NewSandboxStore(db)
 	bus := sandbox.NewBus(sbStore, time.Now)
 	manager := sandbox.NewManager(sandbox.ManagerOptions{

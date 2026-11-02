@@ -68,6 +68,12 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 
 两个 provider 共用 `sandbox.GrantsNetwork` 判定，因此不会再出现「同一个取值在一种后端断网、在另一种后端放全量网络」的分叉；provider 的 `Describe().Network` 也不再宣称支持 `egress_allowlist`。
 
+`local` provider（既无容器运行时也无 bubblewrap 时的兜底）**没有自己的网络命名空间**：子进程用的是宿主的路由与 DNS，
+因此它的 `Describe().Network` 只报 `platform`，不再宣称能做到 `none`。profile 里的 `network` 对它不构成约束，
+这一点写在 `local.go` 的注释里——把"给不出网"写成 capability 才是真正的谎报。
+`AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` 同理：值会进 profile 以便回读，但没有任何 provider 做 host 过滤，
+启动时打一条 `WARN` 说明它不构成访问控制。
+
 ## 3. API
 
 权限沿用 `resources:read` / `resources:write` 与 `tasks:write`，不新增权限码：租约与类型目录走

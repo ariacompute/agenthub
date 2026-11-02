@@ -19,6 +19,13 @@ import (
 
 func sandboxService(t *testing.T) *sandbox.Service {
 	t.Helper()
+	return sandboxServiceWith(t, sandbox.ArgsPassthrough)
+}
+
+// sandboxServiceWith lets one case run under the shipping default ("none") while
+// the rest of the surface keeps the passthrough a console try-it needs.
+func sandboxServiceWith(t *testing.T, argsPolicy string) *sandbox.Service {
+	t.Helper()
 	store := sandbox.NewMemoryStore()
 	registry := sandbox.NewRegistry(sandbox.RegistryOptions{Default: sandbox.ProviderMock, Clock: time.Now})
 	if err := registry.Register(sandbox.NewMockProvider()); err != nil {
@@ -27,11 +34,14 @@ func sandboxService(t *testing.T) *sandbox.Service {
 	// One bus shared by both: the manager publishes, the facade replays.
 	bus := sandbox.NewBus(store, nil)
 	manager := sandbox.NewManager(sandbox.ManagerOptions{
-		Registry:    registry,
-		Store:       store,
-		Bus:         bus,
-		Clock:       time.Now,
-		Defaults:    sandbox.Defaults{Provider: sandbox.ProviderMock, Network: sandbox.NetworkNone, TimeoutMS: 1000, MaxOutputBytes: 4096},
+		Registry: registry,
+		Store:    store,
+		Bus:      bus,
+		Clock:    time.Now,
+		// ArgsPolicy passthrough: the console's try-it endpoint sends argv, and
+		// Exec now enforces the profile on every argument. The default "none"
+		// is covered by the sandbox package's own policy cases.
+		Defaults:    sandbox.Defaults{Provider: sandbox.ProviderMock, Network: sandbox.NetworkNone, TimeoutMS: 1000, MaxOutputBytes: 4096, ArgsPolicy: argsPolicy},
 		IdleTTL:     10 * time.Minute,
 		MaxTTL:      time.Hour,
 		MaxPerOwner: 4, MaxTotal: 16,
@@ -669,5 +679,40 @@ func TestSandboxNodeHelpers(t *testing.T) {
 
 	if groups := groupByLayer(nil); len(groups) != 0 {
 		t.Fatalf("an empty catalogue renders no headings, got %+v", groups)
+	}
+}
+
+// The try-it endpoint used to hand caller supplied argv straight to the
+// provider: the lease said "no arguments" and the endpoint sent them anyway.
+// Exec is the funnel that now enforces it, so the refusal surfaces here as a
+// policy code instead of a process starting.
+func TestTheExecEndpointCannotSmuggleArgumentsPastThePolicy(t *testing.T) {
+	d := testDeps(t, openConfig(""))
+	d.Sandboxes = sandboxServiceWith(t, sandbox.ArgsNone)
+	lease, err := d.Sandboxes.Manager().Acquire(context.Background(), sandbox.LeaseRequest{
+		OwnerID: "dev", Provider: sandbox.ProviderMock,
+	})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	caller := principalAs("dev", authz.PermResourcesRead, authz.PermResourcesWrite)
+
+	// No arguments is what a "none" policy leaves room for.
+	w := sandboxRecorder()
+	d.handleExecSandbox(w, sandboxRequest(http.MethodPost, "/api/sandboxes/x/exec", `{"command":"ls"}`, caller, lease.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("bare command: status = %d (%s)", w.Code, w.Body.String())
+	}
+
+	// An argument that rewrites the command is refused here, not deep inside a
+	// provider: the endpoint is the door every caller shares.
+	w = sandboxRecorder()
+	d.handleExecSandbox(w, sandboxRequest(http.MethodPost, "/api/sandboxes/x/exec",
+		`{"command":"ls","args":["-c","cat /etc/shadow"]}`, caller, lease.ID))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("smuggled argument: status = %d (%s), want 403", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), string(sandbox.CodePolicyDenied)) {
+		t.Fatalf("body = %s, want %q", w.Body.String(), sandbox.CodePolicyDenied)
 	}
 }

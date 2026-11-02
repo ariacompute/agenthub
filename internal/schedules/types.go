@@ -45,10 +45,15 @@ type Schedule struct {
 }
 
 // Store persists schedules. Implemented in internal/store.
+//
+// Ownership is part of the key (see channels.Store): a by-id lookup carries the
+// caller's owner id, so another account's goal is reported as absent rather than
+// returned, rewritten or deleted. The cron scan is the one caller that passes an
+// empty owner and runs under the system identity.
 type Store interface {
 	List(ctx context.Context, ownerID string) ([]*Schedule, error)
-	Get(ctx context.Context, id string) (*Schedule, error)
+	Get(ctx context.Context, id, ownerID string) (*Schedule, error)
 	Create(ctx context.Context, s *Schedule) (*Schedule, error)
-	Update(ctx context.Context, s *Schedule) (*Schedule, error)
-	Delete(ctx context.Context, id string) error
+	Update(ctx context.Context, s *Schedule, ownerID string) (*Schedule, error)
+	Delete(ctx context.Context, id, ownerID string) error
 }

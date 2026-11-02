@@ -111,37 +111,103 @@ type PersistenceSpec struct {
 	StorageClass *string `json:"storageClass,omitempty"`
 }
 
+// AuditSpec configures the API audit trail (AGENTHUB_AUDIT_*). The trail is on
+// by default in the server; naming the block is how an operator changes its
+// retention or turns it off deliberately.
+type AuditSpec struct {
+	Enabled *bool `json:"enabled,omitempty"`
+	// Retention is how long an audit row survives, as a Go duration ("2160h").
+	Retention string `json:"retention,omitempty"`
+	// Queue is the in-memory batch depth, Batch the rows per insert.
+	Queue *int32 `json:"queue,omitempty"`
+	Batch *int32 `json:"batch,omitempty"`
+}
+
+// SandboxSpec configures the execution control plane (AGENTHUB_SANDBOX_*).
+//
+// Off unless Enabled is true: the server refuses to start a container runtime
+// nobody asked for, and this block follows the same rule.
+type SandboxSpec struct {
+	Enabled      *bool  `json:"enabled,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	DefaultImage string `json:"defaultImage,omitempty"`
+	// IdleTTL, MaxTTL and SweepInterval are Go durations ("10m", "1h").
+	IdleTTL       string `json:"idleTTL,omitempty"`
+	MaxTTL        string `json:"maxTTL,omitempty"`
+	SweepInterval string `json:"sweepInterval,omitempty"`
+	MaxPerOwner   *int32 `json:"maxPerOwner,omitempty"`
+	MaxTotal      *int32 `json:"maxTotal,omitempty"`
+	// EgressAllowlist is recorded on every profile but not enforced: no provider
+	// filters egress hosts yet, so the server logs a warning and reads the
+	// allowlist network mode as "no network".
+	EgressAllowlist []string `json:"egressAllowlist,omitempty"`
+}
+
+// RouterSpec configures the router layer (AGENTHUB_ROUTER_*): the trigger
+// intake, the beat interval and the resource a ticket is delegated to.
+type RouterSpec struct {
+	Enabled  *bool  `json:"enabled,omitempty"`
+	Interval string `json:"interval,omitempty"`
+	// MaxTickets bounds the concurrent tickets; it has to fit inside the
+	// sandbox ceilings, which the server validates at boot.
+	MaxTickets     *int32 `json:"maxTickets,omitempty"`
+	AssessMode     string `json:"assessMode,omitempty"`
+	AssessResource string `json:"assessResource,omitempty"`
+	Resource       string `json:"resource,omitempty"`
+}
+
 // AgentHubSpec is the desired state of an agenthub deployment.
 type AgentHubSpec struct {
-	Image           ImageSpec                    `json:"image,omitempty"`
-	Replicas        *int32                       `json:"replicas,omitempty"`
-	Env             string                       `json:"env,omitempty"`
-	HTTPPort        int32                        `json:"httpPort,omitempty"`
-	StaticDir       string                       `json:"staticDir,omitempty"`
-	BootstrapAdmin  BootstrapAdminSpec           `json:"bootstrapAdmin,omitempty"`
-	SessionTTL      string                       `json:"sessionTTL,omitempty"`
-	CookieSecure    *bool                        `json:"cookieSecure,omitempty"`
-	PublicBaseURL   string                       `json:"publicBaseURL,omitempty"`
-	Database        DatabaseSpec                 `json:"database,omitempty"`
-	OAuth           *OAuthSpec                   `json:"oauth,omitempty"`
-	SeedDemo        *bool                        `json:"seedDemo,omitempty"`
-	MaxParallel     *int32                       `json:"maxParallel,omitempty"`
-	CLITimeout      string                       `json:"cliTimeout,omitempty"`
-	CLIAllowlist    []string                     `json:"cliAllowlist,omitempty"`
-	MaxOutputBytes  *int32                       `json:"maxOutputBytes,omitempty"`
-	EventBuffer     *int32                       `json:"eventBuffer,omitempty"`
-	PushEnabled     *bool                        `json:"pushEnabled,omitempty"`
-	PushRecordLimit *int32                       `json:"pushRecordLimit,omitempty"`
-	EncryptionKey   SecretOrValue                `json:"encryptionKey,omitempty"`
-	PushSecret      SecretOrValue                `json:"pushSecret,omitempty"`
-	Backup          *BackupSpec                  `json:"backup,omitempty"`
-	RegistrySync    *RegistrySyncSpec            `json:"registrySync,omitempty"`
-	ModelRouterMode string                       `json:"modelRouterMode,omitempty"`
-	ChannelsEnabled *bool                        `json:"channelsEnabled,omitempty"`
-	SpeechMode      string                       `json:"speechMode,omitempty"`
-	AudioMaxBytes   *int32                       `json:"audioMaxBytes,omitempty"`
-	Resources       *corev1.ResourceRequirements `json:"resources,omitempty"`
-	Persistence     *PersistenceSpec             `json:"persistence,omitempty"`
+	Image          ImageSpec          `json:"image,omitempty"`
+	Replicas       *int32             `json:"replicas,omitempty"`
+	Env            string             `json:"env,omitempty"`
+	HTTPPort       int32              `json:"httpPort,omitempty"`
+	StaticDir      string             `json:"staticDir,omitempty"`
+	BootstrapAdmin BootstrapAdminSpec `json:"bootstrapAdmin,omitempty"`
+	SessionTTL     string             `json:"sessionTTL,omitempty"`
+	CookieSecure   *bool              `json:"cookieSecure,omitempty"`
+	PublicBaseURL  string             `json:"publicBaseURL,omitempty"`
+	Database       DatabaseSpec       `json:"database,omitempty"`
+	// MigrateDatabaseURL is the DDL role (AGENTHUB_MIGRATE_DATABASE_URL): a
+	// schema owner, distinct from the runtime role so a stolen runtime credential
+	// cannot alter a table or turn a policy off.
+	MigrateDatabaseURL *DatabaseSpec `json:"migrateDatabaseURL,omitempty"`
+	// RLS is the row level security mode (AGENTHUB_RLS): "" and "enforce" keep
+	// the policies binding, "off" relaxes them. Off in production also needs
+	// RLSAck, and the controller refuses the combination without it rather than
+	// letting the Pod crash-loop on the server's own refusal.
+	// +kubebuilder:validation:Enum=enforce;off
+	RLS string `json:"rls,omitempty"`
+	// RLSAck is AGENTHUB_RLS_ACK: the operator's second signature on turning the
+	// policies off.
+	RLSAck *bool `json:"rlsAck,omitempty"`
+	// AdminToken is AGENTHUB_ADMIN_TOKEN, the break-glass bearer token. Prefer an
+	// existingSecret reference: an inline value lands in the managed Secret.
+	AdminToken       SecretOrValue                `json:"adminToken,omitempty"`
+	AgentTimeout     string                       `json:"agentTimeout,omitempty"`
+	A2ALegacyMethods *bool                        `json:"a2aLegacyMethods,omitempty"`
+	OAuth            *OAuthSpec                   `json:"oauth,omitempty"`
+	SeedDemo         *bool                        `json:"seedDemo,omitempty"`
+	MaxParallel      *int32                       `json:"maxParallel,omitempty"`
+	CLITimeout       string                       `json:"cliTimeout,omitempty"`
+	CLIAllowlist     []string                     `json:"cliAllowlist,omitempty"`
+	MaxOutputBytes   *int32                       `json:"maxOutputBytes,omitempty"`
+	EventBuffer      *int32                       `json:"eventBuffer,omitempty"`
+	PushEnabled      *bool                        `json:"pushEnabled,omitempty"`
+	PushRecordLimit  *int32                       `json:"pushRecordLimit,omitempty"`
+	EncryptionKey    SecretOrValue                `json:"encryptionKey,omitempty"`
+	PushSecret       SecretOrValue                `json:"pushSecret,omitempty"`
+	Backup           *BackupSpec                  `json:"backup,omitempty"`
+	RegistrySync     *RegistrySyncSpec            `json:"registrySync,omitempty"`
+	ModelRouterMode  string                       `json:"modelRouterMode,omitempty"`
+	ChannelsEnabled  *bool                        `json:"channelsEnabled,omitempty"`
+	SpeechMode       string                       `json:"speechMode,omitempty"`
+	AudioMaxBytes    *int32                       `json:"audioMaxBytes,omitempty"`
+	Audit            *AuditSpec                   `json:"audit,omitempty"`
+	Sandbox          *SandboxSpec                 `json:"sandbox,omitempty"`
+	Router           *RouterSpec                  `json:"router,omitempty"`
+	Resources        *corev1.ResourceRequirements `json:"resources,omitempty"`
+	Persistence      *PersistenceSpec             `json:"persistence,omitempty"`
 }
 
 // AgentHubStatus is the observed state, patched by the controller.

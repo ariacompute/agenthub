@@ -84,15 +84,49 @@ func identityOf(p *authz.Principal) identity.Identity {
 	}
 }
 
-// requireAuth rejects anonymous callers with a machine readable code.
+// requireAuth rejects callers with no identity at all with a machine readable
+// code.
+//
+// It asks Principal.Anonymous() rather than comparing with nil, because those
+// are not the same question: Anonymous() also covers a principal that resolved
+// but carries no user id. That shape is fail-open everywhere ownership is keyed
+// on UserID — an empty owner id means "the row has no owner", never "any row" —
+// so a session that lost its user must be refused here, once, instead of being
+// trusted downstream.
 func (d Deps) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return d.identify(func(w http.ResponseWriter, r *http.Request) {
-		if PrincipalFrom(r) == nil {
+		if !authenticated(r) {
 			httputil.WriteError(w, http.StatusUnauthorized, httputil.CodeUnauthenticated)
 			return
 		}
 		next(w, r)
 	})
+}
+
+// authenticated reports whether the request carries a usable identity. It is
+// the same question Principal.Anonymous answers, asked in one place so the two
+// cannot drift apart again.
+func authenticated(r *http.Request) bool { return !PrincipalFrom(r).Anonymous() }
+
+// callerID is the owner id every per-owner store call scopes on. The routes
+// that reach those calls sit behind requireAuth, which refuses a principal
+// without a user id, so this is never empty on a path that reads or writes a
+// row by id.
+func callerID(r *http.Request) string {
+	if p := PrincipalFrom(r); p != nil {
+		return p.UserID
+	}
+	return ""
+}
+
+// systemScope is the process identity attached to the caller's context: the
+// request keeps its cancellation and deadline, but row level security sees a
+// process owned path instead of a signed in (or absent) user. It exists for the
+// one public endpoint that must read a tenant row before a session can exist —
+// the channel webhook, which has to read the row to learn which secret to verify
+// the body against.
+func systemScope(r *http.Request) context.Context {
+	return identity.With(r.Context(), identity.Identity{System: true})
 }
 
 // requirePermission is requireAuth plus one capability check. The permission

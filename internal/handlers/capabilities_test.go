@@ -224,7 +224,7 @@ func TestDeleteComputerClosesTheLeaseAndSurvivesATerminateFailure(t *testing.T) 
 	// The sweep may already have reclaimed the lease, so a failing Terminate is a
 	// warning, not a reason to leave a card nobody can reach.
 	if _, err := store.Create(t.Context(), &computers.Computer{
-		ID: "comp-leased", Kind: computers.KindShell, LeaseID: "lease-gone",
+		ID: "comp-leased", OwnerID: "dev", Kind: computers.KindShell, LeaseID: "lease-gone",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

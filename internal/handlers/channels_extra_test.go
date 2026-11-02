@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,12 +30,28 @@ func TestListDeliveriesReturnsWhatTheChannelRecorded(t *testing.T) {
 	defer srv.Close()
 
 	if _, err := fake.Create(context.Background(), &channels.Channel{
-		ID: "c1", Kind: channels.KindSlack, Name: "sl", Enabled: true,
+		ID: "c1", OwnerID: "dev", Kind: channels.KindSlack, Name: "sl", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fake.RecordDelivery(context.Background(), &channels.ChannelMessage{
 		ChannelID: "c1", ExternalRef: "out-1", Direction: "outbound", Status: channels.StatusFailed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A channel that never sent anything, and somebody else's channel that has:
+	// the two cases the endpoint used to confuse.
+	for _, c := range []*channels.Channel{
+		{ID: "c-empty", OwnerID: "dev", Kind: channels.KindSlack, Name: "empty", Enabled: true},
+		{ID: "c-theirs", OwnerID: "someone-else", Kind: channels.KindSlack, Name: "theirs", Enabled: true},
+	} {
+		if _, err := fake.Create(context.Background(), c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := fake.RecordDelivery(context.Background(), &channels.ChannelMessage{
+		ChannelID: "c-theirs", ExternalRef: "out-9", Direction: "outbound",
+		Status: channels.StatusFailed, Payload: map[string]any{"text": "THEIR_SECRET"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +72,18 @@ func TestListDeliveriesReturnsWhatTheChannelRecorded(t *testing.T) {
 	code, raw = doReq(t, srv, "GET", "/api/channels/c-empty/deliveries", "")
 	if code != http.StatusOK {
 		t.Fatalf("empty deliveries = %d (%s)", code, raw)
+	}
+
+	// Somebody else's channel is "not found" — not an empty list, and never the
+	// message bodies and provider error text the receipts carry.
+	for _, id := range []string{"c-theirs", "nope"} {
+		code, raw = doReq(t, srv, "GET", "/api/channels/"+id+"/deliveries", "")
+		if code != http.StatusNotFound {
+			t.Fatalf("deliveries of %q = %d (%s), want 404", id, code, raw)
+		}
+		if bytes.Contains(raw, []byte("THEIR_SECRET")) {
+			t.Fatalf("the receipt body of %q leaked: %s", id, raw)
+		}
 	}
 }
 

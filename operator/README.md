@@ -85,6 +85,22 @@ server (defaults mirror `config.go`):
 | `audioMaxBytes` | `AGENTHUB_AUDIO_MAX_BYTES` | |
 | `registrySync.*` | `AGENTHUB_REGISTRY_SYNC_*` | |
 | `backup.*` | `AGENTHUB_BACKUP_*` | |
+| `rls` | `AGENTHUB_RLS` | `enforce` (default) / `off`; `off` + `env: prod` also needs `rlsAck` |
+| `rlsAck` | `AGENTHUB_RLS_ACK` | the second signature on turning the policies off |
+| `migrateDatabaseURL` | `AGENTHUB_MIGRATE_DATABASE_URL` | DDL role; secret (`existingSecret` preferred) |
+| `adminToken` | `AGENTHUB_ADMIN_TOKEN` | break-glass bearer token; secret |
+| `agentTimeout` | `AGENTHUB_AGENT_TIMEOUT` | |
+| `a2aLegacyMethods` | `AGENTHUB_A2A_LEGACY_METHODS` | |
+| `audit.enabled` / `audit.retention` | `AGENTHUB_AUDIT_ENABLED` / `_RETENTION` | the API trail |
+| `audit.queue` / `audit.batch` | `AGENTHUB_AUDIT_QUEUE` / `_BATCH` | |
+| `sandbox.enabled` / `sandbox.provider` | `AGENTHUB_SANDBOX_ENABLED` / `_PROVIDER` | execution is **off** unless enabled |
+| `sandbox.defaultImage` | `AGENTHUB_SANDBOX_DEFAULT_IMAGE` | |
+| `sandbox.idleTTL` / `maxTTL` / `sweepInterval` | `AGENTHUB_SANDBOX_*` | Go durations |
+| `sandbox.maxPerOwner` / `maxTotal` | `AGENTHUB_SANDBOX_MAX_*` | must fit `router.maxTickets` |
+| `sandbox.egressAllowlist` | `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` | recorded, **not enforced** (no provider filters hosts) |
+| `router.enabled` / `router.interval` | `AGENTHUB_ROUTER_*` | |
+| `router.maxTickets` | `AGENTHUB_ROUTER_MAX_TICKETS` | |
+| `router.assessMode` / `assessResource` / `resource` | `AGENTHUB_ROUTER_*` | |
 | `persistence.enabled` | — | mounts a PVC at `/var/lib/agenthub/backups` and sets `AGENTHUB_BACKUP_DIR` |
 
 Non-secret values land in a ConfigMap; inline secret values (database DSN,
@@ -126,6 +142,58 @@ to its release namespace, and `WATCH_NAMESPACE` is set to that namespace.
 Create your `AgentHub` CR **in the same namespace** as the operator. To watch
 multiple namespaces, edit the chart to a `ClusterRole`/`ClusterRoleBinding`
 and drop `WATCH_NAMESPACE`.
+
+### Turning row level security off
+`spec.rls: enforce` is the default and the only value a `prod` CR may use unless
+it also sets `spec.rlsAck: true`. The controller refuses the combination at
+reconcile time (`status.conditions[Available]=False, reason=RLSOffNotAcknowledged`)
+for the same reason `config.go` refuses it at boot: `AGENTHUB_RLS=off` makes
+every per-owner policy a no-op, and a staging value copied into production must
+not widen row visibility by accident. An unknown value is refused everywhere
+(`reason=InvalidRLSMode`), rather than being handed to a Pod that would exit.
+
+## RBAC: what the operator grants, and what it does not
+
+There are **two unrelated RBAC layers** here, and only the first one is the
+operator's to manage. Conflating them is the usual mistake when somebody asks
+whether the operator's RBAC "matches the service".
+
+**1. Kubernetes RBAC — the operator's own credentials.** Declared as
+`+kubebuilder:rbac` markers on the reconciler and generated into
+`config/rbac/role.yaml` (`make manifests`). The Helm chart ships the equivalent
+namespaced `Role` in `deploy/agenthub-operator/templates/role.yaml`. The two must
+grant the same verbs for the same objects, because they are two ways to install
+one controller:
+
+| object | verbs | why |
+|---|---|---|
+| `agenthubs` + `/status` + `/finalizers` | get, list, watch, create, update, patch, delete | the CR itself |
+| `deployments` (apps) | get, list, watch, create, update, patch, delete | the workload |
+| `services`, `configmaps`, `secrets`, `serviceaccounts` | same | the children |
+| `persistentvolumeclaims` | same | **only when persistence is enabled** — `buildPVC` creates one per CR |
+| `roles`, `rolebindings` (rbac) | same | the minimal per-app `Role` |
+| `leases` (coordination) | same | leader election |
+| `events` (core **and** `events.k8s.io`) | create, patch | the recorder writes `core/v1` events; `events.k8s.io` is its newer sibling and both are granted so it works under either |
+
+The generated `ClusterRole` used to be missing `persistentvolumeclaims` and core
+`events` while the chart's `Role` had both, so an install from `config/rbac`
+failed to create the backup PVC (403) and the recorder could not publish. Both
+are fixed and the two manifests now agree; `controller-gen` merges the two
+`events` groups into one rule, which is equivalent.
+
+**2. agenthub application RBAC — the service's own authorisation.** The
+`permissions` / `roles` / `grants` tables, the fourteen permission codes
+(`tasks:read`, `resources:write`, `audit:read`, …) and group membership. This is
+**not** expressible in a CR, and the operator deliberately does not try:
+
+- the vocabulary lives in `internal/authz` and is versioned with the server, not
+  with the CRD; a CRD enum here would have to be released in lockstep with every
+  permission the service ever adds;
+- a grant is a per-user row, not desired state — a controller reconciling them
+  would fight the console, and would need a `users` CRD to attach them to;
+- the only identity the operator creates is the bootstrap administrator, which
+  the service marks as the owner (`IsOwner`) exactly as it does when
+  `AGENTHUB_BOOTSTRAP_ADMIN_*` is set out of band.
 
 ## Local cluster walkthrough (kind / k3d)
 

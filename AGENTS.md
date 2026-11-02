@@ -210,6 +210,21 @@ persistence ← internal/store（GORM 实现）
   迁移 SQL 必须幂等（`CREATE TABLE/INDEX IF NOT EXISTS`），新增表或列走新文件、**不改已执行文件**。
   幂等 ≠ 并发安全：`store.Migrate` 对建表与每个文件持 `pg_advisory_xact_lock` 并在锁内复查
   `schema_migrations`（两个副本、或 `go test` 的两个包同时迁移会撞系统目录 23505），别把这段去掉。
+- **按 id 取行必须带 owner**：`schedules` / `channels` / `computers` 的端口签名是
+  `Get(ctx, id, ownerID)` / `Update(ctx, x, ownerID)` / `Delete(ctx, id, ownerID)`，仓储统一走
+  `store.ownedWhere`（`WHERE id = ? AND owner_id = ?`）。`ownerID == ""` 只匹配无主行，
+  **永远不是「任意 owner」**；越权一律 404，不泄露存在性。唯一的无归属读是显式命名的
+  `channels.GetUnscoped`（webhook 验签前要读行），调用方必须自带 `identity.System()`。
+  新增任何「按 id 服务某个请求」的读，照抄这条，别再回到只认 id。
+- **RLS 是第二道闸（11 张表）**：`026` 覆盖任务管道 + `knowledge` + `audit_log`，
+  `028` 补 `schedules` / `channels` / `computers`，全部 `ENABLE` + `FORCE`，谓词统一是
+  `agenthub_row_visible(owner_id)`（`app.system` / `app.bypass` / 精确非空 owner）。
+  两条配套要求：后台节拍（cron 扫描、sweeper、同步）必须 `identity.With(ctx, {System:true})`，
+  否则 `FORCE` 下读到 0 行、表现为「定时任务再也不触发」；公开回调只有 webhook 一处例外，
+  走 `GetUnscoped` + 系统身份。`tests/rls_test.go` 的表清单与策略名断言同步在 11 张表上。
+- **文档与路由双向守恒**：新增/删除 `mux.HandleFunc` 必须同步 `web/src/lib/docs-content.js`
+  （再 `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md`）。`tests/docs_endpoints_test.go`
+  对 `handlers.go` 与 `docs.md` 做双向差集：漏项与幽灵条目都会让 `go test` 变红。
 - **持久化不得阻塞运行**：状态/artifact/span 同步写，`events` 与 `push_records` **尽力而为**
   （有界队列 + 异步 writer，队列满或失败只 `slog.Warn`，绝不回压任务执行）；
   所有持久层调用统一走 `context.Background()`（客户端断连不得丢弃任务状态）。
@@ -331,6 +346,12 @@ make web-install / make web-dev / make web-build / make web-test
   未知占位符/空 argv/相对路径二进制在启动期拒绝。模板只来自运营者配置，永不来自请求。
 - **命令来源**：CLI 命令必须等于资源登记命令，参数按 `args_policy`（`none|prefix|passthrough`）校验；
   **禁止**再从提示词推导命令（首词回退已删除），提示词最多作 stdin。
+- **参数在漏斗处再校验一次**：`Manager.Exec` 对 `req.Args` 逐个调 `sandbox.Argument(profile, arg)`，
+  失败即 `sandbox_policy_denied`。CLI 连接器造租约前已问过 `ArgsAllowed`，但 `Exec` 是所有调用方
+  （含 `POST /api/sandboxes/{id}/exec`）的唯一入口——「命令在白名单里、参数不在」正是绕过方式。
+- **后端如实声明能力**：`local` 的 `Describe().Network` 只有 `platform`（裸子进程没有自己的网络
+  命名空间，走宿主的路由与 DNS）；只有容器 / bwrap 才能真的断网。`AGENTHUB_SANDBOX_EGRESS_ALLOWLIST`
+  目前**无人执行**，启动时非空即 `slog.Warn`，语义仍是「无网络」。
 - **租约与任务解耦**：任务取消/失败/重启不销毁租约；租约丢失不使任务失败（`Manager.Exec` 标 failed，
   下次 `Acquire` 重建）。作用域解析 `metadata.ticket` → `metadata.contextId` → `default`。
 - **owner 必须贯穿**：经 router 发起的执行走 `Hub.SendAs(ticket.ActorID)`，否则租约落进「匿名不复用」。

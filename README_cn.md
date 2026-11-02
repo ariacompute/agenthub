@@ -246,16 +246,23 @@ mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`
 
 **数据库**：运行期须用最小权限角色，且**该角色不得是表属主、不得有 `BYPASSRLS`**——任一条件成立都会
 静默跳过隔离策略。`scripts/provision-db-roles.sql` 生成三个角色（`migrator` 拥有 schema 并执行 DDL、
-`app` 只有 DML、`readonly` 只有 SELECT），且末尾断言：八张受保护表缺 `ENABLE`+`FORCE ROW LEVEL SECURITY`
-就 `RAISE EXCEPTION`。DDL 用 `AGENTHUB_MIGRATE_DATABASE_URL` 指向 migrator；未设置时回退到
-`DATABASE_URL` 并在启动日志告警，因为单角色部署的边界更弱。连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` /
-`_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME` 调优。
+`app` 只有 DML、`readonly` 只有 SELECT），且末尾断言：十一张受保护表缺
+`ENABLE`+`FORCE ROW LEVEL SECURITY` 就 `RAISE EXCEPTION`。DDL 用 `AGENTHUB_MIGRATE_DATABASE_URL`
+指向 migrator；未设置时回退到 `DATABASE_URL` 并在启动日志告警，因为单角色部署的边界更弱。
+连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME` 调优。
 
-**数据隔离（行级安全）**：任务及其 artifact/span/pending/push 行与事件、以及知识块都带 `owner_id`。
-PostgreSQL 策略（`migrations/026`）按三个事务内设置判定可见性——`app.owner_id`（登录用户）、
-`app.bypass`（管理员）、`app.system`（进程内路径：任务状态机、事件扇出、seed、迁移、备份、审计写入）。
-未设置的设置读作 NULL，比较一律为假，因此**忘记注入身份的请求什么也看不到**，而不是看到全部。每次仓储
-调用开一个短事务（`internal/store.scoped`）并用 `set_config(..., true)` 注入身份，请求不持连接。
+**数据隔离（行级安全）**：任务及其 artifact/span/pending/push 行与事件、知识块，以及调度目标、
+通道、agent 计算机都带 `owner_id`。PostgreSQL 策略（任务管道在 `migrations/026`，三张按 owner
+的表在 `028`，合计**十一张**）按三个事务内设置判定可见性——`app.owner_id`（登录用户）、
+`app.bypass`（管理员）、`app.system`（进程内路径：任务状态机、事件扇出、cron 扫描、seed、迁移、
+备份、审计写入）。未设置的设置读作 NULL，比较一律为假，因此**忘记注入身份的请求什么也看不到**，
+而不是看到全部。每次仓储调用开一个短事务（`internal/store.scoped`）并用 `set_config(..., true)`
+注入身份，请求不持连接。
+
+应用层把同一条规则写进了端口签名：按 id 取行是 `Get(ctx, id, ownerID)`（`Update` / `Delete`
+同样带 owner），别人的行一律回 `404` 而不是 `403`——不泄露存在性。唯一的「无归属读」是被显式命名的
+`channels.GetUnscoped`，只有入站 webhook 用：它必须先读出行才知道用哪个密钥验签，此时还没有任何会话；
+调用时带进程身份。该端点的验签、重放窗与去重语义未变。
 
 `AGENTHUB_RLS=enforce` 是默认值。`AGENTHUB_RLS=off` 让全部策略通过（在 DSN 追加
 `options=-c app.system=on`）并打印醒目告警；`AGENTHUB_ENV=prod` 下会被拒绝，除非同时设

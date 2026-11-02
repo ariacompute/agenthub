@@ -61,6 +61,53 @@ spec:
   seedDemo: false
   pushEnabled: true
 
+  # --- Row level security ---
+  # enforce is the server default; it is written out so the CR states what it
+  # wants. Switching it off makes every per-owner policy a no-op, so with
+  # env=prod the controller refuses the spec unless rlsAck is true as well.
+  rls: enforce
+  # rls: off
+  # rlsAck: true
+  #
+  # The DDL role: a schema owner, distinct from the runtime role. When it is
+  # unset the migrations run as the runtime role, which is weaker (the role can
+  # then alter its own tables and turn a policy off).
+  # migrateDatabaseURL:
+  #   existingSecret: agenthub-migrate-db
+  #   secretKey: MIGRATE_DATABASE_URL
+  #
+  # Break-glass bearer token. Prefer an existingSecret over an inline value.
+  # adminToken:
+  #   existingSecret: agenthub-admin
+  #   key: ADMIN_TOKEN
+
+  # --- Audit trail ---
+  audit:
+    enabled: true
+    retention: 2160h        # 90 days
+    queue: 1024
+    batch: 128
+
+  # --- Execution control plane (off unless asked for) ---
+  sandbox:
+    enabled: false
+    provider: docker
+    defaultImage: debian:bookworm-slim
+    idleTTL: 10m
+    maxTTL: 1h
+    maxPerOwner: 2
+    maxTotal: 8
+    # egressAllowlist is recorded but NOT enforced yet: no provider filters
+    # egress hosts, so the server warns at boot and reads the allowlist mode as
+    # "no network". Leave it unset unless you are tracking that TODO.
+
+  # --- Router layer (trigger intake and delegation) ---
+  router:
+    enabled: true
+    interval: 15s
+    maxTickets: 4           # must fit inside sandbox.maxTotal
+    assessMode: rules
+
   # --- Optional database checkpoints (mounts a backup PVC) ---
   persistence:
     enabled: false

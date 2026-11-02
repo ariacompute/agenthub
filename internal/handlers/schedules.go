@@ -74,7 +74,7 @@ func (d Deps) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 	if !d.schedulesReady(w) {
 		return
 	}
-	s, err := d.Schedules.Get(r.Context(), r.PathValue("id"))
+	s, err := d.Schedules.Get(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -90,7 +90,7 @@ func (d Deps) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	if !d.schedulesReady(w) {
 		return
 	}
-	s, err := d.Schedules.Get(r.Context(), r.PathValue("id"))
+	s, err := d.Schedules.Get(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -112,7 +112,7 @@ func (d Deps) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	s.CronExpr = req.CronExpr
 	s.Enabled = req.Enabled
-	updated, err := d.Schedules.Update(r.Context(), s)
+	updated, err := d.Schedules.Update(r.Context(), s, callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -124,7 +124,7 @@ func (d Deps) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	if !d.schedulesReady(w) {
 		return
 	}
-	if err := d.Schedules.Delete(r.Context(), r.PathValue("id")); err != nil {
+	if err := d.Schedules.Delete(r.Context(), r.PathValue("id"), callerID(r)); err != nil {
 		httputil.WriteErr(w, err)
 		return
 	}

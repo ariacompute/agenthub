@@ -13,6 +13,10 @@ import (
 )
 
 // computersStore implements computers.Store over GORM.
+//
+// computers is one of the tables under forced row level security
+// (migrations/028_rls_policies_owned_surfaces.sql), so every method runs through
+// scoped/withIdentity rather than a bare handle.
 type computersStore struct{ db *gorm.DB }
 
 // NewComputersStore returns a computers.Store backed by the shared GORM handle.
@@ -41,30 +45,34 @@ func toDomainComputer(r *model.Computer) *computers.Computer {
 }
 
 func (s *computersStore) List(ctx context.Context, ownerID string) ([]*computers.Computer, error) {
-	var rows []model.Computer
-	q := s.db.WithContext(ctx).Order("created_at DESC")
-	if ownerID != "" {
-		q = q.Where("owner_id = ?", ownerID)
-	}
-	if err := q.Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*computers.Computer, 0, len(rows))
-	for i := range rows {
-		out = append(out, toDomainComputer(&rows[i]))
-	}
-	return out, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]*computers.Computer, error) {
+		var rows []model.Computer
+		q := db.Order("created_at DESC")
+		if ownerID != "" {
+			q = q.Where("owner_id = ?", ownerID)
+		}
+		if err := q.Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]*computers.Computer, 0, len(rows))
+		for i := range rows {
+			out = append(out, toDomainComputer(&rows[i]))
+		}
+		return out, nil
+	})
 }
 
-func (s *computersStore) Get(ctx context.Context, id string) (*computers.Computer, error) {
-	var r model.Computer
-	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&r).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+func (s *computersStore) Get(ctx context.Context, id, ownerID string) (*computers.Computer, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (*computers.Computer, error) {
+		var r model.Computer
+		if err := ownedWhere(db, id, ownerID).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	return toDomainComputer(&r), nil
+		return toDomainComputer(&r), nil
+	})
 }
 
 func (s *computersStore) Create(ctx context.Context, c *computers.Computer) (*computers.Computer, error) {
@@ -88,13 +96,15 @@ func (s *computersStore) Create(ctx context.Context, c *computers.Computer) (*co
 		LastAction: c.LastAction,
 		CreatedAt:  time.Now().UTC(),
 	}
-	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return db.Create(&row).Error
+	}); err != nil {
 		return nil, err
 	}
 	return toDomainComputer(&row), nil
 }
 
-func (s *computersStore) Update(ctx context.Context, c *computers.Computer) (*computers.Computer, error) {
+func (s *computersStore) Update(ctx context.Context, c *computers.Computer, ownerID string) (*computers.Computer, error) {
 	updates := map[string]any{
 		"session_ref": c.SessionRef,
 		"provider":    c.Provider,
@@ -104,14 +114,26 @@ func (s *computersStore) Update(ctx context.Context, c *computers.Computer) (*co
 		"status":      c.Status,
 		"last_action": c.LastAction,
 	}
-	if err := s.db.WithContext(ctx).Model(&model.Computer{}).Where("id = ?", c.ID).Updates(updates).Error; err != nil {
-		return nil, err
-	}
-	return s.Get(ctx, c.ID)
+	return scoped(ctx, s.db, func(db *gorm.DB) (*computers.Computer, error) {
+		if err := ownedWhere(db.Model(&model.Computer{}), c.ID, ownerID).
+			Updates(updates).Error; err != nil {
+			return nil, err
+		}
+		var r model.Computer
+		if err := ownedWhere(db, c.ID, ownerID).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return toDomainComputer(&r), nil
+	})
 }
 
-func (s *computersStore) Delete(ctx context.Context, id string) error {
-	return s.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Computer{}).Error
+func (s *computersStore) Delete(ctx context.Context, id, ownerID string) error {
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return ownedWhere(db, id, ownerID).Delete(&model.Computer{}).Error
+	})
 }
 
 // parseTimePtr keeps an empty string meaning "no expiry" instead of the zero

@@ -148,3 +148,42 @@ func TestVisibleEntriesFailsClosed(t *testing.T) {
 		t.Fatalf("visible = %v, want nothing when the store is down", got)
 	}
 }
+
+// A principal that resolved but carries no user id is not an identity.
+//
+// The ownership keys of every per-owner store call are user ids, and an empty
+// one means "the row has no owner", never "any owner" — so this shape has to be
+// refused once, at the door, instead of being trusted downstream. The rule is
+// Principal.Anonymous(), not "is the pointer nil": those differ exactly here.
+func TestAuthenticatedUsesTheSameRuleAsAnonymous(t *testing.T) {
+	as := func(p *authz.Principal) *http.Request {
+		return withPrincipal(httptest.NewRequest(http.MethodGet, "/api/channels", nil), p)
+	}
+	if authenticated(as(nil)) {
+		t.Fatal("a request with no principal is not authenticated")
+	}
+	if authenticated(as(&authz.Principal{Email: "ghost@example.com", IsOwner: true})) {
+		t.Fatal("a principal without a user id is not an identity, owner flag or not")
+	}
+	if !authenticated(as(reader("u-1"))) {
+		t.Fatal("a principal with a user id is authenticated")
+	}
+}
+
+// The middleware path: a session-less request to a guarded route is 401 with the
+// machine readable code, and the handler never runs.
+func TestRequireAuthRefusesASessionLessRequest(t *testing.T) {
+	d, _ := authTestDeps(t, "")
+	d.Channels = newFakeChannels()
+	h := Register(d)
+
+	w := do(t, h, http.MethodGet, "/api/channels", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d (%s), want 401", w.Code, w.Body.String())
+	}
+	var body capErrBody
+	decodeJSON(t, w, &body)
+	if body.Code != "unauthenticated" {
+		t.Fatalf("code = %q, want unauthenticated", body.Code)
+	}
+}

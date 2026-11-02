@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: agenthubs.agenthub.ai
 spec:
   group: agenthub.ai
@@ -56,9 +56,46 @@ spec:
           spec:
             description: AgentHubSpec is the desired state of an agenthub deployment.
             properties:
+              a2aLegacyMethods:
+                type: boolean
+              adminToken:
+                description: |-
+                  AdminToken is AGENTHUB_ADMIN_TOKEN, the break-glass bearer token. Prefer an
+                  existingSecret reference: an inline value lands in the managed Secret.
+                properties:
+                  existingSecret:
+                    type: string
+                  key:
+                    type: string
+                  value:
+                    type: string
+                type: object
+              agentTimeout:
+                type: string
               audioMaxBytes:
                 format: int32
                 type: integer
+              audit:
+                description: |-
+                  AuditSpec configures the API audit trail (AGENTHUB_AUDIT_*). The trail is on
+                  by default in the server; naming the block is how an operator changes its
+                  retention or turns it off deliberately.
+                properties:
+                  batch:
+                    format: int32
+                    type: integer
+                  enabled:
+                    type: boolean
+                  queue:
+                    description: Queue is the in-memory batch depth, Batch the rows
+                      per insert.
+                    format: int32
+                    type: integer
+                  retention:
+                    description: Retention is how long an audit row survives, as a
+                      Go duration ("2160h").
+                    type: string
+                type: object
               backup:
                 description: |-
                   BackupSpec sets the initial database checkpoint policy. Checkpointing is
@@ -155,6 +192,19 @@ spec:
               maxParallel:
                 format: int32
                 type: integer
+              migrateDatabaseURL:
+                description: |-
+                  MigrateDatabaseURL is the DDL role (AGENTHUB_MIGRATE_DATABASE_URL): a
+                  schema owner, distinct from the runtime role so a stolen runtime credential
+                  cannot alter a table or turn a policy off.
+                properties:
+                  existingSecret:
+                    type: string
+                  secretKey:
+                    type: string
+                  url:
+                    type: string
+                type: object
               modelRouterMode:
                 type: string
               oauth:
@@ -313,6 +363,79 @@ spec:
                       otherwise to an implementation-defined value. Requests cannot exceed Limits.
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
+                type: object
+              rls:
+                description: |-
+                  RLS is the row level security mode (AGENTHUB_RLS): "" and "enforce" keep
+                  the policies binding, "off" relaxes them. Off in production also needs
+                  RLSAck, and the controller refuses the combination without it rather than
+                  letting the Pod crash-loop on the server's own refusal.
+                enum:
+                - enforce
+                - "off"
+                type: string
+              rlsAck:
+                description: |-
+                  RLSAck is AGENTHUB_RLS_ACK: the operator's second signature on turning the
+                  policies off.
+                type: boolean
+              router:
+                description: |-
+                  RouterSpec configures the router layer (AGENTHUB_ROUTER_*): the trigger
+                  intake, the beat interval and the resource a ticket is delegated to.
+                properties:
+                  assessMode:
+                    type: string
+                  assessResource:
+                    type: string
+                  enabled:
+                    type: boolean
+                  interval:
+                    type: string
+                  maxTickets:
+                    description: |-
+                      MaxTickets bounds the concurrent tickets; it has to fit inside the
+                      sandbox ceilings, which the server validates at boot.
+                    format: int32
+                    type: integer
+                  resource:
+                    type: string
+                type: object
+              sandbox:
+                description: |-
+                  SandboxSpec configures the execution control plane (AGENTHUB_SANDBOX_*).
+
+                  Off unless Enabled is true: the server refuses to start a container runtime
+                  nobody asked for, and this block follows the same rule.
+                properties:
+                  defaultImage:
+                    type: string
+                  egressAllowlist:
+                    description: |-
+                      EgressAllowlist is recorded on every profile but not enforced: no provider
+                      filters egress hosts yet, so the server logs a warning and reads the
+                      allowlist network mode as "no network".
+                    items:
+                      type: string
+                    type: array
+                  enabled:
+                    type: boolean
+                  idleTTL:
+                    description: IdleTTL, MaxTTL and SweepInterval are Go durations
+                      ("10m", "1h").
+                    type: string
+                  maxPerOwner:
+                    format: int32
+                    type: integer
+                  maxTTL:
+                    type: string
+                  maxTotal:
+                    format: int32
+                    type: integer
+                  provider:
+                    type: string
+                  sweepInterval:
+                    type: string
                 type: object
               seedDemo:
                 type: boolean

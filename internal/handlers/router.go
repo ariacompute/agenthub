@@ -352,7 +352,7 @@ func (d Deps) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 	if !d.routerReady(w) {
 		return
 	}
-	trig, err := d.Router.RunSchedule(r.Context(), r.PathValue("id"))
+	trig, err := d.Router.RunSchedule(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		writeRouterErr(w, err)
 		return

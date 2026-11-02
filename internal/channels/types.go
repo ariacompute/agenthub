@@ -70,12 +70,25 @@ const (
 )
 
 // Store persists channels and their messages. Implemented in internal/store.
+//
+// Ownership is part of the key, not a filter: Get, Update and Delete take the
+// caller's owner id and report somebody else's row as absent. The list endpoint
+// was always scoped while the by-id endpoints were not, which let any signed in
+// user read, rewrite, re-point or delete another account's channel; a lookup
+// that does not carry the owner cannot answer "does this id exist" either
+// (requirements-isolation.md: an unauthorised read is "not found").
 type Store interface {
 	List(ctx context.Context, ownerID string) ([]*Channel, error)
-	Get(ctx context.Context, id string) (*Channel, error)
+	// Get returns the channel when ownerID owns it, and nil otherwise.
+	Get(ctx context.Context, id, ownerID string) (*Channel, error)
+	// GetUnscoped reads a channel with no ownership predicate. It exists for
+	// one caller only — the public inbound webhook, which has to read the row to
+	// verify the platform signature before any session can exist — and is always
+	// called with a system identity, never with a request identity.
+	GetUnscoped(ctx context.Context, id string) (*Channel, error)
 	Create(ctx context.Context, c *Channel) (*Channel, error)
-	Update(ctx context.Context, c *Channel) (*Channel, error)
-	Delete(ctx context.Context, id string) error
+	Update(ctx context.Context, c *Channel, ownerID string) (*Channel, error)
+	Delete(ctx context.Context, id, ownerID string) error
 	// RecordDelivery inserts a channel message. It returns (false, nil) when
 	// ExternalRef is a duplicate, letting the caller treat redelivery as a no-op.
 	RecordDelivery(ctx context.Context, m *ChannelMessage) (bool, error)

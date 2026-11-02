@@ -733,3 +733,114 @@ migrate: store: migration 026_rls_policies.sql failed:
       `TestIntegrationAPIKeyLifecycle` 这次都止步于迁移失败，断言仍未被执行过；其期望已逐条比对
       `authz.CanAccessResource` / `VisibleResourceIDs` / `BootstrapAdmin` 与 `006_rbac.sql`
       的 viewer 权限表，需以 CI 下一轮结果为准。
+
+## M12 — 第四轮完整度报告 §8 收口（2026-11-02）
+
+第四轮报告点出的第一类问题是**跨租户越权**：`schedules` / `channels` / `computers` 的列表
+按 owner 过滤，但按 id 取行只认 id——任何登录用户改一个 id 就能读、改、删、投递或「立即触发」
+别人的资产。第二类是同三张表没有被数据库行级策略覆盖，应用层是唯一一道闸。本轮先立闸，
+再把文档与沙盒的「说了但没做」逐条改正。
+
+### 1. 应用层 owner 作用域（8 处越权）
+
+照抄已被验证的 `threads` 范式：**owner 提到端口签名上**，仓储侧统一走 `store.ownedWhere`：
+
+```go
+Get(ctx, id, ownerID)         // WHERE id = ? AND owner_id = ?
+GetUnscoped(ctx, id)          // 仅 webhook；调用方必须自带系统身份
+Update(ctx, c, ownerID)       // 精确 owner
+Delete(ctx, id, ownerID)      // 精确 owner
+```
+
+语义定死：`ownerID == ""` 只匹配 `owner_id = ''` 的无主行，**不是「任意 owner」**；越权一律
+返回 404（不泄露存在性）。改动面：
+
+| 面 | 改法 |
+| --- | --- |
+| `handleGet/Update/DeleteSchedule` | 传 `callerID(r)` |
+| `handleRunSchedule` | `router.RunSchedule(ctx, id, ownerID)`；非本人 → `ErrTicketNotFound` → 既有 404；`ActorID` 仍记该行 owner，`Meta` 增 `requestedBy` |
+| `CronSource.Scan` | 列表与回写都在 `identity.With(ctx, {System:true})` 内，`Update` 传行自身的 `OwnerID` |
+| `handleGet/Update/DeleteChannel`、`Deliver`、`RetryDelivery` | 传 `callerID(r)` |
+| `handleListDeliveries` | **先**按 owner 取 channel 再列回执（此前完全没有归属校验） |
+| `handleChannelWebhook` | `GetUnscoped` + `systemScope(r)`；验签、去重、转发不变 |
+| `handleGetComputer`、创建回滚的 `Delete` | 传 `callerID(r)` |
+
+新增 `internal/handlers/ownership_test.go` 覆盖「他人 id → 404」的每一条路径。
+
+### 2. 数据库第二道闸：028 把三表纳入 FORCE RLS
+
+`migrations/028_rls_policies_owned_surfaces.sql`：`channels` / `schedules` / `computers` 三表
+`ENABLE` + `FORCE ROW LEVEL SECURITY`，策略 `*_owner_access` 的 `USING` 与 `WITH CHECK`
+都走 `agenthub_row_visible(owner_id)`——跨 owner 的 `UPDATE`/`INSERT` 也被数据库拒绝。
+受保护表因此从 8 张变 **11 张**，`tests/rls_test.go` 的表清单、策略名断言与三组新用例
+（无身份看不到 / 他人看不到 / 跨 owner 写入被拒）同步更新。
+
+`channel_messages` 有意不覆盖：回执只能经其 channel 到达，而 `handleListDeliveries` 已先做
+owner 作用域的父行取数，父行就是闸门。
+
+### 3. 认证口径对齐
+
+`requireAuth` 改用 `Principal.Anonymous()` 判定，而不是 `PrincipalFrom(r) == nil`：前者还覆盖
+「解析出了 principal 但没有 user id」这一形态，而它正是 owner 作用域下的 fail-open 入口。
+
+### 4. 文档端点补全 + 差集守卫
+
+- `web/src/lib/docs-content.js` 补 `DELETE /api/computers/{id}`（此前 `/docs` 屏漏项），
+  `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md`；`web/tests/docs-content.spec.js`
+  的端点数 132 → 133。
+- 新增 `tests/docs_endpoints_test.go`：正则抓 `handlers.go` 的 `mux.HandleFunc("METHOD PATH"`，
+  归一化 `{id}` 形态后与 `docs/docs.md` 的表格行做**双向差集**——`TestEveryRouteIsDocumented`
+  报漏项、`TestNoDocumentedRouteIsDead` 报幽灵条目。此后任何新路由漏文档都会直接红。
+
+### 5. 沙盒诚实化
+
+- `local` provider 的 `Describe().Network` 从 `[none bridge]` 改为 `[platform]`：裸子进程
+  没有自己的网络命名空间，它走宿主的路由与 DNS，声明「可无网」是卖没有的能力。
+- `Manager.Exec` 逐 arg 调 `sandbox.Argument(lease.Profile, arg)`（`CodePolicyDenied`）。
+  CLI 连接器本来在造租约前就问过 `ArgsAllowed`，但 `Exec` 是所有调用方的唯一漏斗——
+  包括 `POST /api/sandboxes/{id}/exec`，此前把调用方参数原样透传给 provider。
+  默认 `ArgsNone` 下等价于「不接受任何调用方参数」，合法路径零变化。
+- `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` 保留旋钮，但启动时非空即 `slog.Warn`：当前没有任何
+  provider 做主机过滤，列表仍按 `none` 执行；要真正生效需要 egress sidecar。
+
+### 6. 备份覆盖率（有库门控）
+
+新增 `internal/backup/pgdump_client_test.go`（子进程注入密码、失败透传、超时；用
+`TestMain` 之外的 helper 进程自证）与 `tests/backup_pgdump_test.go`
+（`DATABASE_URL` + `pg_dump`/`pg_restore` 双门控）：`SelectEngine` 命中 pg_dump、
+`Dump` 产出可读 manifest、`Restore` 往返、garbage archive 被拒。
+本机（Windows，无 PostgreSQL）全部 skip，数字以 CI 为准；`internal/backup` 无库时约 57%，
+有库 CI 上抬到 85% 以上——两个数字都如实记录，不合并成一个。
+
+### 7. operator RBAC 评估与 CRD 旋钮
+
+结论写在 `operator/README.md` / `README_cn.md`：K8s RBAC（operator 对 API 的权限）与
+应用层 RBAC（14 个权限码 + 组/角色/授予）是两层正交体系，CRD 不建模后者是合理边界，
+但必须写明「应用层 RBAC 在控制台配置」，否则运维会以为 CR 能声明用户权限。
+
+真 bug 一个：`config/rbac/role.yaml`（controller-gen 产物）缺 `persistentvolumeclaims`
+与 core 组 `events`，而 controller 真会 `buildPVC` + `Owns(PVC)` 并用 core events 记录事件
+——非 Helm 安装开 `persistence` 就 403。已补 `+kubebuilder:rbac` 标记并对齐清单。
+
+CRD 另补主服务有而 operator 缺的旋钮：`spec.rls{ mode, acknowledged }`、`spec.audit{…}`、
+`spec.sandbox{…}`、`spec.router{…}`、`spec.migrateDatabaseURL`、`spec.legacyMethods`、
+`spec.agentTimeout`、`spec.oauth.wechat`，渲染为对应 `AGENTHUB_*` 环境变量；
+`rls.mode=off` 必须 `acknowledged=true`，与主服务 `Validate()` 同规则。
+
+### 8. 校验与残余
+
+- [x] `go vet ./...` 干净。
+- [x] `go test -count=1 ./...` 全绿（本机无 PostgreSQL，集成用例 skip，属预期；
+      结论区分「通过」与「跳过」）。
+- [ ] CI 上 `go test -race ./...` 需要 cgo；本机 Windows 未装 C 工具链，故只跑无 `-race` 版本。
+- [ ] `tests/rls_test.go` 的三组新断言与 `tests/backup_pgdump_test.go` 需要真实数据库与
+      `pg_dump`/`pg_restore`，本机（Windows，无 PostgreSQL）全部 skip。WSL2 复验一条命令：
+
+      ```bash
+      DATABASE_URL=postgres://agenthub_app:pw@127.0.0.1:5432/agenthub?sslmode=disable \
+        go test -race -count=1 -run 'RLS|PgDump' ./tests/ ./internal/backup/
+      ```
+
+      （先 `psql -f scripts/provision-db-roles.sql` 建角色并跑过一次迁移。）
+- 残余：`channel_messages` 与 `threads` 无 `owner_id` 列，未纳入 RLS；webhook 的验签与去重
+  语义未改；operator 的 `buildRole`（受管应用自身 Role）保持最小，不动。

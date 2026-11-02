@@ -183,11 +183,16 @@ func (s *Service) Inject(ctx context.Context, t *Trigger) (*Trigger, bool, error
 }
 
 // RunSchedule fires a schedule immediately, whatever its cron expression says.
-func (s *Service) RunSchedule(ctx context.Context, id string) (*Trigger, error) {
+//
+// ownerID is the caller's: a manual firing is an act on somebody's goal, so the
+// row is looked up inside that owner's scope. Before this parameter existed any
+// signed in user could fire another account's goal and the resulting ticket was
+// recorded under the victim's actor id.
+func (s *Service) RunSchedule(ctx context.Context, id, ownerID string) (*Trigger, error) {
 	if s.schedules == nil {
 		return nil, ErrPolicyInvalid
 	}
-	sc, err := s.schedules.Get(ctx, id)
+	sc, err := s.schedules.Get(ctx, id, ownerID)
 	if err != nil {
 		return nil, err
 	}

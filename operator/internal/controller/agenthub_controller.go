@@ -85,6 +85,42 @@ const (
 	envOAuthOIDCSc     = "AGENTHUB_OAUTH_OIDC_SCOPES"
 	envBootstrapPwd    = "AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD"
 
+	// The knobs below were supported by the server but unreachable from a CR,
+	// which meant an operator had to patch the Deployment behind the controller
+	// (and lose the patch on the next reconcile) to use them.
+	envRLS            = "AGENTHUB_RLS"
+	envRLSAck         = "AGENTHUB_RLS_ACK"
+	envMigrateDBURL   = "AGENTHUB_MIGRATE_DATABASE_URL"
+	envAdminToken     = "AGENTHUB_ADMIN_TOKEN"
+	envAgentTimeout   = "AGENTHUB_AGENT_TIMEOUT"
+	envA2ALegacy      = "AGENTHUB_A2A_LEGACY_METHODS"
+	envAuditEnabled   = "AGENTHUB_AUDIT_ENABLED"
+	envAuditRetention = "AGENTHUB_AUDIT_RETENTION"
+	envAuditQueue     = "AGENTHUB_AUDIT_QUEUE"
+	envAuditBatch     = "AGENTHUB_AUDIT_BATCH"
+	envSandboxEnabled = "AGENTHUB_SANDBOX_ENABLED"
+	envSandboxProv    = "AGENTHUB_SANDBOX_PROVIDER"
+	envSandboxImage   = "AGENTHUB_SANDBOX_DEFAULT_IMAGE"
+	envSandboxIdle    = "AGENTHUB_SANDBOX_IDLE_TTL"
+	envSandboxMaxTTL  = "AGENTHUB_SANDBOX_MAX_TTL"
+	envSandboxPerOwn  = "AGENTHUB_SANDBOX_MAX_PER_OWNER"
+	envSandboxTotal   = "AGENTHUB_SANDBOX_MAX_TOTAL"
+	envSandboxSweep   = "AGENTHUB_SANDBOX_SWEEP_INTERVAL"
+	envSandboxEgress  = "AGENTHUB_SANDBOX_EGRESS_ALLOWLIST"
+	envRouterEnabled  = "AGENTHUB_ROUTER_ENABLED"
+	envRouterInterval = "AGENTHUB_ROUTER_INTERVAL"
+	envRouterTickets  = "AGENTHUB_ROUTER_MAX_TICKETS"
+	envRouterAssess   = "AGENTHUB_ROUTER_ASSESS_MODE"
+	envRouterAssessR  = "AGENTHUB_ROUTER_ASSESS_RESOURCE"
+	envRouterResource = "AGENTHUB_ROUTER_RESOURCE"
+
+	// RLSModeEnforce / RLSModeOff mirror internal/config. The controller has to
+	// know them because it refuses the same combination the server refuses, one
+	// layer earlier: a Pod that crash-loops on a policy switch is a worse
+	// experience than a CR that never leaves the API server.
+	RLSModeEnforce = "enforce"
+	RLSModeOff     = "off"
+
 	defaultHTTPPort = int32(3500)
 	defaultEnv      = "dev"
 	defaultStatic   = "/app/backend/static"
@@ -105,9 +141,11 @@ type AgentHubReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is the controller-runtime entry point.
 func (r *AgentHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -258,6 +296,22 @@ func validate(cr *agenthubv1alpha1.AgentHub) (string, string) {
 		if spec.EncryptionKey.ExistingSecret == "" && len(spec.EncryptionKey.Value) < 32 {
 			return "WeakEncryptionKey", "AGENTHUB_ENV=prod requires spec.encryptionKey with at least 32 bytes (or an existingSecret reference)"
 		}
+	}
+	// The same rule internal/config enforces at boot, applied one layer earlier
+	// so the Pod is never created in a state that cannot start. The two answers
+	// have to agree: an operator that accepts what the server rejects produces a
+	// CR stuck in CrashLoopBackOff with no condition explaining why.
+	switch spec.RLS {
+	case "", RLSModeEnforce:
+	case RLSModeOff:
+		ack := spec.RLSAck != nil && *spec.RLSAck
+		if spec.Env == "prod" && !ack {
+			return "RLSOffNotAcknowledged",
+				"spec.rls=off is refused with env=prod unless spec.rlsAck is true: the switch makes every " +
+					"per-owner policy a no-op, and a staging value copied into production must not do that by accident"
+		}
+	default:
+		return "InvalidRLSMode", fmt.Sprintf("spec.rls must be %q or %q, got %q", RLSModeEnforce, RLSModeOff, spec.RLS)
 	}
 	return "", ""
 }
@@ -410,6 +464,69 @@ func buildConfig(cr *agenthubv1alpha1.AgentHub) (corev1.ConfigMap, corev1.Secret
 	putStr(envSpeech, spec.SpeechMode)
 	if spec.AudioMaxBytes != nil {
 		putStr(envAudioMaxBytes, fmt.Sprint(*spec.AudioMaxBytes))
+	}
+
+	// Row level security. "enforce" is written out rather than left to the
+	// binary's default: a CR that says what it wants survives a version whose
+	// default changes.
+	putStr(envRLS, spec.RLS)
+	if spec.RLSAck != nil {
+		putStr(envRLSAck, boolStr(spec.RLSAck))
+	}
+	if spec.MigrateDatabaseURL != nil {
+		addSecretValue(envMigrateDBURL, agenthubv1alpha1.SecretOrValue{
+			Value:          spec.MigrateDatabaseURL.URL,
+			ExistingSecret: spec.MigrateDatabaseURL.ExistingSecret,
+			Key:            defaultString(spec.MigrateDatabaseURL.SecretKey, envMigrateDBURL),
+		}, &secret, &extra)
+	}
+	addSecretValue(envAdminToken, spec.AdminToken, &secret, &extra)
+	putStr(envAgentTimeout, spec.AgentTimeout)
+	if spec.A2ALegacyMethods != nil {
+		putStr(envA2ALegacy, boolStr(spec.A2ALegacyMethods))
+	}
+
+	if spec.Audit != nil {
+		putStr(envAuditEnabled, boolStr(spec.Audit.Enabled))
+		putStr(envAuditRetention, spec.Audit.Retention)
+		if spec.Audit.Queue != nil {
+			putStr(envAuditQueue, fmt.Sprint(*spec.Audit.Queue))
+		}
+		if spec.Audit.Batch != nil {
+			putStr(envAuditBatch, fmt.Sprint(*spec.Audit.Batch))
+		}
+	}
+
+	if spec.Sandbox != nil {
+		putStr(envSandboxEnabled, boolStr(spec.Sandbox.Enabled))
+		putStr(envSandboxProv, spec.Sandbox.Provider)
+		putStr(envSandboxImage, spec.Sandbox.DefaultImage)
+		putStr(envSandboxIdle, spec.Sandbox.IdleTTL)
+		putStr(envSandboxMaxTTL, spec.Sandbox.MaxTTL)
+		putStr(envSandboxSweep, spec.Sandbox.SweepInterval)
+		if spec.Sandbox.MaxPerOwner != nil {
+			putStr(envSandboxPerOwn, fmt.Sprint(*spec.Sandbox.MaxPerOwner))
+		}
+		if spec.Sandbox.MaxTotal != nil {
+			putStr(envSandboxTotal, fmt.Sprint(*spec.Sandbox.MaxTotal))
+		}
+		if len(spec.Sandbox.EgressAllowlist) > 0 {
+			// Recorded, not enforced: no provider filters egress hosts yet and
+			// the server warns about it at boot. It is rendered so a CR stays the
+			// whole truth about the process it describes.
+			putStr(envSandboxEgress, strings.Join(spec.Sandbox.EgressAllowlist, ","))
+		}
+	}
+
+	if spec.Router != nil {
+		putStr(envRouterEnabled, boolStr(spec.Router.Enabled))
+		putStr(envRouterInterval, spec.Router.Interval)
+		if spec.Router.MaxTickets != nil {
+			putStr(envRouterTickets, fmt.Sprint(*spec.Router.MaxTickets))
+		}
+		putStr(envRouterAssess, spec.Router.AssessMode)
+		putStr(envRouterAssessR, spec.Router.AssessResource)
+		putStr(envRouterResource, spec.Router.Resource)
 	}
 
 	if spec.OAuth != nil {

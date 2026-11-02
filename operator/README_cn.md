@@ -78,6 +78,22 @@ kubectl -n agenthub-operator get pods,svc,deploy
 | `audioMaxBytes` | `AGENTHUB_AUDIO_MAX_BYTES` | |
 | `registrySync.*` | `AGENTHUB_REGISTRY_SYNC_*` | |
 | `backup.*` | `AGENTHUB_BACKUP_*` | |
+| `rls` | `AGENTHUB_RLS` | `enforce`（默认）/ `off`；`off` 且 `env: prod` 时还必须给 `rlsAck` |
+| `rlsAck` | `AGENTHUB_RLS_ACK` | 关掉行级策略的第二道签名 |
+| `migrateDatabaseURL` | `AGENTHUB_MIGRATE_DATABASE_URL` | DDL 角色；密钥（优先 `existingSecret`） |
+| `adminToken` | `AGENTHUB_ADMIN_TOKEN` | 应急 bearer token；密钥 |
+| `agentTimeout` | `AGENTHUB_AGENT_TIMEOUT` | |
+| `a2aLegacyMethods` | `AGENTHUB_A2A_LEGACY_METHODS` | |
+| `audit.enabled` / `audit.retention` | `AGENTHUB_AUDIT_ENABLED` / `_RETENTION` | API 审计 |
+| `audit.queue` / `audit.batch` | `AGENTHUB_AUDIT_QUEUE` / `_BATCH` | |
+| `sandbox.enabled` / `sandbox.provider` | `AGENTHUB_SANDBOX_ENABLED` / `_PROVIDER` | 未启用时执行能力**关闭** |
+| `sandbox.defaultImage` | `AGENTHUB_SANDBOX_DEFAULT_IMAGE` | |
+| `sandbox.idleTTL` / `maxTTL` / `sweepInterval` | `AGENTHUB_SANDBOX_*` | Go duration |
+| `sandbox.maxPerOwner` / `maxTotal` | `AGENTHUB_SANDBOX_MAX_*` | 必须与 `router.maxTickets` 相容 |
+| `sandbox.egressAllowlist` | `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` | 只记录，**不生效**（没有 provider 做主机过滤） |
+| `router.enabled` / `router.interval` | `AGENTHUB_ROUTER_*` | |
+| `router.maxTickets` | `AGENTHUB_ROUTER_MAX_TICKETS` | |
+| `router.assessMode` / `assessResource` / `resource` | `AGENTHUB_ROUTER_*` | |
 | `persistence.enabled` | — | 在 `/var/lib/agenthub/backups` 挂载 PVC，并设置 `AGENTHUB_BACKUP_DIR` |
 
 非敏感值进入 ConfigMap；内联的敏感值（数据库 DSN、引导管理员密码、加密/推送密钥、OAuth 密钥）
@@ -110,6 +126,51 @@ operator 被授予一个**命名空间级 `Role`**（而非 `ClusterRole`），�
 且 `WATCH_NAMESPACE` 被设为该命名空间。请在**与 operator 相同的命名空间**中创建你的
 `AgentHub` CR。如需 watch 多个命名空间，把 chart 改为 `ClusterRole` / `ClusterRoleBinding`
 并去掉 `WATCH_NAMESPACE`。
+
+### 关掉行级安全
+`spec.rls: enforce` 是默认值，也是 `prod` CR 唯一能用的值——除非同时设 `spec.rlsAck: true`。
+这个组合在调和期就被拒绝（`status.conditions[Available]=False, reason=RLSOffNotAcknowledged`），
+理由与 `config.go` 在启动时拒绝它一样：`AGENTHUB_RLS=off` 会让每一条按 owner 的策略变成
+空操作，一个从 staging 抄进生产的值不该顺手扩大可见行。未知取值在两边都会被拒
+（`reason=InvalidRLSMode`），而不是塞给一个注定退出的 Pod。
+
+## RBAC：operator 授予了什么，没授予什么
+
+这里有**两层互不相干的 RBAC**，只有第一层归 operator 管。被问到「operator 的 RBAC 和主服务
+一致吗」时，把它们混为一谈就是最常见的错误。
+
+**1. Kubernetes RBAC——operator 自己的凭据。** 由 reconciler 上的 `+kubebuilder:rbac` 标记声明，
+生成到 `config/rbac/role.yaml`（`make manifests`）。Helm chart 在
+`deploy/agenthub-operator/templates/role.yaml` 里提供等价的命名空间级 `Role`。两份必须对同一批
+对象授予同一批 verbs，因为它们是安装同一个控制器的两条路：
+
+| 对象 | verbs | 用途 |
+|---|---|---|
+| `agenthubs` + `/status` + `/finalizers` | get, list, watch, create, update, patch, delete | CR 本身 |
+| `deployments`（apps） | 同上 | 工作负载 |
+| `services`、`configmaps`、`secrets`、`serviceaccounts` | 同上 | 子对象 |
+| `persistentvolumeclaims` | 同上 | **仅在启用 persistence 时**——`buildPVC` 每个 CR 建一个 |
+| `roles`、`rolebindings`（rbac） | 同上 | 受管应用的最小 `Role` |
+| `leases`（coordination） | 同上 | 选主 |
+| `events`（core **与** `events.k8s.io`） | create, patch | 记录器写的是 `core/v1` 事件；`events.k8s.io` 是新兄弟组，两组都授予才不挑集群 |
+
+生成出来的 `ClusterRole` 曾经缺 `persistentvolumeclaims` 与 core `events`，而 chart 的 `Role`
+两项都有：于是不是用 Helm 安装（直接 apply `config/rbac`）的集群，一旦开 `persistence` 就会
+403，记录器也发不出事件。现在两边都补齐且一致；`controller-gen` 会把两个 `events` 组合并成
+一条规则，等价。
+
+**2. agenthub 应用层 RBAC——服务自己的授权。** `permissions` / `roles` / `grants` 三张表、
+十四个权限码（`tasks:read`、`resources:write`、`audit:read` 等）与组成员关系。这一层**无法**
+用 CR 表达，operator 也刻意不去表达：
+
+- 词汇表在 `internal/authz` 里，随服务端版本走，不随 CRD 走；把它做成 CRD enum 等于每加一个
+  权限都要跟 CRD 一起发版；
+- 一条授予是「某个用户的一行数据」，不是期望状态——控制器去调和它只会和控制台打架，而且还需要
+  一个 `users` CRD 才能挂上去；
+- operator 创建的唯一身份是引导管理员，服务端把它标成 owner（`IsOwner`），与在集群外设置
+  `AGENTHUB_BOOTSTRAP_ADMIN_*` 完全同义。
+
+因此「应用层 RBAC」应当、也只能在控制台里配置；CR 里没有、也不会有用户权限字段。
 
 ## 本地集群演练（kind / k3d）
 

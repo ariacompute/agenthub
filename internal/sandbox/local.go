@@ -23,12 +23,19 @@ func NewLocalProvider() *LocalProvider { return &LocalProvider{} }
 func (l *LocalProvider) Name() string { return "local" }
 
 // Describe tells the truth: process isolation only.
+//
+// The network entry says platform, not none or bridge. A child process has no
+// network namespace of its own — it reaches whatever the host reaches, on the
+// host's routing table and DNS — so claiming it can be had "without network"
+// was a promise this provider cannot keep. Only a container or a bubblewrap
+// sandbox can actually withhold the network; those two report the modes they
+// enforce.
 func (l *LocalProvider) Describe(context.Context) (Descriptor, error) {
 	return Descriptor{
 		Name:      "local",
 		Layer:     LayerProcess,
 		Isolation: IsolationNone,
-		Network:   []string{NetworkNone, NetworkBridge},
+		Network:   []string{NetworkPlatform},
 		Source:    SourceBuiltin,
 		License:   "n/a",
 		DocsURL:   "/docs",

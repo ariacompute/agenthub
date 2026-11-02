@@ -28,22 +28,26 @@ func (s *stubSchedules) List(ctx context.Context, ownerID string) ([]*schedules.
 	return out, nil
 }
 
-func (s *stubSchedules) Get(ctx context.Context, id string) (*schedules.Schedule, error) {
+func (s *stubSchedules) Get(ctx context.Context, id, ownerID string) (*schedules.Schedule, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.items[id], nil
+	sc := s.items[id]
+	if sc == nil || sc.OwnerID != ownerID {
+		return nil, nil
+	}
+	return sc, nil
 }
 
 func (s *stubSchedules) Create(ctx context.Context, sc *schedules.Schedule) (*schedules.Schedule, error) {
 	return sc, nil
 }
 
-func (s *stubSchedules) Update(ctx context.Context, sc *schedules.Schedule) (*schedules.Schedule, error) {
+func (s *stubSchedules) Update(ctx context.Context, sc *schedules.Schedule, ownerID string) (*schedules.Schedule, error) {
 	return sc, nil
 }
 
-func (s *stubSchedules) Delete(ctx context.Context, id string) error { return nil }
+func (s *stubSchedules) Delete(ctx context.Context, id, ownerID string) error { return nil }
 
 // newTestService builds the facade the HTTP layer sees, over the memory store and
 // the hub stub, with a hand-cranked clock so a beat is always deterministic.
@@ -164,7 +168,7 @@ func TestServiceRunScheduleFiresOneGoal(t *testing.T) {
 	svc, _, _, _ := newTestService(t, ServiceOptions{Schedules: src})
 	ctx := context.Background()
 
-	out, err := svc.RunSchedule(ctx, "sched-9")
+	out, err := svc.RunSchedule(ctx, "sched-9", "usr-1")
 	if err != nil {
 		t.Fatalf("run schedule: %v", err)
 	}
@@ -178,12 +182,19 @@ func TestServiceRunScheduleFiresOneGoal(t *testing.T) {
 		t.Fatalf("a manual run must be marked in the metadata, got %+v", out.Meta)
 	}
 
-	if _, err := svc.RunSchedule(ctx, "nope"); !errors.Is(err, ErrTicketNotFound) {
+	if _, err := svc.RunSchedule(ctx, "nope", "usr-1"); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("an unknown schedule must be not-found, got %v", err)
 	}
 
+	// Another owner's goal is not found — not "fired on their behalf". Firing it
+	// would open a ticket whose actor id is the victim's, which is the
+	// action-shaped half of the cross-tenant hole this parameter closes.
+	if _, err := svc.RunSchedule(ctx, "sched-9", "usr-2"); !errors.Is(err, ErrTicketNotFound) {
+		t.Fatalf("another owner's schedule must be not-found, got %v", err)
+	}
+
 	src.err = errors.New("db down")
-	if _, err := svc.RunSchedule(ctx, "sched-9"); err == nil || errors.Is(err, ErrTicketNotFound) {
+	if _, err := svc.RunSchedule(ctx, "sched-9", "usr-1"); err == nil || errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("a store failure must surface as-is, got %v", err)
 	}
 }
@@ -191,7 +202,7 @@ func TestServiceRunScheduleFiresOneGoal(t *testing.T) {
 func TestServiceRunScheduleNeedsAScheduleStore(t *testing.T) {
 	svc, _, _, _ := newTestService(t, ServiceOptions{})
 	// Without a schedule store the endpoint must refuse rather than invent a goal.
-	if _, err := svc.RunSchedule(context.Background(), "sched-9"); !errors.Is(err, ErrPolicyInvalid) {
+	if _, err := svc.RunSchedule(context.Background(), "sched-9", "usr-1"); !errors.Is(err, ErrPolicyInvalid) {
 		t.Fatalf("want ErrPolicyInvalid, got %v", err)
 	}
 }

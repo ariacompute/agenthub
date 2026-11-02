@@ -14,6 +14,11 @@ import (
 
 // channelsStore implements channels.Store over GORM, following the same shape as the
 // other store implementations in this package.
+//
+// channels is one of the tables under forced row level security
+// (migrations/028_rls_policies_owned_surfaces.sql), so every method runs through
+// scoped/withIdentity: without the identity in the session, a policy compares the
+// owner against NULL and the statement touches nothing.
 type channelsStore struct {
 	db *gorm.DB
 }
@@ -60,30 +65,51 @@ func toDomainMessage(r *model.ChannelMessage) *channels.ChannelMessage {
 }
 
 func (s *channelsStore) List(ctx context.Context, ownerID string) ([]*channels.Channel, error) {
-	var rows []model.Channel
-	q := s.db.WithContext(ctx).Order("created_at DESC")
-	if ownerID != "" {
-		q = q.Where("owner_id = ?", ownerID)
-	}
-	if err := q.Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*channels.Channel, 0, len(rows))
-	for i := range rows {
-		out = append(out, toDomainChannel(&rows[i]))
-	}
-	return out, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]*channels.Channel, error) {
+		var rows []model.Channel
+		q := db.Order("created_at DESC")
+		if ownerID != "" {
+			q = q.Where("owner_id = ?", ownerID)
+		}
+		if err := q.Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]*channels.Channel, 0, len(rows))
+		for i := range rows {
+			out = append(out, toDomainChannel(&rows[i]))
+		}
+		return out, nil
+	})
 }
 
-func (s *channelsStore) Get(ctx context.Context, id string) (*channels.Channel, error) {
-	var r model.Channel
-	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&r).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+func (s *channelsStore) Get(ctx context.Context, id, ownerID string) (*channels.Channel, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (*channels.Channel, error) {
+		var r model.Channel
+		if err := ownedWhere(db, id, ownerID).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	return toDomainChannel(&r), nil
+		return toDomainChannel(&r), nil
+	})
+}
+
+// GetUnscoped is the webhook's read: no ownership predicate, because the row
+// itself carries the signing secret reference the request is verified against.
+// It is called with a system identity so row level security admits it, and it
+// must never be reached from a path that answers a signed in user.
+func (s *channelsStore) GetUnscoped(ctx context.Context, id string) (*channels.Channel, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (*channels.Channel, error) {
+		var r model.Channel
+		if err := db.Where("id = ?", id).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return toDomainChannel(&r), nil
+	})
 }
 
 func (s *channelsStore) Create(ctx context.Context, c *channels.Channel) (*channels.Channel, error) {
@@ -103,13 +129,15 @@ func (s *channelsStore) Create(ctx context.Context, c *channels.Channel) (*chann
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
-	if err := s.db.WithContext(ctx).Create(&r).Error; err != nil {
+	if err := withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return db.Create(&r).Error
+	}); err != nil {
 		return nil, err
 	}
 	return toDomainChannel(&r), nil
 }
 
-func (s *channelsStore) Update(ctx context.Context, c *channels.Channel) (*channels.Channel, error) {
+func (s *channelsStore) Update(ctx context.Context, c *channels.Channel, ownerID string) (*channels.Channel, error) {
 	cfg, err := model.NewJSONField(c.Config)
 	if err != nil {
 		return nil, err
@@ -125,16 +153,20 @@ func (s *channelsStore) Update(ctx context.Context, c *channels.Channel) (*chann
 		OwnerID:       c.OwnerID,
 		UpdatedAt:     time.Now().UTC(),
 	}
-	if err := s.db.WithContext(ctx).
-		Where("id = ?", c.ID).
-		Updates(&r).Error; err != nil {
+	// Ownership is never transferred by an update: the row is matched with the
+	// caller's owner id, and the write puts the same owner back.
+	if err := withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return ownedWhere(db.Model(&model.Channel{}), c.ID, ownerID).Updates(&r).Error
+	}); err != nil {
 		return nil, err
 	}
 	return toDomainChannel(&r), nil
 }
 
-func (s *channelsStore) Delete(ctx context.Context, id string) error {
-	return s.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Channel{}).Error
+func (s *channelsStore) Delete(ctx context.Context, id, ownerID string) error {
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		return ownedWhere(db, id, ownerID).Delete(&model.Channel{}).Error
+	})
 }
 
 func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelMessage) (bool, error) {
@@ -153,35 +185,36 @@ func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelM
 		Error:       m.Error,
 		CreatedAt:   time.Now().UTC(),
 	}
-	// The unique index on (channel_id, external_ref) dedupes redeliveries: an
-	// identical key is swallowed rather than erroring.
-	err = s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&r).Error
-	if err != nil {
-		return false, err
-	}
-	// If no row was written (conflict swallowed), treat as a duplicate.
-	affected := s.db.WithContext(ctx).
-		Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ExternalRef).
-		First(&model.ChannelMessage{}).Error
-	if affected != nil {
-		return false, nil
-	}
-	return true, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) (bool, error) {
+		// The unique index on (channel_id, external_ref) dedupes redeliveries: an
+		// identical key is swallowed rather than erroring.
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&r).Error; err != nil {
+			return false, err
+		}
+		// If no row was written (conflict swallowed), treat as a duplicate.
+		affected := db.
+			Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ExternalRef).
+			First(&model.ChannelMessage{}).Error
+		if affected != nil {
+			return false, nil
+		}
+		return true, nil
+	})
 }
 
 func (s *channelsStore) GetDelivery(ctx context.Context, channelID, id string) (*channels.ChannelMessage, error) {
-	var r model.ChannelMessage
-	if err := s.db.WithContext(ctx).
-		Where("channel_id = ? AND external_ref = ?", channelID, id).
-		First(&r).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) (*channels.ChannelMessage, error) {
+		var r model.ChannelMessage
+		if err := db.
+			Where("channel_id = ? AND external_ref = ?", channelID, id).
+			First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	return toDomainMessage(&r), nil
+		return toDomainMessage(&r), nil
+	})
 }
 
 func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelMessage) (bool, error) {
@@ -189,27 +222,31 @@ func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelM
 	if err != nil {
 		return false, err
 	}
-	res := s.db.WithContext(ctx).
-		Model(&model.ChannelMessage{}).
-		Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ID).
-		Updates(map[string]any{"status": m.Status, "error": m.Error, "payload": payload})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) (bool, error) {
+		res := db.
+			Model(&model.ChannelMessage{}).
+			Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ID).
+			Updates(map[string]any{"status": m.Status, "error": m.Error, "payload": payload})
+		if res.Error != nil {
+			return false, res.Error
+		}
+		return res.RowsAffected > 0, nil
+	})
 }
 
 func (s *channelsStore) ListDeliveries(ctx context.Context, channelID string) ([]*channels.ChannelMessage, error) {
-	var rows []model.ChannelMessage
-	if err := s.db.WithContext(ctx).
-		Where("channel_id = ?", channelID).
-		Order("created_at DESC").
-		Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]*channels.ChannelMessage, 0, len(rows))
-	for i := range rows {
-		out = append(out, toDomainMessage(&rows[i]))
-	}
-	return out, nil
+	return scoped(ctx, s.db, func(db *gorm.DB) ([]*channels.ChannelMessage, error) {
+		var rows []model.ChannelMessage
+		if err := db.
+			Where("channel_id = ?", channelID).
+			Order("created_at DESC").
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]*channels.ChannelMessage, 0, len(rows))
+		for i := range rows {
+			out = append(out, toDomainMessage(&rows[i]))
+		}
+		return out, nil
+	})
 }

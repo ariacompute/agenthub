@@ -31,6 +31,9 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # Both event APIs: the recorder writes core/v1, events.k8s.io is its newer
+  # sibling. controller-gen merges these two into one rule with two apiGroups in
+  # config/rbac/role.yaml; the effect has to stay identical, so keep them in sync.
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]

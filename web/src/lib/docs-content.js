@@ -1131,6 +1131,16 @@ export const httpEndpoints = [
   },
   {
     group: 'capabilities',
+    method: 'DELETE',
+    path: '/api/computers/{id}',
+    permission: 'resources:write',
+    descKey: 'verbDelete',
+    nounKey: 'nounComputers',
+    request: '',
+    response: '204 — terminates the sandbox lease first, then drops the card | 404 computer_not_found',
+  },
+  {
+    group: 'capabilities',
     method: 'GET',
     path: '/api/schedules',
     permission: 'tasks:read',

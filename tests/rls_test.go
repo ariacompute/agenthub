@@ -30,7 +30,10 @@ import (
 
 	"gorm.io/gorm"
 
+	"agenthub/internal/channels"
+	"agenthub/internal/computers"
 	"agenthub/internal/identity"
+	"agenthub/internal/schedules"
 	"agenthub/internal/store"
 )
 
@@ -306,6 +309,10 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 	expected := []string{
 		"tasks", "task_artifacts", "task_spans", "task_pending", "task_push",
 		"events", "knowledge", "audit_log",
+		// The three per-owner surfaces joined in 028. They are the tables whose
+		// by-id endpoints used to answer any id, so this list is also the
+		// regression guard for that class of bug.
+		"channels", "schedules", "computers",
 	}
 	for _, table := range expected {
 		var enabled, forced bool
@@ -346,6 +353,7 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		"task_pending_owner_access", "task_push_owner_access", "events_owner_access",
 		"knowledge_owner_access",
 		"audit_log_read", "audit_log_append", "audit_log_retention",
+		"channels_owner_access", "schedules_owner_access", "computers_owner_access",
 	} {
 		if !names[want] {
 			t.Fatalf("policy %q is missing, got %v", want, names)
@@ -583,5 +591,110 @@ func TestRLSRepositoryQueriesAreScoped(t *testing.T) {
 	}
 	if _, err := repo.Get(stranger, id); err == nil {
 		t.Fatal("another account read the task through the repository")
+	}
+}
+
+// TestRLSOwnedSurfacesAreScopedByOwner walks channels, schedules and computers
+// through their real repositories. The three share one shape: the list endpoint
+// always carried the owner, the by-id endpoints did not, and the tables had no
+// policy behind them either — so a missing owner in a handler was invisible.
+//
+// The assertions are therefore two-sided: the SQL scoping must answer "absent"
+// for a stranger, and the policy must agree. Only the webhook read is
+// deliberately unscoped, and it is asserted explicitly so nobody narrows it
+// later without discovering why it exists.
+func TestRLSOwnedSurfacesAreScopedByOwner(t *testing.T) {
+	db := openRLSDB(t)
+	id := rlsTag(t)
+	alice := "alice-" + id
+	bob := "bob-" + id
+	aliceCtx := identity.With(t.Context(), identity.Identity{OwnerID: alice})
+	bobCtx := identity.With(t.Context(), identity.Identity{OwnerID: bob})
+	system := identity.System()
+
+	chans := store.NewChannelsStore(db)
+	scheds := store.NewSchedulesStore(db)
+	comps := store.NewComputersStore(db)
+
+	channel, err := chans.Create(aliceCtx, &channels.Channel{
+		Kind: channels.KindSlack, Name: "webhook-" + id, Enabled: true,
+		SigningKeyEnv: "RLS_TEST_" + id, OwnerID: alice,
+		Config: map[string]any{"target_url": "https://example.test/hook"},
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	sched, err := scheds.Create(aliceCtx, &schedules.Schedule{
+		Goal: "goal-" + id, Trigger: "cron", CronExpr: "0 9 * * *", Enabled: true, OwnerID: alice,
+	})
+	if err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	comp, err := comps.Create(aliceCtx, &computers.Computer{
+		Kind: computers.KindShell, LastAction: "action-" + id, OwnerID: alice,
+	})
+	if err != nil {
+		t.Fatalf("create computer: %v", err)
+	}
+	t.Cleanup(func() {
+		// Cleanup runs as the process: a policy would refuse to delete another
+		// owner's row, which is the behaviour under test.
+		_ = chans.Delete(system, channel.ID, alice)
+		_ = scheds.Delete(system, sched.ID, alice)
+		_ = comps.Delete(system, comp.ID, alice)
+	})
+
+	// The owner reads their own rows.
+	if got, err := chans.Get(aliceCtx, channel.ID, alice); err != nil || got == nil {
+		t.Fatalf("the owner cannot read their channel: %v", err)
+	}
+	if got, err := scheds.Get(aliceCtx, sched.ID, alice); err != nil || got == nil {
+		t.Fatalf("the owner cannot read their schedule: %v", err)
+	}
+	if got, err := comps.Get(aliceCtx, comp.ID, alice); err != nil || got == nil {
+		t.Fatalf("the owner cannot read their computer: %v", err)
+	}
+
+	// A stranger reads nothing, through either layer.
+	if got, err := chans.Get(bobCtx, channel.ID, bob); err != nil || got != nil {
+		t.Fatalf("stranger channel read = %+v (err=%v), want absent", got, err)
+	}
+	if got, err := scheds.Get(bobCtx, sched.ID, bob); err != nil || got != nil {
+		t.Fatalf("stranger schedule read = %+v (err=%v), want absent", got, err)
+	}
+	if got, err := comps.Get(bobCtx, comp.ID, bob); err != nil || got != nil {
+		t.Fatalf("stranger computer read = %+v (err=%v), want absent", got, err)
+	}
+	if list, err := scheds.List(bobCtx, bob); err != nil || len(list) != 0 {
+		t.Fatalf("stranger schedule list = %d (err=%v), want 0", len(list), err)
+	}
+
+	// A stranger's write and delete touch nothing.
+	if _, err := scheds.Update(bobCtx, &schedules.Schedule{ID: sched.ID, Goal: "hijacked"}, bob); err != nil {
+		t.Fatalf("a refused update must not error, got %v", err)
+	}
+	if err := chans.Delete(bobCtx, channel.ID, bob); err != nil {
+		t.Fatalf("a refused delete must not error, got %v", err)
+	}
+	if kept, err := scheds.Get(aliceCtx, sched.ID, alice); err != nil || kept == nil || kept.Goal != "goal-"+id {
+		t.Fatalf("the schedule was rewritten by a stranger: %+v (err=%v)", kept, err)
+	}
+	if kept, err := chans.Get(aliceCtx, channel.ID, alice); err != nil || kept == nil {
+		t.Fatalf("the channel was deleted by a stranger: %+v (err=%v)", kept, err)
+	}
+
+	// The webhook's read: unscoped on purpose, admitted because it runs as the
+	// process. Without the system identity the policy would deny it, which is
+	// the reason this method is named GetUnscoped and called from exactly one
+	// place.
+	if got, err := chans.GetUnscoped(system, channel.ID); err != nil || got == nil {
+		t.Fatalf("the webhook cannot read a channel: %+v (err=%v)", got, err)
+	}
+
+	// Fail closed: a connection that forgot its identity sees none of the three.
+	for _, table := range []string{"channels", "schedules", "computers"} {
+		if n := countIn(t, db, rlsIdentity{}, `SELECT count(*) FROM `+table+` WHERE id IS NOT NULL`); n != 0 {
+			t.Fatalf("a connection with no identity saw %d rows of %s, want 0", n, table)
+		}
 	}
 }

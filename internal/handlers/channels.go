@@ -71,7 +71,7 @@ func (d Deps) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 	if !d.channelsReady(w) {
 		return
 	}
-	c, err := d.Channels.Get(r.Context(), r.PathValue("id"))
+	c, err := d.Channels.Get(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -126,7 +126,7 @@ func (d Deps) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	if !d.channelsReady(w) {
 		return
 	}
-	c, err := d.Channels.Get(r.Context(), r.PathValue("id"))
+	c, err := d.Channels.Get(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -153,7 +153,7 @@ func (d Deps) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	if req.ThreadID != "" {
 		c.ThreadID = req.ThreadID
 	}
-	updated, err := d.Channels.Update(r.Context(), c)
+	updated, err := d.Channels.Update(r.Context(), c, callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -165,18 +165,30 @@ func (d Deps) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 	if !d.channelsReady(w) {
 		return
 	}
-	if err := d.Channels.Delete(r.Context(), r.PathValue("id")); err != nil {
+	if err := d.Channels.Delete(r.Context(), r.PathValue("id"), callerID(r)); err != nil {
 		httputil.WriteErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleListDeliveries reads one channel's receipts. The channel is fetched
+// first and through the owner scoped lookup: without it this endpoint answered
+// any id with somebody else's message bodies and provider error text.
 func (d Deps) handleListDeliveries(w http.ResponseWriter, r *http.Request) {
 	if !d.channelsReady(w) {
 		return
 	}
-	list, err := d.Channels.ListDeliveries(r.Context(), r.PathValue("id"))
+	c, err := d.Channels.Get(r.Context(), r.PathValue("id"), callerID(r))
+	if err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	if c == nil {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeChannelNotFound)
+		return
+	}
+	list, err := d.Channels.ListDeliveries(r.Context(), c.ID)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -193,7 +205,10 @@ func (d Deps) handleChannelWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channelID := r.PathValue("id")
-	c, err := d.Channels.Get(r.Context(), channelID)
+	// Unscoped and under the process identity, by design: the platform signs the
+	// raw body with the channel's secret, so the row must be readable before any
+	// session exists. Every other read of this table is owner scoped.
+	c, err := d.Channels.GetUnscoped(systemScope(r), channelID)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -257,7 +272,7 @@ func (d Deps) handleDeliverChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channelID := r.PathValue("id")
-	c, err := d.Channels.Get(r.Context(), channelID)
+	c, err := d.Channels.Get(r.Context(), channelID, callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -320,7 +335,7 @@ func (d Deps) handleRetryDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channelID := r.PathValue("id")
-	c, err := d.Channels.Get(r.Context(), channelID)
+	c, err := d.Channels.Get(r.Context(), channelID, callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return

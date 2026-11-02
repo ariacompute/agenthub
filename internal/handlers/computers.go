@@ -50,7 +50,7 @@ func (d Deps) handleGetComputer(w http.ResponseWriter, r *http.Request) {
 	if !d.computersReady(w) {
 		return
 	}
-	c, err := d.Computers.Get(r.Context(), r.PathValue("id"))
+	c, err := d.Computers.Get(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -117,7 +117,7 @@ func (d Deps) handleCreateComputer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Roll back: leaving a card behind would tell the operator an environment
 		// exists when the lease was refused (no docker socket, limit reached...).
-		if derr := d.Computers.Delete(r.Context(), created.ID); derr != nil && d.Log != nil {
+		if derr := d.Computers.Delete(r.Context(), created.ID, ownerID); derr != nil && d.Log != nil {
 			d.Log.Warn("computers: rollback failed", "computer", created.ID, "error", derr)
 		}
 		httputil.WriteErr(w, err)
@@ -130,7 +130,7 @@ func (d Deps) handleCreateComputer(w http.ResponseWriter, r *http.Request) {
 	if !lease.ExpiresAt.IsZero() {
 		created.ExpiresAt = lease.ExpiresAt.UTC().Format(time.RFC3339)
 	}
-	updated, err := d.Computers.Update(r.Context(), created)
+	updated, err := d.Computers.Update(r.Context(), created, ownerID)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -146,7 +146,7 @@ func (d Deps) handleDeleteComputer(w http.ResponseWriter, r *http.Request) {
 	if !d.computersReady(w) {
 		return
 	}
-	c, err := d.Computers.Get(r.Context(), r.PathValue("id"))
+	c, err := d.Computers.Get(r.Context(), r.PathValue("id"), callerID(r))
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -155,17 +155,12 @@ func (d Deps) handleDeleteComputer(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeComputerNotFound)
 		return
 	}
-	caller := PrincipalFrom(r).UserID
-	if caller != "" && c.OwnerID != "" && c.OwnerID != caller {
-		httputil.WriteError(w, http.StatusNotFound, httputil.CodeComputerNotFound)
-		return
-	}
 	if c.LeaseID != "" && d.Sandboxes != nil {
 		if terr := d.Sandboxes.Terminate(r.Context(), c.LeaseID); terr != nil && d.Log != nil {
 			d.Log.Warn("computers: lease termination failed", "computer", c.ID, "lease", c.LeaseID, "error", terr)
 		}
 	}
-	if err := d.Computers.Delete(r.Context(), c.ID); err != nil {
+	if err := d.Computers.Delete(r.Context(), c.ID, callerID(r)); err != nil {
 		httputil.WriteErr(w, err)
 		return
 	}
