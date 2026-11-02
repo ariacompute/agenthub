@@ -44,6 +44,14 @@ describe('passwordBytes (auth.MinPasswordLength)', () => {
     expect(passwordBytes('测试测试')).toBe(12)
     expect(MIN_PASSWORD_BYTES).toBe(8)
   })
+
+  it('counts an empty field as zero bytes, not as "null"', () => {
+    // A form that never set the field hands over undefined; measuring it as the
+    // string "undefined" (9 bytes) would let a blank password through.
+    expect(passwordBytes(undefined)).toBe(0)
+    expect(passwordBytes(null)).toBe(0)
+    expect(passwordBytes('')).toBe(0)
+  })
 })
 
 describe('userFieldErrors', () => {

@@ -48,6 +48,12 @@ describe('applyText', () => {
     expect(applyText({ work_dir: '/work' }, 'work_dir', '   ')).toEqual({})
   })
 
+  it('keeps a non-string value as given', () => {
+    // applyText is also called with numbers from the advanced controls; they
+    // must not become "4" or be trimmed away.
+    expect(applyText({}, 'timeout_ms', 4)).toEqual({ timeout_ms: 4 })
+  })
+
   it('leaves the other fields alone', () => {
     expect(applyText({ image: 'debian' }, 'provider', 'docker')).toEqual({
       image: 'debian',
@@ -99,6 +105,13 @@ describe('applyList', () => {
 
   it('deletes the key when every entry is removed', () => {
     expect(applyList({ egress_allowlist: ['a'] }, 'egress_allowlist', ' , ')).toEqual({})
+  })
+
+  it('reads a missing value as an empty list', () => {
+    // The form hands over undefined before the field is touched; that is a
+    // cleared list, not the string "undefined".
+    expect(applyList({ egress_allowlist: ['a'] }, 'egress_allowlist', undefined)).toEqual({})
+    expect(applyList({}, 'egress_allowlist', null)).toEqual({})
   })
 })
 

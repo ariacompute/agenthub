@@ -63,6 +63,11 @@ func (s *MemoryStore) SeedPolicy(p *Policy) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *p
+	// The list fields are owned by the store, exactly as they are on read: a
+	// caller that keeps a handle on the seeded struct must not be able to widen
+	// an allowlist behind the engine's back.
+	cp.Allow = append([]string(nil), p.Allow...)
+	cp.Keywords = append([]string(nil), p.Keywords...)
 	s.policies[cp.Source] = &cp
 }
 

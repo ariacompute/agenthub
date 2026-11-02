@@ -406,3 +406,44 @@ describe('sign-out', () => {
     expect(store.signedIn).toBe(false)
   })
 })
+
+// Revocation is the one pair of mutations that is not covered by the table
+// above: revoking one session reloads the session list, revoking every session
+// of a user reloads nothing.
+describe('session revocation', () => {
+  it('revokes one session and reloads the list', async () => {
+    const store = useAuthStore()
+    api.listSessions.mockResolvedValue({ sessions: [{ id: 's2' }] })
+    expect(await store.revokeSession('s1')).toBe(true)
+    expect(api.revokeSession).toHaveBeenCalledWith('s1')
+    expect(store.sessions).toEqual([{ id: 's2' }])
+    expect(store.errorCode).toBe('')
+  })
+
+  it('keeps the code when revoking one session fails', async () => {
+    const store = useAuthStore()
+    store.sessions = [{ id: 's1' }]
+    api.revokeSession.mockRejectedValue({ code: 'forbidden' })
+    expect(await store.revokeSession('s1')).toBe(false)
+    expect(store.errorCode).toBe('forbidden')
+    expect(api.listSessions).not.toHaveBeenCalled()
+    expect(store.sessions).toEqual([{ id: 's1' }])
+  })
+
+  it('revokes every session of a user without guessing at a list', async () => {
+    const store = useAuthStore()
+    api.revokeUserSessions.mockResolvedValue({})
+    expect(await store.revokeUserSessions('u1')).toBe(true)
+    expect(api.revokeUserSessions).toHaveBeenCalledWith('u1')
+    // The admin screen shows the target user, not the caller's own sessions.
+    expect(api.listSessions).not.toHaveBeenCalled()
+    expect(store.errorCode).toBe('')
+  })
+
+  it('keeps the code when revoking a user\'s sessions fails', async () => {
+    const store = useAuthStore()
+    api.revokeUserSessions.mockRejectedValue({ code: 'user_not_found' })
+    expect(await store.revokeUserSessions('u1')).toBe(false)
+    expect(store.errorCode).toBe('user_not_found')
+  })
+})

@@ -58,4 +58,11 @@ describe('language catalogue', () => {
     expect(ogLocaleFor('pt')).toBe('pt_BR')
     expect(ogLocaleFor('xx')).toBe('en_US')
   })
+
+  it('passes an unknown code through unchanged', () => {
+    // A future language must render as itself in a <link hreflang> rather than
+    // being silently relabelled as English.
+    expect(hreflangFor('xx')).toBe('xx')
+    expect(hreflangFor('')).toBe('')
+  })
 })

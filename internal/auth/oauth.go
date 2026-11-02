@@ -527,13 +527,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (c ProviderConfig) scopes(def string) string {
-	if len(c.Scopes) == 0 {
-		return def
-	}
-	return strings.Join(c.Scopes, " ")
-}
-
 // OAuthProviders returns the providers of the service configuration, or nil when
 // OAuth is switched off.
 func (s *Service) OAuthProviders() []Provider { return s.oauthCfg.Providers() }

@@ -579,3 +579,75 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - [x] `README.md` 沙盒表把 Console 行拆成 **API** 与 **Console** 两行（交互式控制台在 agentbuddy
       的 `ComputersView`），并补一行 Network 语义；`task-sandbox.md` S8 的两条声称（`sandbox-copy.js`、
       `ResourceKindForm` 沙盒区块 + 错误码 13 语）本轮之后与代码一致。
+
+## M9 — 服务端与 web 覆盖率补强（2026-11-02，测试为主）
+
+### 1. 服务端逐包抬升
+- [x] `handlers` 73.7% → 76.2%：新增 `capabilities_test.go`（schedules 五个端点的 CRUD、未知 id、
+      无 store 时整组 503；computers 删除的正常路径、不存在、他人卡片按 404 隐藏、带租约且
+      `Terminate` 失败仍删卡片、无 store 503）与 `channels_extra_test.go`（投递回执列表、`itoa` 与
+      `strconv` 对拍、`delegateThread` 的调度器/扇出/提及过滤/线程缺失、`redirectWithCode` 与
+      `authCodeOf` 全分支）。参与者按**资源 id** 命名、`Registry.Get` 亦按 id，此前测试未触及这点。
+- [x] `channels` 71.4% → 82.5%：`Deliver` 的无主机、拨号期拒绝私网、死域名、已取消 context、
+      非字符串 `target_url` 五条失败路径（`https` 之外的写法在拨号前就被 `ValidateURL` 拦下）。
+- [x] `router` 82.2% → 84.5%：门面访问器（`Engine`/`Bus`/`Resource`/`Clock`/`Kick`/`Live`/`GetTicket`）、
+      `Disposition.Settled` 与 `DecisionKind.Disposition` 词汇表、`MemoryStore.SeedPolicy` 的写入与覆盖；
+      `eval_apply_test.go` 覆盖 `apply` 的 attach（属主仍在则绑定、已关闭则重建工单）、三类不建单裁决、
+      词表外裁决，以及 `ownerOf` 只认属主订阅（context-only 不算）。
+- [x] `registry` 88.0% → 91.5%：`Kind.Valid`、`fieldError.Error/FieldOf`、`SandboxConfig.Profile`
+      （nil 与全字段拷贝）、`EffectiveArgsPolicy` 六种组合、`validateSandbox` 全部拒绝项（含
+      「未知 network 归一为 none 而非报错」），`WithSandboxChecker` 四条路径（查/不查/拒绝/未注入）。
+- [x] `auth` 81.4% → 84.5%：`OAuthProviders`、`BeginOAuth`（state/verifier 新鲜、PKCE challenge 与
+      redirect_uri 断言、未配置与无授权端点都返回 `ErrOAuthNotConfigured`）、`CompleteOAuth` 未配置；
+      删除从未被调用的 `ProviderConfig.scopes`（与 `scopeString` 重复）。
+- [x] `secure` 80.5% → 87.8%：密文非 base64 / 短于 nonce / 被篡改 / 错密钥，以及 `rand.Reader` 失败时
+      加解密返回错误而不是空串（空串会被误读成「这一列本来就是空的」）。
+
+### 2. 顺带修掉的真实缺陷
+- [x] `router.MemoryStore.SeedPolicy` 原先只做结构体浅拷贝，`Allow`/`Keywords` 仍与调用方共享底层
+      数组，调用方改一个元素就能在引擎不知情时放宽白名单；现改为写入即复制，
+      `TestMemoryStoreSeedPolicyCopiesThePolicyIn` 钉住「播种后再改原结构不影响存储」。
+
+### 3. web
+- [x] 新增 `tests/api-stream.spec.js`：`streamTask`（正常帧、error 帧解包、坏 JSON 继续读、拒绝时
+      `stream_unavailable`、body 缺失、abort 后 cancel）、`subscribeTaskEvents`（四种帧、路径转义、
+      dispose 关闭、坏帧只记日志）、`saveBlob`（点击临时链接触发下载并释放 object URL）、
+      `request` 的 204 / 非 JSON / 无 code 三条边界。
+- [x] 新增 `tests/use-dismiss-dom.spec.js`：用手写 renderer + document 桩驱动 `useEscape` 的挂载/卸载、
+      单一全局监听、栈顶优先、`ref`/函数/布尔三种 active、无 document 时不炸。
+- [x] 新增 `tests/use-copy-dom.spec.js`：无 navigator 时回退 en、URL 优先于存储、`setLang` 落盘并镜像
+      `<html lang|dir>`（ar → rtl）、未收录语言回退 en、无 window 时仍返回规范码。
+- [x] `store.spec.js`：部分载荷的空默认值、无 code 的拒绝记为 `internal_error`、13 个动作的失败路径表
+      （返回值 + `errorCode`）、`update` 成功路径。
+- [x] `auth-store.spec.js`：`revokeSession` / `revokeUserSessions` 的成功与失败，并断言只有前者重载列表。
+- [x] 零碎分支：`autoContinue` 遇未知策略返回 false、`hreflangFor` 未知码透传、`applyList` 的
+      `undefined`/`null` 读作空列表、`passwordBytes` 的 `undefined` 记 0 字节、`applyText` 保留非字符串。
+- [x] 结果：**21 文件 / 408 用例**，语句 99.85%、分支 95.19%、函数 98.51%
+      （基线 18 文件 / 335 用例，98.59% / 91.66% / 93%）。
+
+### 4. store：写后重读的失败回传（行为变更）
+
+补用例时暴露的真问题：`update` 等动作在写入成功后调用 `refreshResources()`，而 `refreshX` 把失败
+吞进 `errorCode`，动作随后又执行 `this.errorCode = ''` 并返回 `true`——**保存成功但列表没刷新**
+会显示为成功、列表还是旧的、错误码还被抹掉。
+
+- [x] `refreshResources` / `refreshTasks` / `refreshHealth` / `refreshRegistries` / `refreshApprovals` /
+      `refreshSources` 一律返回布尔（成功 `true`，失败 `false` 且写入机器码）。仍**不抛异常**：
+      多数调用点是 fire-and-forget，空白屏幕比过期列表更糟。
+- [x] 新增动作内 `write(call)`：把写入的拒绝统一折算成 `errorCode` + `false`，13 处 try/catch 收敛成一处。
+- [x] `register` / `update` / `remove` / `probe` / `saveRegistry` / `removeRegistry` / `saveSource` /
+      `removeSource` 的返回值改为**「写入落地且列表已刷新」**：写入成功但重读失败时返回 `false`，
+      错误码保留，抽屉不关闭（`errorCode` 的横幅给出的正是原因），也绝不重试写入。
+- [x] `curate` 顺序读目录与审批队列，两者都要真读；成功的那次读会清空横幅，故在返回前把先失败
+      的那次的码恢复（`catalogueCode || this.errorCode`），不会让第二个读把第一个的原因抹掉。
+- [x] `syncSource` 的返回值仍是**同步结果本身**：重读失败时若返回 `null`，等于把服务端已报的
+      imported/updated/skipped 藏起来，是第二个更大的谎；失败只体现在 `errorCode`，同样恢复被
+      后一次成功读清掉的码。
+- [x] `store.spec.js` 增补：「写成功但重读失败」的 8 个动作逐条断言（`false` + 码保留 + 写入只发生一次）、
+      `curate` 的三种组合、`syncSource` 的结果保留、6 个 `refreshX` 的 true/false 对照。
+
+### 5. 校验与未覆盖项
+- [x] `go vet ./...` 干净；`go test ./...` 全绿，新增 53 条 Go 用例。
+- [x] 本机 `go test -race` 不可用（Windows 无 cgo/gcc），已在 CI 侧补跑，不伪称已验证。
+- [x] `internal/store`（3.0%）与 `internal/backup` 的 `pg_dump`/`COPY` 路径需 `DATABASE_URL`，
+      仍按 skip 处理；`backup.writeArchiveHash` 依赖落盘引擎，未强测。

@@ -353,4 +353,11 @@ describe('autoContinue', () => {
     expect(DEFAULT_ROUNDS.relay).toBe(1)
     expect(DEFAULT_ROUNDS.group).toBeLessThanOrEqual(MAX_ROUNDS)
   })
+
+  it('refuses to continue on a policy it does not know', () => {
+    // A policy outside the vocabulary is a bug upstream; continuing would spend
+    // the operator's tokens on a setting nobody can explain.
+    expect(autoContinue('group', 'nonsense', 1, 3)).toBe(false)
+    expect(autoContinue('group', undefined, 1, 3)).toBe(false)
+  })
 })
