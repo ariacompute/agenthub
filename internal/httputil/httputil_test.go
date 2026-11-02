@@ -151,10 +151,12 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeRouterTicketNotFound, http.StatusNotFound},
 		{CodeRouterTriggerNotFound, http.StatusNotFound},
 		{CodeRouterThreadNotFound, http.StatusNotFound},
+		{CodeDeliveryNotFound, http.StatusNotFound},
 		// 409: well formed, refused by state.
 		{CodeEmailTaken, http.StatusConflict},
 		{CodeRoleExists, http.StatusConflict},
 		{CodeGroupExists, http.StatusConflict},
+		{CodeDeliveryNotRetryable, http.StatusConflict},
 		{CodeBackupsDisabled, http.StatusConflict},
 		{CodeBackupInProgress, http.StatusConflict},
 		{CodeBackupChecksum, http.StatusConflict},

@@ -80,4 +80,11 @@ type Store interface {
 	// ExternalRef is a duplicate, letting the caller treat redelivery as a no-op.
 	RecordDelivery(ctx context.Context, m *ChannelMessage) (bool, error)
 	ListDeliveries(ctx context.Context, channelID string) ([]*ChannelMessage, error)
+	// GetDelivery returns the receipt identified by ID (its ExternalRef) on a
+	// channel, or nil when there is none.
+	GetDelivery(ctx context.Context, channelID, id string) (*ChannelMessage, error)
+	// UpdateDelivery rewrites the outcome of an existing receipt in place, so a
+	// retry keeps one line per message instead of appending a second one. It
+	// reports false when the row is gone.
+	UpdateDelivery(ctx context.Context, m *ChannelMessage) (bool, error)
 }

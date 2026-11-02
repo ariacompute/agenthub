@@ -41,6 +41,11 @@ func (d Deps) channelsReady(w http.ResponseWriter) bool {
 	return true
 }
 
+// deliverOutbound performs one outbound send. It is a package variable so the
+// retry bookkeeping can be tested without a network target: the SSRF guard
+// refuses loopback by design, so a local httptest server can never be reached.
+var deliverOutbound = channels.Deliver
+
 type channelRequest struct {
 	Kind          string         `json:"kind"`
 	Name          string         `json:"name"`
@@ -277,8 +282,20 @@ func (d Deps) handleDeliverChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body, _ := json.Marshal(map[string]any{"text": req.Message})
-	result, err := channels.Deliver(r.Context(), c, string(body))
+	result, err := deliverOutbound(r.Context(), c, string(body))
 	if err != nil {
+		// A failed send still gets a receipt: it is the only record from which
+		// the console can offer a retry, and without it the message is simply
+		// lost. The text is kept so the retry re-sends what was meant.
+		_, _ = d.Channels.RecordDelivery(r.Context(), &channels.ChannelMessage{
+			ChannelID:   channelID,
+			ExternalRef: "out-" + auth.NewID("dlv"),
+			ThreadID:    c.ThreadID,
+			Direction:   "outbound",
+			Payload:     map[string]any{"text": req.Message},
+			Status:      channels.StatusFailed,
+			Error:       string(httputil.CodeDeliveryFailed),
+		})
 		httputil.WriteError(w, http.StatusBadGateway, httputil.CodeDeliveryFailed)
 		return
 	}
@@ -287,9 +304,69 @@ func (d Deps) handleDeliverChannel(w http.ResponseWriter, r *http.Request) {
 		ExternalRef: "out-" + auth.NewID("dlv"),
 		ThreadID:    c.ThreadID,
 		Direction:   "outbound",
-		Payload:     map[string]any{"status": result.Status, "raw": result.Raw},
+		Payload:     map[string]any{"text": req.Message, "status": result.Status, "raw": result.Raw},
 		Status:      channels.StatusDelivered,
 	})
+	httputil.WriteJSON(w, http.StatusOK, result)
+}
+
+// handleRetryDelivery re-sends one outbound receipt that never left. The
+// receipt is updated in place — one line per message, so the console's retry
+// button disappears as soon as the message lands. Inbound receipts and ones
+// already delivered are refused rather than silently re-posted, and a provider
+// failure leaves the receipt failed with a fresh code for the next attempt.
+func (d Deps) handleRetryDelivery(w http.ResponseWriter, r *http.Request) {
+	if !d.channelsReady(w) {
+		return
+	}
+	channelID := r.PathValue("id")
+	c, err := d.Channels.Get(r.Context(), channelID)
+	if err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	if c == nil {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeChannelNotFound)
+		return
+	}
+	if !c.Enabled {
+		httputil.WriteError(w, http.StatusForbidden, httputil.CodeChannelDisabled)
+		return
+	}
+	receipt, err := d.Channels.GetDelivery(r.Context(), channelID, r.PathValue("did"))
+	if err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	if receipt == nil {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeDeliveryNotFound)
+		return
+	}
+	text, _ := receipt.Payload["text"].(string)
+	if receipt.Direction != "outbound" || receipt.Status == channels.StatusDelivered || text == "" {
+		httputil.WriteError(w, http.StatusConflict, httputil.CodeDeliveryNotRetryable)
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"text": text})
+	result, derr := deliverOutbound(r.Context(), c, string(body))
+	if derr != nil {
+		receipt.Status = channels.StatusFailed
+		receipt.Error = string(httputil.CodeDeliveryFailed)
+		receipt.Payload = map[string]any{"text": text}
+		if _, uerr := d.Channels.UpdateDelivery(r.Context(), receipt); uerr != nil {
+			slog.Warn("channels: record failed retry", "channel", channelID, "delivery", receipt.ID, "error", uerr)
+		}
+		httputil.WriteError(w, http.StatusBadGateway, httputil.CodeDeliveryFailed)
+		return
+	}
+	receipt.Status = channels.StatusDelivered
+	receipt.Error = ""
+	receipt.Payload = map[string]any{"text": text, "status": result.Status, "raw": result.Raw}
+	if _, uerr := d.Channels.UpdateDelivery(r.Context(), receipt); uerr != nil {
+		// The message did leave; a stale receipt is worse than none, but the
+		// caller must not be told the send failed.
+		slog.Warn("channels: record retried delivery", "channel", channelID, "delivery", receipt.ID, "error", uerr)
+	}
 	httputil.WriteJSON(w, http.StatusOK, result)
 }
 

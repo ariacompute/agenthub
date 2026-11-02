@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -100,6 +101,25 @@ func (f *fakeChannels) ListDeliveries(_ context.Context, channelID string) ([]*c
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeChannels) GetDelivery(_ context.Context, channelID, id string) (*channels.ChannelMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deliveries[channelID+"/"+id], nil
+}
+
+func (f *fakeChannels) UpdateDelivery(_ context.Context, m *channels.ChannelMessage) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	old, ok := f.deliveries[m.ChannelID+"/"+m.ID]
+	if !ok {
+		return false, nil
+	}
+	old.Status = m.Status
+	old.Error = m.Error
+	old.Payload = m.Payload
+	return true, nil
 }
 
 // ---- shared handler harness ----
@@ -374,6 +394,165 @@ func TestChannelWebhook(t *testing.T) {
 	code = postSlackWebhook(t, srv, "nope", payload, slackSig("shh", ts, []byte(payload)), ts)
 	if code != http.StatusNotFound {
 		t.Fatalf("unknown channel = %d", code)
+	}
+}
+
+// A send that never leaves still has to leave a receipt: it is the only record
+// the console can offer a retry from, and it must carry the text to re-send.
+func TestChannelDeliverRecordsFailureReceipt(t *testing.T) {
+	orig := deliverOutbound
+	deliverOutbound = func(context.Context, *channels.Channel, string) (*channels.DeliverResult, error) {
+		return nil, errors.New("dial tcp 10.0.0.1:443: connect: refused")
+	}
+	defer func() { deliverOutbound = orig }()
+
+	fake := newFakeChannels()
+	d, _ := newDeps(t)
+	d.Channels = fake
+	srv := httptest.NewServer(Register(d))
+	defer srv.Close()
+
+	if _, err := fake.Create(context.Background(), &channels.Channel{
+		ID: "c1", Kind: channels.KindSlack, Name: "sl", Enabled: true,
+		Config: map[string]any{"target_url": "https://example.test/hook"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	code, raw := doReq(t, srv, "POST", "/api/channels/c1/deliver", `{"message":"hi"}`)
+	if code != http.StatusBadGateway {
+		t.Fatalf("deliver = %d (%s)", code, raw)
+	}
+	if got := httputil.AsError(decodeErr(raw)).Code; got != httputil.CodeDeliveryFailed {
+		t.Fatalf("code = %q", got)
+	}
+
+	msgs, err := fake.ListDeliveries(context.Background(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("receipts = %d, want 1", len(msgs))
+	}
+	m := msgs[0]
+	if m.Direction != "outbound" || m.Status != channels.StatusFailed {
+		t.Fatalf("receipt = %+v", m)
+	}
+	if m.Error != string(httputil.CodeDeliveryFailed) {
+		t.Fatalf("error = %q", m.Error)
+	}
+	if text, _ := m.Payload["text"].(string); text != "hi" {
+		t.Fatalf("payload text = %q, want hi", text)
+	}
+}
+
+func TestChannelRetryDelivery(t *testing.T) {
+	orig := deliverOutbound
+	fail := false
+	deliverOutbound = func(context.Context, *channels.Channel, string) (*channels.DeliverResult, error) {
+		if fail {
+			return nil, errors.New("provider down")
+		}
+		return &channels.DeliverResult{Status: 200, Raw: `{"ok":true}`}, nil
+	}
+	defer func() { deliverOutbound = orig }()
+
+	fake := newFakeChannels()
+	d, _ := newDeps(t)
+	d.Channels = fake
+	srv := httptest.NewServer(Register(d))
+	defer srv.Close()
+
+	for _, c := range []*channels.Channel{
+		{ID: "c1", Kind: channels.KindSlack, Name: "sl", Enabled: true, Config: map[string]any{"target_url": "https://example.test/hook"}},
+		{ID: "off", Kind: channels.KindSlack, Name: "off", Enabled: false, Config: map[string]any{"target_url": "https://example.test/hook"}},
+	} {
+		if _, err := fake.Create(context.Background(), c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed := func(id, channelID, direction, status string, payload map[string]any) {
+		t.Helper()
+		if _, err := fake.RecordDelivery(context.Background(), &channels.ChannelMessage{
+			ID: id, ExternalRef: id, ChannelID: channelID, Direction: direction,
+			Status: status, Payload: payload,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("out-failed", "c1", "outbound", channels.StatusFailed, map[string]any{"text": "hello"})
+	seed("out-done", "c1", "outbound", channels.StatusDelivered, map[string]any{"text": "hello"})
+	seed("in-failed", "c1", "inbound", channels.StatusFailed, map[string]any{"text": "hello"})
+	seed("out-notext", "c1", "outbound", channels.StatusFailed, map[string]any{})
+	seed("out-off", "off", "outbound", channels.StatusFailed, map[string]any{"text": "hello"})
+
+	// A receipt that never left is re-sent and flipped to delivered in place.
+	code, raw := doReq(t, srv, "POST", "/api/channels/c1/deliveries/out-failed/retry", "")
+	if code != http.StatusOK {
+		t.Fatalf("retry = %d (%s)", code, raw)
+	}
+	var result channels.DeliverResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != 200 {
+		t.Fatalf("result = %+v", result)
+	}
+	got, _ := fake.GetDelivery(context.Background(), "c1", "out-failed")
+	if got == nil || got.Status != channels.StatusDelivered || got.Error != "" {
+		t.Fatalf("receipt after retry = %+v", got)
+	}
+	if got.Payload["raw"] != `{"ok":true}` {
+		t.Fatalf("payload after retry = %+v", got.Payload)
+	}
+	if msgs, _ := fake.ListDeliveries(context.Background(), "c1"); len(msgs) != 4 {
+		t.Fatalf("retry appended a receipt: %d rows", len(msgs))
+	}
+
+	// The three cases where a retry cannot mean anything.
+	for name, tc := range map[string]struct{ path string }{
+		"delivered":    {"/api/channels/c1/deliveries/out-done/retry"},
+		"inbound":      {"/api/channels/c1/deliveries/in-failed/retry"},
+		"without text": {"/api/channels/c1/deliveries/out-notext/retry"},
+	} {
+		code, raw := doReq(t, srv, "POST", tc.path, "")
+		if code != http.StatusConflict {
+			t.Fatalf("%s: status = %d (%s)", name, code, raw)
+		}
+		if got := httputil.AsError(decodeErr(raw)).Code; got != httputil.CodeDeliveryNotRetryable {
+			t.Fatalf("%s: code = %q", name, got)
+		}
+	}
+
+	// Unknown receipt, then a disabled channel.
+	code, raw = doReq(t, srv, "POST", "/api/channels/c1/deliveries/nope/retry", "")
+	if code != http.StatusNotFound {
+		t.Fatalf("unknown receipt = %d (%s)", code, raw)
+	}
+	if got := httputil.AsError(decodeErr(raw)).Code; got != httputil.CodeDeliveryNotFound {
+		t.Fatalf("code = %q", got)
+	}
+	code, raw = doReq(t, srv, "POST", "/api/channels/off/deliveries/out-off/retry", "")
+	if code != http.StatusForbidden {
+		t.Fatalf("disabled = %d (%s)", code, raw)
+	}
+
+	// A provider failure keeps the receipt retryable and says why.
+	seed("out-boom", "c1", "outbound", channels.StatusFailed, map[string]any{"text": "hello"})
+	fail = true
+	code, raw = doReq(t, srv, "POST", "/api/channels/c1/deliveries/out-boom/retry", "")
+	if code != http.StatusBadGateway {
+		t.Fatalf("provider down = %d (%s)", code, raw)
+	}
+	if got := httputil.AsError(decodeErr(raw)).Code; got != httputil.CodeDeliveryFailed {
+		t.Fatalf("code = %q", got)
+	}
+	got, _ = fake.GetDelivery(context.Background(), "c1", "out-boom")
+	if got == nil || got.Status != channels.StatusFailed || got.Error != string(httputil.CodeDeliveryFailed) {
+		t.Fatalf("receipt after failed retry = %+v", got)
+	}
+	if text, _ := got.Payload["text"].(string); text != "hello" {
+		t.Fatalf("text lost after failed retry: %+v", got.Payload)
 	}
 }
 

@@ -86,6 +86,11 @@ const (
 	CodeChannelTimestampExpired Code = "channel_timestamp_expired"
 	CodeChannelPayloadInvalid   Code = "channel_payload_invalid"
 	CodeDeliveryFailed          Code = "delivery_failed"
+	// A retry only makes sense for one receipt that never left. Naming the two
+	// refusals separately lets the console hide a button that cannot work instead
+	// of discovering it on click.
+	CodeDeliveryNotFound     Code = "delivery_not_found"
+	CodeDeliveryNotRetryable Code = "delivery_not_retryable"
 
 	// Connectors: external applications invoking a kind=mcp resource.
 	CodeConnectorNotFound  Code = "connector_not_found"
@@ -185,8 +190,12 @@ func WriteErr(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusTooManyRequests, e.Code)
 	case CodeForbidden, CodeUserDisabled, CodeBuiltinRole:
 		WriteError(w, http.StatusForbidden, e.Code)
-	case CodeNotFound:
+	case CodeNotFound, CodeDeliveryNotFound:
 		WriteError(w, http.StatusNotFound, e.Code)
+	// A receipt that landed (or was never outbound) is a state refusal: the
+	// request was well formed, re-posting it would duplicate the message.
+	case CodeDeliveryNotRetryable:
+		WriteError(w, http.StatusConflict, e.Code)
 	case CodeMethodNotAllowed:
 		WriteError(w, http.StatusMethodNotAllowed, e.Code)
 	case CodePayloadTooLarge:

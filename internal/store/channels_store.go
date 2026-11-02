@@ -171,6 +171,34 @@ func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelM
 	return true, nil
 }
 
+func (s *channelsStore) GetDelivery(ctx context.Context, channelID, id string) (*channels.ChannelMessage, error) {
+	var r model.ChannelMessage
+	if err := s.db.WithContext(ctx).
+		Where("channel_id = ? AND external_ref = ?", channelID, id).
+		First(&r).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return toDomainMessage(&r), nil
+}
+
+func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelMessage) (bool, error) {
+	payload, err := model.NewJSONField(m.Payload)
+	if err != nil {
+		return false, err
+	}
+	res := s.db.WithContext(ctx).
+		Model(&model.ChannelMessage{}).
+		Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ID).
+		Updates(map[string]any{"status": m.Status, "error": m.Error, "payload": payload})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 func (s *channelsStore) ListDeliveries(ctx context.Context, channelID string) ([]*channels.ChannelMessage, error) {
 	var rows []model.ChannelMessage
 	if err := s.db.WithContext(ctx).

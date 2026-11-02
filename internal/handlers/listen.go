@@ -38,6 +38,7 @@ func Listeners() []Listener {
 		{"GET /api/channels", "channels: external messaging surfaces bound to threads"},
 		{"POST /api/channels/{id}/webhook", "public inbound webhook for a channel (signed)"},
 		{"POST /api/channels/{id}/deliver", "channels: send a message out through a channel's target URL"},
+		{"POST /api/channels/{id}/deliveries/{did}/retry", "channels: re-send one outbound receipt that never left"},
 		{"GET /api/connectors", "connectors: external applications invoking an mcp resource"},
 		{"POST /api/connectors/{id}/actions", "invoke a connector action (policy gated)"},
 		{"POST /api/threads/{id}/audio", "voice message upload, transcribed server side"},

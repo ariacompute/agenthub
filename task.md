@@ -461,6 +461,50 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - [x] `internal/httputil` 覆盖率 76.0% → 91.5%；余下未覆盖仅 `WriteJSON` 的编码失败分支与
   `sse.go` 的 KeepAlive 写错误分支，两者都需构造失败 writer 才能触发。
 
+## M8 — /docs 屏与 docs/*.md 补齐沙盒端点（文档同步，2026-11）
+
+背景：`/docs` 屏已有「执行沙盒」概念章节（`sectionSandbox` + 7 层隔离表），但 HTTP 端点表里
+**没有任何 `sandbox*` 行**，通道投递重试 `POST /api/channels/{id}/deliveries/{did}/retry` 也缺失；
+错误码表同样停在调度器那一轮，`channel_*` / `connector_*` / `audio_*` / `sandbox_*` 全部未登记。
+两者都由 `docs-content.js` + `docs-copy.js` 渲染，因此一次修复即可同时更新 `/docs` 屏与
+`docs/docs.md` / `docs/docs_cn.md`。
+
+### 1. 机器数据（`web/src/lib/docs-content.js`）
+- [x] `endpointGroups`：`capabilities` 与 `router` 之间新增 `sandbox` 分组（`groupKey: 'groupSandbox'`）。
+- [x] `httpEndpoints`：新增 15 条 —— `GET /api/sandboxes`、`GET /api/sandboxes/{id}`、
+  `GET /api/sandboxes/stats`、`GET /api/sandboxes/events`、`POST /api/sandboxes/{id}/exec`、
+  `POST /api/sandboxes/{id}/renew`、`DELETE /api/sandboxes/{id}`、`GET /api/sandbox-providers`、
+  `POST /api/sandbox-providers/refresh`、`GET /api/sandbox-nodes`、`POST /api/sandbox-nodes`、
+  `DELETE /api/sandbox-nodes/{id}`、`POST /api/sandbox-nodes/{id}/heartbeat`、
+  `GET /api/sandbox-nodes/{id}/jobs`、`POST /api/sandbox-nodes/{id}/jobs/{job}`；权限与请求/响应
+  形状逐条对齐 `handlers.go` 与各 handler 的实际读写（`GET|POST jobs` 用 `tasks:write`，
+  其余 lease 路由 `resources:read|write`）。
+- [x] `httpEndpoints`：补 `POST /api/channels/{id}/deliveries/{did}/retry`（`tasks:write`，无请求体，
+  502 `delivery_failed` 后回执仍可重试）。
+- [x] `errorGroups`：补齐 `channel_payload_invalid` / `connector_action_denied` / `audio_unsupported` /
+  `sandbox_unknown_provider`（400），`channel_signature_*` / `channel_timestamp_expired`（401），
+  `channel_disabled` / `connector_policy_off` / `sandbox_disabled` / `sandbox_policy_denied`（403），
+  `channel_not_found` / `delivery_not_found` / `connector_not_found` / `sandbox_not_found`（404），
+  `delivery_not_retryable` / `sandbox_unsupported` / `sandbox_lease_lost`（409），`audio_too_large`（413），
+  `delivery_failed`（502），`speech_disabled` / `sandbox_node_offline`（503）；新增 `415`
+  （`audio_unsupported`）、`422`（`audio_transcribe_failed`）、`429`（`account_locked`、
+  `sandbox_limit_reached`）、`504`（`sandbox_timeout`）四行。
+
+### 2. 文案（`web/src/lib/copy/docs-copy.js`，13 语）
+- [x] 新增 `groupSandbox` / `nounSandboxes` / `nounSandboxProviders` / `nounSandboxNodes`、
+  12 个 `epSandbox*` 与 `epChannelRetry`，共 14 键 × 13 语；可复用 `verbList`/`verbGet`/`verbDelete`
+  的端点只加名词，避免同一句话译 13 遍。
+
+### 3. 守卫与生成
+- [x] `web/tests/docs-content.spec.js`：新增两条 —— 每条 `httpEndpoints` 的 `descKey`/`nounKey`
+  在 13 语均可解析；每个 `endpointGroups` 都有标题且至少一条端点、每条端点的 `group` 都已声明。
+  缺失端点正是此前静默漏掉 15 行的原因，故把「键能解析」变成断言。
+- [x] `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md`（en）与 `docs/docs_cn.md`（zh），
+  两份文件均出现 `### Execution sandboxes` / `### 执行沙盒` 与 16 条新行；生成物不手改。
+- [x] 法语 `epSandboxProviderRefresh` 初稿含 `redémarrage`，被 `style.spec.js` 的色相词守卫
+  判为独立单词 `red`（`é` 构成词边界），改写为「sans avoir à relancer le serveur」。
+- [x] `bun run test` 17 文件 / 303 用例全绿。
+
 ## M3 — 后续项（未开始）
 
 94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`

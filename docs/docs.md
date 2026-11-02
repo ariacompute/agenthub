@@ -247,6 +247,7 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — Read tasks | List all deliveries | — | `ChannelMessage[]` |
 | `POST` | `/api/channels/{id}/webhook` | — | Inbound webhook: verify the signature, dedupe by external ref, then forward the message into the bound thread. | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
 | `POST` | `/api/channels/{id}/deliver` | `tasks:write` — Cancel and resume tasks | Outbound delivery: post the message to the channel target_url (config.target_url) via an SSRF-safe client and echo the provider raw response (status plus truncated body). | `{ "message": "string" }` | `DeliverResult { status, raw }` |
+| `POST` | `/api/channels/{id}/deliveries/{did}/retry` | `tasks:write` — Cancel and resume tasks | Retry an outbound receipt that never landed: the same row flips to delivered instead of a new one being added. | — | `DeliverResult { status, raw } \| 404 delivery_not_found \| 409 delivery_not_retryable \| 502 delivery_failed (the receipt stays retryable)` |
 | `GET` | `/api/connectors` | `resources:read` — Read resources | List all connectors | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
 | `PUT` | `/api/connectors/{id}/policy` | `resources:write` — Change resources | Set the policy that gates external invocation: off, ask_first, or allowed. | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
 | `GET` | `/api/connectors/{id}/actions` | `resources:read` — Read resources | List all actions | — | `{ id, policy, actions: [{ name, description }] }` |
@@ -266,6 +267,26 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `PUT` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Replace one of the schedules outright | `{ goal?, trigger?, cronExpr?, enabled? }` | `Schedule \| 404 schedule_not_found` |
 | `DELETE` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the schedules | — | `204, no body` |
 | `GET` | `/api/knowledge` | `resources:read` — Read resources | List all knowledge | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
+
+### Execution sandboxes
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/sandboxes` | `resources:read` — Read resources | List all leases | — | `{ leases: Lease[], default: Profile, live: boolean } — Lease { id, ownerId, resourceId, scope, provider, runtime?, nodeId?, state, ref?, profile, createdAt, renewedAt, expiresAt, execs, lastExitCode, lastCommand? }` |
+| `GET` | `/api/sandboxes/{id}` | `resources:read` — Read resources | Read one of the leases by id | — | `{ lease: Lease, execs: ExecRecord[] } — the last 50 executions; someone else's lease reads as 404 sandbox_not_found` |
+| `GET` | `/api/sandboxes/stats` | `resources:read` — Read resources | Water level: active leases, queued jobs, nodes online, recent executions, last sweep. | — | `{ activeLeases, pendingJobs, onlineNodes, recentExecs, lastSweepAt, sweeps, reclaimed, lastError? }` |
+| `GET` | `/api/sandboxes/events` | `resources:read` — Read resources | SSE: replay from `since`, then follow lease and job events live. | `?since=<seq>` | `text/event-stream, event name sandbox_event` |
+| `POST` | `/api/sandboxes/{id}/exec` | `resources:write` — Change resources | Run one command inside the lease without a shell: argv is exec-ed directly, output is capped, and the receipt is audited. | `{ command(required), args?, stdin?, dir?, env?, timeoutMs? } — 1 MiB body cap; argv is exec-ed directly, never through a shell` | `ExecResult { exitCode, stdout?, stderr?, truncated, durationMs, provider, ref?, receipt? } \| 400 sandbox_policy_denied \| 409 sandbox_lease_lost \| 504 sandbox_timeout` |
+| `POST` | `/api/sandboxes/{id}/renew` | `resources:write` — Change resources | Extend a lease up to the instance TTL; an expired or terminated lease cannot come back. | — | `Lease \| 409 sandbox_lease_lost (expired, terminated, or past the instance TTL)` |
+| `DELETE` | `/api/sandboxes/{id}` | `resources:write` — Change resources | Delete one of the leases | — | `204, no body \| 404 sandbox_not_found` |
+| `GET` | `/api/sandbox-providers` | `resources:read` — Read resources | List all sandbox providers | — | `{ providers: ProviderInfo[], groups: [{ layer, providers }], layers: Layer[], default: string }` |
+| `POST` | `/api/sandbox-providers/refresh` | `resources:write` — Change resources | Re-probe every runtime, so a freshly installed container engine shows up without a restart. | — | `same shape as GET /api/sandbox-providers` |
+| `GET` | `/api/sandbox-nodes` | `resources:read` — Read resources | List all execution nodes | — | `{ nodes: Node[], waiters, pollHint } — Node { id, ownerId, name, apiKeyId?, capabilities?, status, lastSeenAt, createdAt }` |
+| `POST` | `/api/sandbox-nodes` | `resources:write` — Change resources | Enrol a node by id; registering the same id again updates it instead of adding a row. | `{ id(required, 1-64 of [A-Za-z0-9._-]), name?, capabilities? } — 64 KiB body cap` | `Node \| 400 bad_request \| 404 sandbox_not_found (that id belongs to someone else)` |
+| `DELETE` | `/api/sandbox-nodes/{id}` | `resources:write` — Change resources | Delete one of the execution nodes | — | `204, no body \| 404 sandbox_not_found` |
+| `POST` | `/api/sandbox-nodes/{id}/heartbeat` | `tasks:write` — Cancel and resume tasks | Node heartbeat; the reply carries the poll hint for the next job wait. | — | `{ node: Node, pollHint } \| 404 sandbox_not_found` |
+| `GET` | `/api/sandbox-nodes/{id}/jobs` | `tasks:write` — Cancel and resume tasks | Long poll for the next job: 204 when the queue is empty for the whole wait. | `?wait=<seconds> — default 25, capped at 60` | `Job \| 204 when the queue stays empty for the whole wait` |
+| `POST` | `/api/sandbox-nodes/{id}/jobs/{job}` | `tasks:write` — Cancel and resume tasks | Report a finished job back to the server; a non-empty error marks it failed. | `{ exitCode, stdout?, stderr?, truncated?, durationMs?, receipt?, error? } — 1 MiB body cap` | `{ ok: true } \| 404 sandbox_not_found` |
 
 ### Scheduler
 
@@ -344,16 +365,20 @@ Failures answer with a machine-readable code. Grouped here by the HTTP status th
 
 | Status | Meaning | Codes |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid` |
-| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials` |
-| `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled` |
-| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid, channel_payload_invalid, connector_action_denied, audio_unsupported, sandbox_unknown_provider` |
+| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials, channel_signature_missing, channel_signature_invalid, channel_timestamp_expired` |
+| `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled, channel_disabled, connector_policy_off, sandbox_disabled, sandbox_policy_denied` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset` |
-| `413` | Payload Too Large | `payload_too_large` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost` |
+| `413` | Payload Too Large | `payload_too_large, audio_too_large` |
+| `415` | Unsupported Media Type | `audio_unsupported` |
+| `422` | Unprocessable Entity | `audio_transcribe_failed` |
+| `429` | Too Many Requests | `account_locked, sandbox_limit_reached` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
-| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email` |
-| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable` |
+| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email, delivery_failed` |
+| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable, speech_disabled, sandbox_node_offline` |
+| `504` | Gateway Timeout | `sandbox_timeout` |
 
 The body is always {"code": "..."}. Log the code rather than any prose that came with it.
 

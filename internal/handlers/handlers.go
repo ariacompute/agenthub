@@ -181,6 +181,9 @@ func Register(d Deps) http.Handler {
 	// secret, verified against the env var named in signing_key_env.
 	mux.HandleFunc("POST /api/channels/{id}/webhook", d.handleChannelWebhook)
 	mux.HandleFunc("POST /api/channels/{id}/deliver", d.requirePermission(authz.PermTasksWrite, d.handleDeliverChannel))
+	// Retry re-sends one outbound receipt that never left, updating it in place
+	// so the console keeps a single line per message (F6.2).
+	mux.HandleFunc("POST /api/channels/{id}/deliveries/{did}/retry", d.requirePermission(authz.PermTasksWrite, d.handleRetryDelivery))
 
 	// Connectors: external applications invoking a kind=mcp resource, with a
 	// per-resource policy that may require a human approval (HITL).

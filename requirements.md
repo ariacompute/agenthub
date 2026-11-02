@@ -400,7 +400,7 @@ POST   /api/router/passes                     → 202 {kicked:true}（tasks:writ
 GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 router_event，先回放再实时）
 ```
 
-#### 4.2.1 路由分组索引（当前 127 条 `/api` 路由）
+#### 4.2.1 路由分组索引（当前 128 条 `/api` 路由）
 
 不逐条罗列，避免与 `handlers.go` 反复漂移；每条路径的请求/响应示例由控制台 `/docs` 屏给出
 （`web/src/lib/docs-content.js`），路由搬动时两处必须同步。
@@ -415,7 +415,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | 任务 | 6 | `/api/tasks`、`{id}`、`{id}/spans`、`{id}/events`、`{id}/cancel`、`{id}/resume` | `tasks:read` / `tasks:write` |
 | 导出 | 2 | `/api/export/mcp`、`/api/export/agent-card` | `resources:read` |
 | 工作台与线程 | 7 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`、`{id}/messages`、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
-| 通道 | 8 | `/api/channels`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/deliveries`、`{id}/webhook`（**公开，签名校验**）、`{id}/deliver` | `tasks:read` / `tasks:write`；webhook 无会话 |
+| 通道 | 9 | `/api/channels`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/deliveries`、`{id}/deliveries/{did}/retry`、`{id}/webhook`（**公开，签名校验**）、`{id}/deliver` | `tasks:read` / `tasks:write`；webhook 无会话 |
 | 连接器 | 4 | `/api/connectors`、`{id}/policy`（PUT）、`{id}/actions`（GET/POST） | `resources:read` / `resources:write` |
 | 计算机 | 4 | `/api/computers`（GET/POST）、`{id}`（GET/DELETE） | `resources:read` / `resources:write` |
 | 目标与周期 | 6 | `/api/schedules`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/run` | `tasks:read` / `tasks:write` |
@@ -463,7 +463,8 @@ API Key 码：`api_key_not_found` → 404、`api_key_expired`·`api_key_revoked`
 `api_key_name_required`·`api_key_invalid_scope` → 400。
 
 通道码：`channel_not_found` → 404、`channel_disabled` → 403（控制面未接线时 503）、`channel_payload_invalid` → 400、
-`channel_signature_missing`·`channel_signature_invalid`·`channel_timestamp_expired` → 401、`delivery_failed` → 502。
+`channel_signature_missing`·`channel_signature_invalid`·`channel_timestamp_expired` → 401、`delivery_failed` → 502、
+`delivery_not_found` → 404（回执不存在）、`delivery_not_retryable` → 409（已送达 / 入站 / 无原文）。
 连接器码：`connector_not_found` → 404、`connector_action_denied` → 400、`connector_policy_off` → 403。
 语音码：`audio_too_large` → 413、`audio_unsupported` → 400/415、`audio_transcribe_failed` → 422、
 `speech_disabled` → 503。
@@ -637,7 +638,7 @@ M3 各块的逐项验收写在对应子文档（`requirements-security.md` §验
 
 - 功能：六类资源通道、任务状态机（`submitted → working → input-required → completed/failed/canceled`）、
   健康值**只由探测或运行写入**的语义、记录审批状态机。
-- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 127 条路由**，逐条给出方法、
+- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 128 条路由**，逐条给出方法、
   路径、所需权限、请求体与响应体示例，按 §4.2.1 的分组组织（协议/鉴权/资源/命名空间/上游源/任务/
   导出/工作台与线程/通道/连接器/计算机/目标与周期/调度器/沙盒与节点/知识/用户与授权/备份/API Key/审计）。
 - 沙盒：隔离层概念、类型目录与执行节点协议（与 `requirements-sandbox.md` 同源）。
@@ -658,8 +659,9 @@ M3 各块的逐项验收写在对应子文档（`requirements-security.md` §验
 
 - `docs` 已加入 `tests/copy-fallback.spec.js` 的 `PROSE` 表：13 语键位齐全且非英语译文异于英文。
 - 端点清单与 `internal/handlers/handlers.go` 注册一致（增删路由须同步 `docs-content.js`）。
-  **已知差距（待补）**：`docs-content.js` 目前 116 条，缺 `DELETE /api/computers/{id}` 与 15 条
-  沙盒/类型目录/执行节点路由（含 13 语 `descKey`）。
+  **已知差距（待补）**：`docs-content.js` 目前 116 条，缺 `DELETE /api/computers/{id}`、
+  `POST /api/channels/{id}/deliveries/{did}/retry` 与 15 条沙盒/类型目录/执行节点路由
+  （含 13 语 `descKey`）。
 - 完成后必须 `make web-build`：`backend/static` 由 Go 在 3500 端口直接托管，不重建则新屏不可见。
 
 ## 10. 调度器（Router 层）

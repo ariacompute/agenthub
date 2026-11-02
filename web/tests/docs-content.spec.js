@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { docsSections, sandboxLayers } from '../src/lib/docs-content.js'
+import { docsSections, endpointGroups, httpEndpoints, sandboxLayers } from '../src/lib/docs-content.js'
 import { docsCopy } from '../src/lib/copy/docs-copy.js'
 
 // The /docs screen renders keys, not prose: a key with no translation renders its
@@ -43,5 +43,34 @@ describe('docs content', () => {
 
   it('keeps the sandbox section among the rendered sections', () => {
     expect(docsSections.map((section) => section.id)).toContain('sandbox')
+  })
+
+  it('resolves every endpoint description and noun in every language', () => {
+    // An endpoint whose descKey is missing renders its own key as prose, which is
+    // how a route silently drops out of the table. The noun is what `{n}` becomes.
+    for (const lang of LANGS) {
+      const dict = resolve(lang)
+      for (const endpoint of httpEndpoints) {
+        expect(dict[endpoint.descKey], `${lang}.${endpoint.descKey} missing`).toBeTruthy()
+        if (endpoint.nounKey) {
+          expect(dict[endpoint.nounKey], `${lang}.${endpoint.nounKey} missing`).toBeTruthy()
+        }
+      }
+    }
+  })
+
+  it('files every endpoint under a group the table renders', () => {
+    const declared = endpointGroups.map((group) => group.id)
+    expect(new Set(declared).size).toBe(declared.length)
+    for (const group of endpointGroups) {
+      expect(docsCopy.en[group.groupKey], `group ${group.id} has no title`).toBeTruthy()
+      expect(
+        httpEndpoints.some((endpoint) => endpoint.group === group.id),
+        `group ${group.id} declares no endpoint`,
+      ).toBe(true)
+    }
+    for (const endpoint of httpEndpoints) {
+      expect(declared, `${endpoint.method} ${endpoint.path} has no group`).toContain(endpoint.group)
+    }
   })
 })

@@ -247,6 +247,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — 查看任务 | 列出全部投递 | — | `ChannelMessage[]` |
 | `POST` | `/api/channels/{id}/webhook` | — | 入站 webhook：校验签名，按外部引用去重，再将消息转发到绑定线程。 | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
 | `POST` | `/api/channels/{id}/deliver` | `tasks:write` — 取消与恢复任务 | 出站投递：经 SSRF 安全客户端把消息发往通道的 config.target_url，并回显 Provider 原始响应（状态码 + 截断后的响应体）。 | `{ "message": "string" }` | `DeliverResult { status, raw }` |
+| `POST` | `/api/channels/{id}/deliveries/{did}/retry` | `tasks:write` — 取消与恢复任务 | 重试一条从未送达的出向回执：原地翻成 delivered，不新增行。 | — | `DeliverResult { status, raw } \| 404 delivery_not_found \| 409 delivery_not_retryable \| 502 delivery_failed (the receipt stays retryable)` |
 | `GET` | `/api/connectors` | `resources:read` — 查看资源 | 列出全部连接器 | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
 | `PUT` | `/api/connectors/{id}/policy` | `resources:write` — 变更资源 | 设置约束外部调用的策略：off、ask_first 或 allowed。 | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
 | `GET` | `/api/connectors/{id}/actions` | `resources:read` — 查看资源 | 列出全部动作 | — | `{ id, policy, actions: [{ name, description }] }` |
@@ -266,6 +267,26 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `PUT` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 整体替换其中一条调度 | `{ goal?, trigger?, cronExpr?, enabled? }` | `Schedule \| 404 schedule_not_found` |
 | `DELETE` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条调度 | — | `204, no body` |
 | `GET` | `/api/knowledge` | `resources:read` — 查看资源 | 列出全部知识库 | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
+
+### 执行沙盒
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/sandboxes` | `resources:read` — 查看资源 | 列出全部租约 | — | `{ leases: Lease[], default: Profile, live: boolean } — Lease { id, ownerId, resourceId, scope, provider, runtime?, nodeId?, state, ref?, profile, createdAt, renewedAt, expiresAt, execs, lastExitCode, lastCommand? }` |
+| `GET` | `/api/sandboxes/{id}` | `resources:read` — 查看资源 | 按 id 读取其中一条租约 | — | `{ lease: Lease, execs: ExecRecord[] } — the last 50 executions; someone else's lease reads as 404 sandbox_not_found` |
+| `GET` | `/api/sandboxes/stats` | `resources:read` — 查看资源 | 水位：活跃租约、待执行作业、在线节点、最近执行、上次清扫。 | — | `{ activeLeases, pendingJobs, onlineNodes, recentExecs, lastSweepAt, sweeps, reclaimed, lastError? }` |
+| `GET` | `/api/sandboxes/events` | `resources:read` — 查看资源 | SSE：从 `since` 回放，随后实时跟随租约与作业事件。 | `?since=<seq>` | `text/event-stream, event name sandbox_event` |
+| `POST` | `/api/sandboxes/{id}/exec` | `resources:write` — 变更资源 | 在租约内执行一条命令，不经过 shell：argv 直接 exec，输出截断，回执进审计。 | `{ command(required), args?, stdin?, dir?, env?, timeoutMs? } — 1 MiB body cap; argv is exec-ed directly, never through a shell` | `ExecResult { exitCode, stdout?, stderr?, truncated, durationMs, provider, ref?, receipt? } \| 400 sandbox_policy_denied \| 409 sandbox_lease_lost \| 504 sandbox_timeout` |
+| `POST` | `/api/sandboxes/{id}/renew` | `resources:write` — 变更资源 | 把租约续到实例 TTL 上限；已过期或已终止的租约无法复活。 | — | `Lease \| 409 sandbox_lease_lost (expired, terminated, or past the instance TTL)` |
+| `DELETE` | `/api/sandboxes/{id}` | `resources:write` — 变更资源 | 删除其中一条租约 | — | `204, no body \| 404 sandbox_not_found` |
+| `GET` | `/api/sandbox-providers` | `resources:read` — 查看资源 | 列出全部沙盒提供方 | — | `{ providers: ProviderInfo[], groups: [{ layer, providers }], layers: Layer[], default: string }` |
+| `POST` | `/api/sandbox-providers/refresh` | `resources:write` — 变更资源 | 重新探测所有运行时，新装的容器引擎无需重启即可出现。 | — | `same shape as GET /api/sandbox-providers` |
+| `GET` | `/api/sandbox-nodes` | `resources:read` — 查看资源 | 列出全部执行节点 | — | `{ nodes: Node[], waiters, pollHint } — Node { id, ownerId, name, apiKeyId?, capabilities?, status, lastSeenAt, createdAt }` |
+| `POST` | `/api/sandbox-nodes` | `resources:write` — 变更资源 | 按 id 注册节点；同一 id 再次注册是更新而非新增。 | `{ id(required, 1-64 of [A-Za-z0-9._-]), name?, capabilities? } — 64 KiB body cap` | `Node \| 400 bad_request \| 404 sandbox_not_found (that id belongs to someone else)` |
+| `DELETE` | `/api/sandbox-nodes/{id}` | `resources:write` — 变更资源 | 删除其中一条执行节点 | — | `204, no body \| 404 sandbox_not_found` |
+| `POST` | `/api/sandbox-nodes/{id}/heartbeat` | `tasks:write` — 取消与恢复任务 | 节点心跳；响应带回下一次取任务的长轮询提示。 | — | `{ node: Node, pollHint } \| 404 sandbox_not_found` |
+| `GET` | `/api/sandbox-nodes/{id}/jobs` | `tasks:write` — 取消与恢复任务 | 长轮询取下一个作业：等待窗口内队列为空则返回 204。 | `?wait=<seconds> — default 25, capped at 60` | `Job \| 204 when the queue stays empty for the whole wait` |
+| `POST` | `/api/sandbox-nodes/{id}/jobs/{job}` | `tasks:write` — 取消与恢复任务 | 把已完成的作业回传服务端；error 非空即记为失败。 | `{ exitCode, stdout?, stderr?, truncated?, durationMs?, receipt?, error? } — 1 MiB body cap` | `{ ok: true } \| 404 sandbox_not_found` |
 
 ### 调度器
 
@@ -344,16 +365,20 @@ API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证�
 
 | 状态码 | 含义 | 错误码 |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid` |
-| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials` |
-| `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled` |
-| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid, channel_payload_invalid, connector_action_denied, audio_unsupported, sandbox_unknown_provider` |
+| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials, channel_signature_missing, channel_signature_invalid, channel_timestamp_expired` |
+| `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled, channel_disabled, connector_policy_off, sandbox_disabled, sandbox_policy_denied` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset` |
-| `413` | Payload Too Large | `payload_too_large` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost` |
+| `413` | Payload Too Large | `payload_too_large, audio_too_large` |
+| `415` | Unsupported Media Type | `audio_unsupported` |
+| `422` | Unprocessable Entity | `audio_transcribe_failed` |
+| `429` | Too Many Requests | `account_locked, sandbox_limit_reached` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
-| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email` |
-| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable` |
+| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email, delivery_failed` |
+| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable, speech_disabled, sandbox_node_offline` |
+| `504` | Gateway Timeout | `sandbox_timeout` |
 
 响应体恒为 {"code": "..."}。请记录错误码，而不是附带的说明文字。
 
