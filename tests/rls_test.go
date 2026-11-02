@@ -13,12 +13,15 @@
 //     read. A policy that is present but wrong shows up here.
 //
 // Gating matches the rest of the package: without DATABASE_URL every case
-// skips. The connection must be opened with RLSEnforce: true, because the zero
-// value of OpenOptions relaxes RLS (store.relaxRLS) and would make every
-// assertion below pass for the wrong reason.
+// skips. Two preconditions have to hold for the assertions to mean anything,
+// and openRLSDB establishes both: the connection must be opened with
+// RLSEnforce: true (the zero value of OpenOptions relaxes RLS through
+// store.relaxRLS), and its session role must be one the policies bind — a
+// superuser or a BYPASSRLS role reads the whole table no matter what 026 says.
 package tests
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -67,9 +70,25 @@ func rlsFlag(on bool) string {
 // asUser is what an ordinary signed-in request publishes.
 func asUser(owner string) rlsIdentity { return rlsIdentity{OwnerID: owner} }
 
+// constrainedRole is the login role the behavioural assertions run as.
+//
+// A superuser or a BYPASSRLS role walks through every policy no matter what
+// 026_rls_policies.sql says, and the policies bind the table owner only because
+// that migration adds FORCE. A suite that connected as the superuser a compose
+// file or the CI service container hands out would therefore assert "everybody
+// sees everything" and call it a pass. Deployments point DATABASE_URL at
+// scripts/provision-db-roles.sql's agenthub_app for exactly that reason; when
+// the suite is handed a privileged role instead, it provisions this throwaway
+// one and reconnects as it, which is the same shape as production.
+const (
+	constrainedRole     = "agenthub_rls_test"
+	constrainedPassword = "agenthub_rls_test"
+)
+
 // openRLSDB opens the database with the policies enforced, runs the migrations
-// and hands the handle back. It is deliberately separate from openDBReal: a
-// relaxed connection would make this whole file meaningless.
+// and hands back a handle whose connections the policies actually bind. It is
+// deliberately separate from openDBReal: a relaxed connection would make this
+// whole file meaningless.
 func openRLSDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
@@ -81,14 +100,108 @@ func openRLSDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open db with RLS enforced: %v", err)
 	}
 	if err := store.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+		// A runtime role (agenthub_app) may not run DDL at all. If the schema is
+		// already there — the production shape — the assertions still hold.
+		if !schemaExists(db) {
+			_ = store.Close(db)
+			t.Fatalf("migrate: %v", err)
+		}
+		t.Logf("rls: schema already migrated, skipping DDL: %v", err)
+	}
+	if !bypassesRLS(t, db) {
+		t.Cleanup(func() {
+			if err := store.Close(db); err != nil {
+				t.Errorf("close db: %v", err)
+			}
+		})
+		return db
+	}
+	// Handed a role the policies do not bind: reconnect as one they do.
+	dsn = reconnectAsConstrainedRole(t, db, dsn)
+	enforced, err := store.OpenWithOptions(dsn, store.OpenOptions{RLSEnforce: true})
+	if err != nil {
+		t.Fatalf("open db as %s: %v", constrainedRole, err)
 	}
 	t.Cleanup(func() {
-		if err := store.Close(db); err != nil {
+		if err := store.Close(enforced); err != nil {
 			t.Errorf("close db: %v", err)
 		}
 	})
-	return db
+	return enforced
+}
+
+// bypassesRLS reports whether the session role ignores every policy.
+func bypassesRLS(t *testing.T, db *gorm.DB) bool {
+	t.Helper()
+	var role string
+	var super, bypass bool
+	err := db.Raw(
+		`SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+	).Row().Scan(&role, &super, &bypass)
+	if err != nil {
+		t.Fatalf("read the session role: %v", err)
+	}
+	t.Logf("rls: connected as %q (superuser=%v bypassrls=%v)", role, super, bypass)
+	return super || bypass
+}
+
+// schemaExists reports whether the migrations have run at least once.
+func schemaExists(db *gorm.DB) bool {
+	var name string
+	if err := db.Raw(`SELECT to_regclass('public.tasks')::text`).Scan(&name).Error; err != nil {
+		return false
+	}
+	return name != ""
+}
+
+// reconnectAsConstrainedRole provisions constrainedRole and returns a DSN that
+// logs in as it. The role is created only in a database the suite already
+// writes to, and it exists to be denied: NOSUPERUSER, NOBYPASSRLS, no DDL.
+func reconnectAsConstrainedRole(t *testing.T, admin *gorm.DB, dsn string) string {
+	t.Helper()
+	var database string
+	if err := admin.Raw(`SELECT current_database()`).Scan(&database).Error; err != nil {
+		_ = store.Close(admin)
+		t.Fatalf("read the database name: %v", err)
+	}
+	statements := []string{
+		`DO $$
+		 BEGIN
+		   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '` + constrainedRole + `') THEN
+		     CREATE ROLE ` + constrainedRole + ` LOGIN;
+		   END IF;
+		 END $$`,
+		`ALTER ROLE ` + constrainedRole + ` LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '` + constrainedPassword + `'`,
+		`GRANT CONNECT ON DATABASE ` + quoteIdent(database) + ` TO ` + constrainedRole,
+		`GRANT USAGE ON SCHEMA public TO ` + constrainedRole,
+		// DELETE on audit_log is part of the grant on purpose: the case below
+		// has to prove that the policy and the append-only trigger refuse an
+		// expiry without app.retention, so a missing privilege must not be what
+		// stops it (and the retention path must still be able to go through).
+		`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ` + constrainedRole,
+		`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ` + constrainedRole,
+	}
+	for _, stmt := range statements {
+		if err := admin.Exec(stmt).Error; err != nil {
+			_ = store.Close(admin)
+			t.Skipf("cannot provision %s for the row level security assertions (%v): point DATABASE_URL at a role the policies bind (scripts/provision-db-roles.sql)", constrainedRole, err)
+		}
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || u.Scheme == "" {
+		_ = store.Close(admin)
+		t.Skipf("DATABASE_URL is not a URL this suite can re-point at %s (%v): use postgres://user:pass@host/db", constrainedRole, err)
+	}
+	u.User = url.UserPassword(constrainedRole, constrainedPassword)
+	if err := store.Close(admin); err != nil {
+		t.Errorf("close the privileged handle: %v", err)
+	}
+	return u.String()
+}
+
+// quoteIdent quotes an SQL identifier (double quotes, doubled inside).
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // rlsTag keeps ids unique per test and per run: the suite shares one database
@@ -128,6 +241,25 @@ func execErrIn(db *gorm.DB, scope rlsIdentity, stmt string, args ...any) error {
 	return inScope(db, scope, func(tx *gorm.DB) error {
 		return tx.Exec(stmt, args...).Error
 	})
+}
+
+// affectedIn reports how many rows a write touched. A refusal counts as zero:
+// "the policy filtered the row out" and "the trigger raised" are different
+// sentences for the same outcome, and the cases that use this assert the
+// outcome (nothing changed) rather than which of the two fired.
+func affectedIn(t *testing.T, db *gorm.DB, scope rlsIdentity, stmt string, args ...any) int64 {
+	t.Helper()
+	var rows int64
+	err := inScope(db, scope, func(tx *gorm.DB) error {
+		res := tx.Exec(stmt, args...)
+		rows = res.RowsAffected
+		return res.Error
+	})
+	if err != nil {
+		t.Logf("write refused as %+v (that is one of the two expected outcomes): %v", scope, err)
+		return 0
+	}
+	return rows
 }
 
 // countIn answers "how many rows does this session see?".
@@ -324,20 +456,14 @@ func TestRLSRefusesToWriteAnotherOwnersRow(t *testing.T) {
 	// The owner can write their own row, and only theirs.
 	execIn(t, db, asUser("alice-"+id), `INSERT INTO tasks (id, state, owner_id) VALUES (?, 'submitted', ?)`, id, "alice-"+id)
 
-	// An UPDATE that would hand the row to somebody else silently matches no row:
-	// USING filters it out before WITH CHECK even runs.
-	err = inScope(db, asUser("alice-"+id), func(tx *gorm.DB) error {
-		res := tx.Exec(`UPDATE tasks SET owner_id = ? WHERE id = ?`, "bob-"+id, id)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 0 {
-			return errUnexpectedRows(res.RowsAffected)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("the update should match no row: %v", err)
+	// An UPDATE that would hand the row to somebody else is an error, not a
+	// silent no-op: USING lets the owner load the row, and WITH CHECK then
+	// rejects the *new* owner. Either way the row must stay where it was.
+	if err := execErrIn(db, asUser("alice-"+id), `UPDATE tasks SET owner_id = ? WHERE id = ?`, "bob-"+id, id); err == nil {
+		t.Fatal("an UPDATE naming another owner must be refused by the WITH CHECK policy")
+	}
+	if got := countIn(t, db, asUser("alice-"+id), `SELECT count(*) FROM tasks WHERE id = ? AND owner_id = ?`, id, "alice-"+id); got != 1 {
+		t.Fatalf("the row moved or vanished: %d of the owner's rows remain", got)
 	}
 
 	// Another account cannot delete it either.
@@ -347,14 +473,6 @@ func TestRLSRefusesToWriteAnotherOwnersRow(t *testing.T) {
 	if got := countIn(t, db, asUser("alice-"+id), `SELECT count(*) FROM tasks WHERE id = ?`, id); got != 1 {
 		t.Fatalf("the row disappeared after another account's delete, %d remain", got)
 	}
-}
-
-// errUnexpectedRows is a tiny typed error so the closure above can report a leak
-// with its row count in the message.
-type errUnexpectedRows int64
-
-func (e errUnexpectedRows) Error() string {
-	return "unexpected rows affected: " + strconv.FormatInt(int64(e), 10)
 }
 
 // TestRLSCoversKnowledgeChunks covers the table added for F14: a chunk belongs
@@ -414,11 +532,25 @@ func TestRLSAuditTrailIsReadOnlyAndAppendOnly(t *testing.T) {
 		t.Fatal("an audit reader must not be able to append")
 	}
 	execIn(t, db, system, `INSERT INTO audit_log (event_id, source, action) VALUES (?, 'api', 'allowed')`, eventID+"-ok")
-	if err := execErrIn(db, system, `DELETE FROM audit_log WHERE event_id = ?`, eventID+"-ok"); err == nil {
-		t.Fatal("the retention setting, not a process identity, is what allows a delete")
+
+	// A process identity alone may not expire a row. On a connection the
+	// policies bind, the DELETE policy filters the row out, so the statement
+	// succeeds while touching nothing; a privileged connection never reaches
+	// the policy and is refused by the append-only trigger instead. Either way
+	// the retention setting is what a delete needs, and the row has to survive.
+	if rows := affectedIn(t, db, system, `DELETE FROM audit_log WHERE event_id = ?`, eventID+"-ok"); rows != 0 {
+		t.Fatalf("a process identity expired %d audit rows without app.retention", rows)
 	}
-	if err := execErrIn(db, rlsIdentity{Bypass: true, Retention: true}, `UPDATE audit_log SET action = 'edited' WHERE event_id = ?`, eventID); err == nil {
-		t.Fatal("the append-only trigger must reject every update, including the owner's")
+	if got := countIn(t, db, system, `SELECT count(*) FROM audit_log WHERE event_id = ?`, eventID+"-ok"); got != 1 {
+		t.Fatalf("the row a process identity tried to delete is gone (count %d)", got)
+	}
+	// An edit is refused the same way: no policy grants UPDATE, and the trigger
+	// behind the policy rejects one for every role, including the owner's.
+	if rows := affectedIn(t, db, rlsIdentity{Bypass: true, Retention: true}, `UPDATE audit_log SET action = 'edited' WHERE event_id = ?`, eventID); rows != 0 {
+		t.Fatal("the append-only trail accepted an edit")
+	}
+	if got := countIn(t, db, system, `SELECT count(*) FROM audit_log WHERE event_id = ? AND action = 'edited'`, eventID); got != 0 {
+		t.Fatal("the append-only trail kept an edit")
 	}
 	// The retention path works: the policy admits it and the trigger allows it.
 	execIn(t, db, rlsIdentity{System: true, Retention: true}, `DELETE FROM audit_log WHERE event_id = ?`, eventID+"-ok")

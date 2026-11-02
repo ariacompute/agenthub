@@ -38,10 +38,22 @@ func TestIntegrationAPIKeyLifecycle(t *testing.T) {
 	keys := store.NewAPIKeyStore(db)
 	svc := auth.New(users, store.NewSessionStore(db), store.NewOAuthStore(db), keys, az, auth.Options{TTL: time.Hour})
 
+	// The instance owner is whoever registered first in this database, and the
+	// suite shares it with the other packages: promote the account explicitly so
+	// "a key never rides the owner bypass" is asserted against a real owner
+	// instead of against whichever case happened to get there first.
 	owner := uniqueEmail("apikey")
 	u, err := svc.Register(ctx, owner, "correct horse", "Owner")
 	if err != nil {
 		t.Fatalf("register owner: %v", err)
+	}
+	if !u.IsOwner {
+		if err := svc.BootstrapAdmin(ctx, owner, "correct horse", "Owner"); err != nil {
+			t.Fatalf("promote owner: %v", err)
+		}
+		if u, err = users.GetByEmail(ctx, owner); err != nil || u == nil {
+			t.Fatalf("reload owner: %v", err)
+		}
 	}
 	member := uniqueEmail("apikey-member")
 	m, err := svc.Register(ctx, member, "correct horse", "Member")
@@ -96,15 +108,21 @@ func TestIntegrationAPIKeyLifecycle(t *testing.T) {
 	}
 
 	// A key for a plain member keeps only what the member actually holds. The
-	// default member permission set is users:read + groups:read, so backups:manage
-	// must be dropped while the two it does hold survive.
+	// self-service role of a registered account is the built-in viewer
+	// (resources:read + tasks:read, see api_auth.go's grantDefaultRole), so
+	// backups:manage must be dropped while the read permission survives.
+	if err := az.Store().SetUserRoles(ctx, m.ID, []string{authz.RoleViewer}); err != nil {
+		t.Fatalf("grant the viewer role: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Exec("DELETE FROM user_roles WHERE user_id = ?", m.ID) })
+
 	rawM, prefixM, hashM, _ := auth.NewAPIKeyToken()
 	mKey := &auth.APIKey{
 		ID:        auth.NewID("key"),
 		UserID:    m.ID,
 		Name:      "member-key",
 		Prefix:    prefixM,
-		Scopes:    []string{"users:read", "groups:read", "backups:manage"},
+		Scopes:    []string{authz.PermResourcesRead, authz.PermTasksRead, authz.PermBackupsManage},
 		CreatedBy: u.ID,
 	}
 	if err := keys.Create(ctx, mKey, hashM); err != nil {
@@ -114,10 +132,10 @@ func TestIntegrationAPIKeyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth member key: %v", err)
 	}
-	if !pm.Can("users:read") || !pm.Can("groups:read") {
-		t.Fatal("member key should keep the permissions the member holds")
+	if !pm.Can(authz.PermResourcesRead) || !pm.Can(authz.PermTasksRead) {
+		t.Fatalf("member key should keep the permissions the member holds: %v", pm.Permissions)
 	}
-	if pm.Can("backups:manage") {
+	if pm.Can(authz.PermBackupsManage) {
 		t.Fatal("member key must drop backups:manage the member lacks")
 	}
 

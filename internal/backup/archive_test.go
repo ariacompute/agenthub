@@ -352,19 +352,22 @@ func TestCheckpointFileNameStaysSafeOnDisk(t *testing.T) {
 
 func TestSelectEngineFallsBackToTheNativeEngine(t *testing.T) {
 	// No pg_dump in the test environment (and none wanted): the copy engine is
-	// what an alpine container without the client gets.
+	// what an alpine container without the client gets. The client is hidden
+	// explicitly, because a CI image that ships it would otherwise prove the
+	// opposite of what this case is about.
+	withoutClient(t)
 	engine, err := SelectEngine("postgres://localhost/agenthub", "")
 	if err != nil {
 		t.Fatalf("select engine: %v", err)
 	}
-	if engine.Name() == "" {
-		t.Fatal("the engine must name itself")
+	if engine.Name() != EngineNative {
+		t.Fatalf("auto selection = %q, want the engine that needs no client", engine.Name())
 	}
 
 	// Asking for pg_dump explicitly must fail loudly rather than silently
 	// serving another engine.
-	if _, err := SelectEngine("postgres://localhost/agenthub", EnginePgDump); !errors.Is(err, ErrEngineUnavailable) && err == nil {
-		t.Fatalf("select pg_dump = %v, want an error when the binary is missing", err)
+	if _, err := SelectEngine("postgres://localhost/agenthub", EnginePgDump); !errors.Is(err, ErrEngineUnavailable) {
+		t.Fatalf("select pg_dump = %v, want ErrEngineUnavailable when the binary is missing", err)
 	}
 	if engine, err := SelectEngine("postgres://localhost/agenthub", EngineNative); err != nil || engine.Name() != EngineNative {
 		t.Fatalf("select native = %v (%v)", engine, err)

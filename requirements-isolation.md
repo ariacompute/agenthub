@@ -228,6 +228,12 @@ hash[i] = sha256( hash[i-1] || canonical(event[i]) )
   （归属过滤在内存与 PostgreSQL 上都有用例）。
 - 越权访问统一按「不存在」返回，不泄露存在性。
 - 审计写失败不阻断业务；队列满只丢帧并告警。
+- `tests/rls_test.go` 的连接必须同时满足两个前提才能断言策略：`RLSEnforce: true`（零值会
+  `relaxRLS` 放行全部策略）、**会话角色受策略约束**（超级用户 / `BYPASSRLS` / 仅靠 `ENABLE`
+  的表属主都会整表可见）。`DATABASE_URL` 指向受约束角色（生产形态）时直接用；指向超级用户
+  （compose 与 CI 服务容器的默认）时用例临时建 `agenthub_rls_test`（`NOSUPERUSER`、
+  `NOBYPASSRLS`、无 DDL）并改用它重连；无建角色权限则整组 skip 并提示
+  `scripts/provision-db-roles.sql`。
 - `go build` / `go vet` / `go test -race ./...` 全绿；前端 `bun run build` + `bun run test` 全绿。
 
 ## 8. 升级操作指引（从无 RLS 版本升上来）

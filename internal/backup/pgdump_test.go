@@ -79,12 +79,21 @@ func TestSanitizeOutputScrubsThePasswordBeforeItIsLogged(t *testing.T) {
 	}
 }
 
+// withoutClient hides the PostgreSQL client tools for the duration of a test.
+// The absence of pg_dump is a supported configuration (the COPY engine covers
+// it), so the tests that assert it must control it rather than inherit it from
+// whatever the host happens to have installed.
+func withoutClient(t *testing.T) {
+	t.Helper()
+	previous := lookPath
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { lookPath = previous })
+}
+
 // The client is optional by design: a container without it has to fall back to
 // the COPY engine rather than fail every checkpoint.
 func TestNewPgDumpEngineIsHonestAboutAMissingClient(t *testing.T) {
-	if _, err := exec.LookPath("pg_dump"); err == nil {
-		t.Skip("pg_dump is installed here; the missing-client path belongs to a host without it")
-	}
+	withoutClient(t)
 	engine, err := newPgDumpEngine("postgres://u:p@localhost:5432/db")
 	if engine != nil {
 		t.Fatal("newPgDumpEngine returned an engine without the client")

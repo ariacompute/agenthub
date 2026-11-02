@@ -204,19 +204,22 @@ func TestIntegrationRBACResolution(t *testing.T) {
 }
 
 // TestIntegrationResourceGrantRestricts covers the resource level rule in SQL:
-// a granted resource is hidden from listings and a read grant never allows a
-// write, while the owner stays above all of it.
+// the grant axis only. Visibility (public | restricted, 024_resource_visibility)
+// is a separate fact the handlers union in, so a record with no grant row is
+// *not* visible here even to a principal holding resources:read — that is the
+// fail-closed default the isolation change introduced, and the reason a fresh
+// record is no longer world readable.
 func TestIntegrationResourceGrantRestricts(t *testing.T) {
 	db := openDBReal(t)
 	ctx := context.Background()
 	azs := store.NewAuthzStore(db)
 	az := authz.New(azs)
 
-	public := integrationResource(t, db, "model", "integration-public")
+	plain := integrationResource(t, db, "model", "integration-plain")
 	secret := integrationResource(t, db, "model", "integration-secret")
 	t.Cleanup(func() {
-		_ = db.Exec("DELETE FROM resource_grants WHERE resource_id IN (?,?)", public, secret)
-		_ = db.Exec("DELETE FROM resources WHERE id IN (?,?)", public, secret)
+		_ = db.Exec("DELETE FROM resource_grants WHERE resource_id IN (?,?)", plain, secret)
+		_ = db.Exec("DELETE FROM resources WHERE id IN (?,?)", plain, secret)
 	})
 
 	// The grant holder has to be a real row: a grant to a user that does not
@@ -237,16 +240,21 @@ func TestIntegrationResourceGrantRestricts(t *testing.T) {
 		t.Fatalf("create grant: %v", err)
 	}
 
+	// Holding resources:read is not what makes a record visible: neither the
+	// record with no grant nor somebody else's grant shows up.
 	p := &authz.Principal{UserID: "somebody-else", Permissions: map[string]bool{authz.PermResourcesRead: true}}
-	visible, err := az.VisibleResourceIDs(ctx, p, []string{public, secret})
+	visible, err := az.VisibleResourceIDs(ctx, p, []string{plain, secret})
 	if err != nil {
 		t.Fatalf("visible: %v", err)
 	}
-	if _, ok := visible[public]; !ok {
-		t.Fatal("an unrestricted resource must stay visible")
+	if _, ok := visible[plain]; ok {
+		t.Fatal("a record with no grant must not be visible to a plain reader")
 	}
 	if _, ok := visible[secret]; ok {
 		t.Fatal("a resource granted to somebody else must not be visible")
+	}
+	if ok, err := az.CanAccessResource(ctx, p, plain, false); err != nil || ok {
+		t.Fatalf("a record with no grant must not be readable by a plain reader (ok=%v err=%v)", ok, err)
 	}
 	if ok, err := az.CanAccessResource(ctx, p, secret, true); err != nil || ok {
 		t.Fatalf("a read grant must not allow writes (ok=%v err=%v)", ok, err)
@@ -257,15 +265,20 @@ func TestIntegrationResourceGrantRestricts(t *testing.T) {
 	if ok, err := az.CanAccessResource(ctx, holderPrincipal, secret, false); err != nil || !ok {
 		t.Fatalf("the grant holder must be able to read (ok=%v err=%v)", ok, err)
 	}
+	if visible, err := az.VisibleResourceIDs(ctx, holderPrincipal, []string{plain, secret}); err != nil {
+		t.Fatalf("visible as the grant holder: %v", err)
+	} else if _, ok := visible[secret]; !ok {
+		t.Fatalf("the grant holder cannot list the granted record: %v", visible)
+	}
 	owner := &authz.Principal{UserID: "owner", IsOwner: true}
 	if ok, err := az.CanAccessResource(ctx, owner, secret, true); err != nil || !ok {
 		t.Fatalf("the owner must bypass grants (ok=%v err=%v)", ok, err)
 	}
 
 	// A grant pointing at a principal that does not exist would restrict a
-	// resource that nobody could ever make public again.
+	// resource that nobody could ever make visible again.
 	if err := azs.CreateGrant(ctx, &authz.Grant{
-		ResourceID:    public,
+		ResourceID:    plain,
 		PrincipalKind: authz.PrincipalGroup,
 		PrincipalID:   "group-nope",
 		Level:         authz.LevelRead,
@@ -273,12 +286,14 @@ func TestIntegrationResourceGrantRestricts(t *testing.T) {
 		t.Fatalf("grant to a missing principal: %v, want group not found", err)
 	}
 
-	// Revoking the grant releases the resource again.
+	// Revoking the grant returns the record to the restricted default:
+	// publishing it again is the explicit registry.Visibility act, not a
+	// side effect of losing the last grant.
 	if err := azs.DeleteGrant(ctx, grant.ID); err != nil {
 		t.Fatalf("delete grant: %v", err)
 	}
-	if ok, err := az.CanAccessResource(ctx, p, secret, false); err != nil || !ok {
-		t.Fatalf("after revoke the resource must be public again (ok=%v err=%v)", ok, err)
+	if ok, err := az.CanAccessResource(ctx, holderPrincipal, secret, false); err != nil || ok {
+		t.Fatalf("after revoke the record must be restricted again (ok=%v err=%v)", ok, err)
 	}
 }
 

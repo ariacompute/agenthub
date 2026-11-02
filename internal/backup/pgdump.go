@@ -13,6 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// lookPath is the binary probe behind SelectEngine. It is a variable because
+// whether the client is installed is a property of the machine, not of the
+// code: CI images ship the PostgreSQL client, many workstations do not, and a
+// test that asserted either answer would pass or fail depending on the host it
+// happened to run on. Tests hide the client through it instead.
+var lookPath = exec.LookPath
+
 // pgDumpEngine shells out to the PostgreSQL client tools. It is preferred when
 // they exist: it produces the archive format every DBA already has tooling for,
 // handles types this package would otherwise have to teach itself, and restores
@@ -28,11 +35,11 @@ type pgDumpEngine struct {
 }
 
 func newPgDumpEngine(dsn string) (*pgDumpEngine, error) {
-	dumpBin, err := exec.LookPath("pg_dump")
+	dumpBin, err := lookPath("pg_dump")
 	if err != nil {
 		return nil, fmt.Errorf("%w: pg_dump not found: %v", ErrEngineUnavailable, err)
 	}
-	restoreBin, err := exec.LookPath("pg_restore")
+	restoreBin, err := lookPath("pg_restore")
 	if err != nil {
 		return nil, fmt.Errorf("%w: pg_restore not found: %v", ErrEngineUnavailable, err)
 	}

@@ -651,3 +651,44 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - [x] 本机 `go test -race` 不可用（Windows 无 cgo/gcc），已在 CI 侧补跑，不伪称已验证。
 - [x] `internal/store`（3.0%）与 `internal/backup` 的 `pg_dump`/`COPY` 路径需 `DATABASE_URL`，
       仍按 skip 处理；`backup.writeArchiveHash` 依赖落盘引擎，未强测。
+
+## M10 — CI 首次 `go test -race` 全绿修正（2026-11-02）
+
+首次跑通的 GitHub Actions（`ci.yml`，postgres:16 服务容器 + `DATABASE_URL`）暴露四类
+「本机没条件跑、因此从未被验证」的用例问题。产品代码的行为不变，改的是用例对环境的假设。
+
+### 1. `internal/backup`：引擎选择依赖宿主机有没有装 pg_dump
+- [x] `pgdump.go` 增加包级 `lookPath`（默认 `exec.LookPath`），`newPgDumpEngine` 走它；用例
+      `withoutClient(t)` 把它换成返回 `exec.ErrNotFound`，`TestSelectEngineFallsBackToTheNativeEngine`
+      与 `TestNewPgDumpEngineIsHonestAboutAMissingClient` 不再因 CI 镜像自带 PostgreSQL 客户端而失败
+      （后者原先靠 `t.Skip` 回避，实际从未验证「没有客户端」这条路）。
+- [x] 顺带把「自动选择必须落在 gonative」写死断言（原先只判 `Name() != ""`，选到 pg_dump 也算过）。
+
+### 2. `tests`：RLS 断言连的是超级用户，等于什么都没断言
+- [x] `openRLSDB` 先探测会话角色（`pg_roles.rolsuper` / `rolbypassrls`）。受策略约束的角色直接用；
+      超级用户（compose 与 CI 服务的默认）则临时建 `agenthub_rls_test`（`NOSUPERUSER`、
+      `NOBYPASSRLS`、无 DDL、只授 DML）并改用它重连，`current_user` 不是属主、不是超级用户，
+      `026` 的策略才真正生效；建不出来时整组 skip 并提示 `scripts/provision-db-roles.sql`。
+- [x] 运行期角色没有 DDL 权限时（生产形态：`DATABASE_URL=agenthub_app`），`Migrate` 失败但
+      schema 已在即继续，不再把「无权限建表」当成断言失败。
+
+### 3. 策略真生效后暴露的两条错误断言（原先被超级用户绕过）
+- [x] `UPDATE tasks SET owner_id='bob'`：不是「USING 先滤掉、静默 0 行」，而是 USING 放行旧行、
+      WITH CHECK 拒绝新属主 → **报错**。改为断言报错 + 行仍属原主。
+- [x] `audit_log` 的 DELETE / UPDATE：策略层已把行滤掉（0 行、不报错），只有在策略不生效的连接上
+      才轮到触发器抛错。改为断言「改动 0 行且内容未变」（`affectedIn`），两种收场都算通过，
+      断言的是结果而不是哪一道闸先响。
+
+### 4. 其余两条集成用例的期望与当前契约不符
+- [x] `TestIntegrationResourceGrantRestricts`：仍按旧规则（「无 grant = 所有人可见」）断言，与
+      `c2b5826` 的 fail-closed 改造相反。改为：持有 `resources:read` 也看不到无 grant 的记录；
+      授权持有者能读能列；撤销后回到 restricted（再公开是 `visibility=public` 的独立动作）。
+- [x] `TestIntegrationAPIKeyLifecycle`：用了词表里根本不存在的 `users:read` / `groups:read`，
+      且 `svc.Register` 不像 `handleRegister` 那样自动授予 `role-viewer`。改为显式授予 viewer
+      后断言 key 的 scope 交集（`resources:read` / `tasks:read` 保留，`backups:manage` 丢掉）；
+      另把「实例所有者」显式化（`BootstrapAdmin` 提权），不再依赖「谁先注册谁就是 owner」的
+      跨包时序。
+
+### 5. 校验
+- [x] `go vet ./...` 干净；`go test ./tests/ ./internal/backup/` 通过（无 `DATABASE_URL` 时集成
+      用例 skip）。本机无 Docker/PostgreSQL，RLS 与其余数据库用例只能在 CI 上验证，不伪称已跑过。
