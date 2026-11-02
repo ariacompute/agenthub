@@ -109,30 +109,51 @@ func TestJSONFieldImplementsDriverInterfaces(t *testing.T) {
 // this pins all of them in one place.
 func TestTableNameMapping(t *testing.T) {
 	cases := map[string]string{
-		(&Resource{}).TableName():         "resources",
-		(&Registry{}).TableName():         "registries",
-		(&RegistrySource{}).TableName():   "registry_sources",
-		(&Task{}).TableName():             "tasks",
-		(&TaskArtifact{}).TableName():     "task_artifacts",
-		(&TaskSpan{}).TableName():         "task_spans",
-		(&TaskPending{}).TableName():      "task_pending",
-		(&TaskPush{}).TableName():         "task_push",
-		(&PushRecord{}).TableName():       "push_records",
-		(&Event{}).TableName():            "events",
-		(&SchemaMigration{}).TableName():  "schema_migrations",
-		(&User{}).TableName():             "users",
-		(&Session{}).TableName():          "sessions",
-		(&OAuthAccount{}).TableName():     "oauth_accounts",
-		(&Permission{}).TableName():       "permissions",
-		(&Role{}).TableName():             "roles",
-		(&RolePermission{}).TableName():   "role_permissions",
-		(&Group{}).TableName():            "groups",
-		(&UserGroup{}).TableName():        "user_groups",
-		(&UserRole{}).TableName():         "user_roles",
-		(&GroupRole{}).TableName():        "group_roles",
-		(&ResourceGrant{}).TableName():    "resource_grants",
-		(&BackupCheckpoint{}).TableName(): "backup_checkpoints",
-		(&BackupSchedule{}).TableName():   "backup_schedules",
+		(&Resource{}).TableName():           "resources",
+		(&Registry{}).TableName():           "registries",
+		(&RegistrySource{}).TableName():     "registry_sources",
+		(&Task{}).TableName():               "tasks",
+		(&TaskArtifact{}).TableName():       "task_artifacts",
+		(&TaskSpan{}).TableName():           "task_spans",
+		(&TaskPending{}).TableName():        "task_pending",
+		(&TaskPush{}).TableName():           "task_push",
+		(&PushRecord{}).TableName():         "push_records",
+		(&Event{}).TableName():              "events",
+		(&SchemaMigration{}).TableName():    "schema_migrations",
+		(&Channel{}).TableName():            "channels",
+		(&ChannelMessage{}).TableName():     "channel_messages",
+		(&Computer{}).TableName():           "computers",
+		(&Schedule{}).TableName():           "schedules",
+		(&Knowledge{}).TableName():          "knowledge",
+		(&AuditLog{}).TableName():           "audit_log",
+		(&User{}).TableName():               "users",
+		(&Session{}).TableName():            "sessions",
+		(&OAuthAccount{}).TableName():       "oauth_accounts",
+		(&Permission{}).TableName():         "permissions",
+		(&Role{}).TableName():               "roles",
+		(&RolePermission{}).TableName():     "role_permissions",
+		(&Group{}).TableName():              "groups",
+		(&UserGroup{}).TableName():          "user_groups",
+		(&UserRole{}).TableName():           "user_roles",
+		(&GroupRole{}).TableName():          "group_roles",
+		(&APIKey{}).TableName():             "api_keys",
+		(&APIKeyScope{}).TableName():        "api_key_scopes",
+		(&ResourceGrant{}).TableName():      "resource_grants",
+		(&BackupCheckpoint{}).TableName():   "backup_checkpoints",
+		(&BackupSchedule{}).TableName():     "backup_schedules",
+		(&RouterTrigger{}).TableName():      "router_triggers",
+		(&RouterThread{}).TableName():       "router_threads",
+		(&RouterSubscription{}).TableName(): "router_subscriptions",
+		(&RouterTicket{}).TableName():       "router_tickets",
+		(&RouterAssignment{}).TableName():   "router_assignments",
+		(&RouterDecision{}).TableName():     "router_decisions",
+		(&RouterPolicy{}).TableName():       "router_policies",
+		(&RouterEvent{}).TableName():        "router_events",
+		(&SandboxLease{}).TableName():       "sandbox_leases",
+		(&SandboxExec{}).TableName():        "sandbox_execs",
+		(&SandboxNode{}).TableName():        "sandbox_nodes",
+		(&SandboxJob{}).TableName():         "sandbox_jobs",
+		(&SandboxEvent{}).TableName():       "sandbox_events",
 	}
 	for got, want := range cases {
 		if got != want {
@@ -140,9 +161,10 @@ func TestTableNameMapping(t *testing.T) {
 		}
 	}
 	// The count is asserted too: a new model without a TableName would silently
-	// fall back to GORM's pluralised guess, which is rarely the migration's name.
-	if len(cases) != 24 {
-		t.Fatalf("models = %d, want 24 — did one gain or lose a table?", len(cases))
+	// fall back to GORM's pluralised guess, which is rarely the migration's name,
+	// and the mismatch only shows up as a missing-table error at runtime.
+	if len(cases) != 45 {
+		t.Fatalf("models = %d, want 45 — did one gain or lose a table?", len(cases))
 	}
 }
 

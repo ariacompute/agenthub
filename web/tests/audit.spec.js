@@ -181,3 +181,21 @@ describe('statsOf', () => {
     })
   })
 })
+
+describe('windowRange inputs', () => {
+  it('accepts an ISO string as "now"', () => {
+    // The screen passes a Date; the tests and any future deep link pass a string
+    // restored from the URL. Both have to produce a window.
+    const { from, to } = windowRange('range1h', '2026-11-02T12:00:00.000Z')
+    expect(to).toBe('2026-11-02T12:00:00.000Z')
+    expect(from).toBe('2026-11-02T11:00:00.000Z')
+  })
+})
+
+describe('chainState without counters', () => {
+  it('reports a clean chain even when the response omits checked', () => {
+    // An older server answers `{ ok: true }` and nothing else; the badge must
+    // still say verified rather than NaN rows checked.
+    expect(chainState({ ok: true })).toEqual({ state: 'ok', checked: 0, brokenAt: '' })
+  })
+})

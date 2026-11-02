@@ -42,6 +42,19 @@ describe('enum copy', () => {
     }
   })
 
+  it('labels every permission the matrix renders', async () => {
+    // The admin screen renders PERMISSIONS × enumsCopy.permission. A permission
+    // without a label shows its raw code to an operator, which is how
+    // `audit:read` shipped unlabelled when the audit trail was added.
+    const { PERMISSIONS } = await import('../src/lib/auth-store.js')
+    for (const permission of PERMISSIONS) {
+      expect(enumsCopy.permission.en[permission], `${permission} has no English label`).toBeTruthy()
+      for (const [code] of LANGUAGES) {
+        expect(enumsCopy.permission[code][permission], `${permission} is missing in ${code}`).toBeTruthy()
+      }
+    }
+  })
+
   it('never translates protocol identifiers used as values', () => {
     expect(Object.keys(enumsCopy.kind.en)).toEqual(['model', 'agent', 'mcp', 'skill', 'cli', 'custom'])
     expect(Object.keys(enumsCopy.transport.en)).toEqual(['stdio', 'streamable-http', 'sse-legacy'])

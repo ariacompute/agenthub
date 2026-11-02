@@ -35,4 +35,24 @@ func TestEffectiveVisibilityDefaultsToRestricted(t *testing.T) {
 	if !(&Entry{Visibility: VisibilityPublic}).IsPublic() {
 		t.Fatal("an explicitly published entry must be public")
 	}
+	// A nil entry is private too: IsPublic/EffectiveVisibility are called from the
+	// store on rows that may not exist, and "no record" must never read as public.
+	var nilEntry *Entry
+	if nilEntry.IsPublic() || nilEntry.EffectiveVisibility() != VisibilityRestricted {
+		t.Fatal("a nil entry must be restricted")
+	}
+}
+
+// TestVisibilityValid pins the predicate the store uses when it writes the
+// column: it is the last line of defence for a value that reached SQL without
+// going through ParseVisibility (a hand-written UPDATE, a restore, a migration).
+func TestVisibilityValid(t *testing.T) {
+	if !VisibilityRestricted.Valid() || !VisibilityPublic.Valid() {
+		t.Fatal("both known states must validate")
+	}
+	for _, raw := range []Visibility{"", "PUBLIC", "open", "internal", "restricted "} {
+		if raw.Valid() {
+			t.Fatalf("%q must not validate", raw)
+		}
+	}
 }

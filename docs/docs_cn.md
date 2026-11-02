@@ -290,9 +290,9 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/audit` | `audit:read` — audit:read | 列出全部审计事件 | `?from=&to=&actor=&action=&resource=&source=&outcome=&q=&before=&limit=` | `{ events: AuditEvent[], stats: { total, failed, denied, written }, next }` |
-| `GET` | `/api/audit/verify` | `audit:read` — audit:read | 重算该时间窗的哈希链，并指出第一处断链的行。 | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
-| `GET` | `/api/audit/{id}` | `audit:read` — audit:read | 按 id 读取其中一条审计事件 | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
+| `GET` | `/api/audit` | `audit:read` — 查看审计日志 | 列出全部审计事件 | `?from=&to=&actor=&action=&resource=&source=&outcome=&q=&before=&limit=` | `{ events: AuditEvent[], stats: { total, failed, denied, written }, next }` |
+| `GET` | `/api/audit/verify` | `audit:read` — 查看审计日志 | 重算该时间窗的哈希链，并指出第一处断链的行。 | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
+| `GET` | `/api/audit/{id}` | `audit:read` — 查看审计日志 | 按 id 读取其中一条审计事件 | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
 
 展开一行即可看到它的请求与响应。
 

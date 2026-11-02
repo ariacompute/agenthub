@@ -48,8 +48,8 @@ beforeEach(() => {
 })
 
 describe('auth-store permission vocabulary', () => {
-  it('exposes the 13 permissions the matrix renders', () => {
-    expect(PERMISSIONS).toHaveLength(13)
+  it('exposes the 14 permissions the matrix renders', () => {
+    expect(PERMISSIONS).toHaveLength(14)
     for (const p of [
       'resources:read',
       'tasks:read',
@@ -57,9 +57,34 @@ describe('auth-store permission vocabulary', () => {
       'users:manage',
       'backups:manage',
       'registry:curate',
+      // Added with the audit table: the admin matrix renders this list, so a
+      // permission missing here cannot be granted from the console at all.
+      'audit:read',
     ]) {
       expect(PERMISSIONS).toContain(p)
     }
+  })
+
+  it('matches the backend vocabulary exactly', async () => {
+    // The console and authz.AllPermissions drift silently: a code the backend
+    // knows but the console omits becomes un-grantable from the matrix, and one
+    // the console invents is never honoured. This pins the set, not the count.
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync(new URL('../../internal/authz/authz.go', import.meta.url), 'utf8')
+
+    const values = new Map()
+    for (const m of source.matchAll(/(Perm[A-Za-z]+)\s*=\s*"([^"]+)"/g)) values.set(m[1], m[2])
+
+    const block = /AllPermissions = \[\]string\{([\s\S]*?)\n\}/.exec(source)
+    expect(block, 'AllPermissions moved; update this guard').toBeTruthy()
+    const names = [...block[1].matchAll(/\b(Perm[A-Za-z]+)\b/g)].map((m) => m[1])
+    expect(names.length).toBeGreaterThan(0)
+
+    const backend = names.map((name) => {
+      expect(values.has(name), `${name} has no literal in authz.go`).toBe(true)
+      return values.get(name)
+    })
+    expect([...PERMISSIONS].sort()).toEqual([...backend].sort())
   })
 })
 
@@ -213,5 +238,171 @@ describe('admin catalogue actions', () => {
     store.errorCode = 'boom'
     store.clearError()
     expect(store.errorCode).toBe('')
+  })
+})
+
+// The administration actions are the same shape repeated: call the endpoint,
+// reload the list, report success or keep the machine code. Covering them as a
+// table keeps the shapes provably identical instead of twelve hand-written
+// cases that drift apart.
+const MUTATIONS = [
+  ['createUser', [], 'createUser', 'listUsers'],
+  ['updateUser', [], 'updateUser', 'listUsers'],
+  ['deleteUser', [], 'deleteUser', 'listUsers'],
+  ['createRole', [], 'createRole', 'listRoles'],
+  ['updateRole', [], 'updateRole', 'listRoles'],
+  ['deleteRole', [], 'deleteRole', 'listRoles'],
+  ['createGroup', [], 'createGroup', 'listGroups'],
+  ['updateGroup', [], 'updateGroup', 'listGroups'],
+  ['deleteGroup', [], 'deleteGroup', 'listGroups'],
+  ['createGrant', [], 'createGrant', 'listGrants'],
+  ['deleteGrant', [], 'deleteGrant', 'listGrants'],
+]
+
+describe('administration mutations', () => {
+  for (const [action, , endpoint, reload] of MUTATIONS) {
+    it(`${action} succeeds and reloads through ${reload}`, async () => {
+      const store = useAuthStore()
+      const args = action === 'deleteUser' || action === 'deleteRole' || action === 'deleteGroup'
+        ? ['x1']
+        : action === 'deleteGrant'
+          ? ['gr1']
+          : [{ name: 'x' }]
+      if (action.startsWith('update')) args.unshift('x1')
+
+      expect(await store[action](...args)).toBe(true)
+      expect(api[endpoint]).toHaveBeenCalledWith(...args)
+      expect(api[reload]).toHaveBeenCalled()
+      expect(store.errorCode).toBe('')
+    })
+
+    it(`${action} keeps the code when the server refuses`, async () => {
+      const store = useAuthStore()
+      api[endpoint].mockRejectedValue({ code: 'forbidden' })
+      expect(await store[action]('x1')).toBe(false)
+      expect(store.errorCode).toBe('forbidden')
+      expect(api[reload]).not.toHaveBeenCalled()
+    })
+  }
+})
+
+describe('list loaders', () => {
+  const LOADERS = [
+    ['loadSessions', 'listSessions', 'sessions', 'sessions'],
+    ['loadUsers', 'listUsers', 'users', 'users'],
+    ['loadRoles', 'listRoles', 'roles', 'rolesCatalogue'],
+    ['loadGroups', 'listGroups', 'groups', 'groupsCatalogue'],
+    ['loadPermissions', 'listPermissions', 'permissions', 'permissionsCatalogue'],
+    ['loadGrants', 'listGrants', 'grants', 'grants'],
+    ['loadAPIKeys', 'listAPIKeys', 'apiKeys', 'apiKeys'],
+  ]
+
+  for (const [action, endpoint, responseKey, stateKey] of LOADERS) {
+    it(`${action} stores what the endpoint returned`, async () => {
+      const store = useAuthStore()
+      api[endpoint].mockResolvedValue({ [responseKey]: [{ id: 'x1' }] })
+      await store[action]()
+      expect(store[stateKey]).toEqual([{ id: 'x1' }])
+      expect(store.errorCode).toBe('')
+    })
+
+    it(`${action} keeps the code and leaves the list alone`, async () => {
+      const store = useAuthStore()
+      store[stateKey] = [{ id: 'old' }]
+      api[endpoint].mockRejectedValue({ code: 'unavailable' })
+      await store[action]()
+      expect(store.errorCode).toBe('unavailable')
+      expect(store[stateKey]).toEqual([{ id: 'old' }])
+    })
+  }
+
+  it('reads a missing collection as empty rather than undefined', async () => {
+    const store = useAuthStore()
+    api.listUsers.mockResolvedValue({})
+    await store.loadUsers()
+    expect(store.users).toEqual([])
+  })
+})
+
+describe('API key actions', () => {
+  it('puts a freshly minted key at the top of the list', async () => {
+    const store = useAuthStore()
+    store.apiKeys = [{ id: 'k1' }]
+    api.createAPIKey.mockResolvedValue({ apiKey: { id: 'k2' }, token: 'secret' })
+    const data = await store.createAPIKey({ name: 'ci' })
+    expect(store.apiKeys.map((k) => k.id)).toEqual(['k2', 'k1'])
+    expect(data.token).toBe('secret')
+  })
+
+  it('ignores a create that returned no key', async () => {
+    const store = useAuthStore()
+    store.apiKeys = [{ id: 'k1' }]
+    api.createAPIKey.mockResolvedValue({})
+    await store.createAPIKey({ name: 'ci' })
+    expect(store.apiKeys.map((k) => k.id)).toEqual(['k1'])
+  })
+
+  it('returns null and keeps the code when minting fails', async () => {
+    const store = useAuthStore()
+    api.createAPIKey.mockRejectedValue({ code: 'forbidden' })
+    expect(await store.createAPIKey({ name: 'ci' })).toBeNull()
+    expect(store.errorCode).toBe('forbidden')
+  })
+
+  it('replaces the edited key in place', async () => {
+    const store = useAuthStore()
+    store.apiKeys = [{ id: 'k1', name: 'old' }, { id: 'k2', name: 'other' }]
+    api.updateAPIKey.mockResolvedValue({ apiKey: { id: 'k1', name: 'new' } })
+    expect(await store.updateAPIKey('k1', { name: 'new' })).toBe(true)
+    expect(store.apiKeys[0].name).toBe('new')
+  })
+
+  it('keeps the code when an edit fails', async () => {
+    const store = useAuthStore()
+    api.updateAPIKey.mockRejectedValue({ code: 'not_found' })
+    expect(await store.updateAPIKey('k1', { name: 'new' })).toBe(false)
+    expect(store.errorCode).toBe('not_found')
+  })
+
+  it('drops a revoked key from the list', async () => {
+    const store = useAuthStore()
+    store.apiKeys = [{ id: 'k1' }, { id: 'k2' }]
+    expect(await store.revokeAPIKey('k1')).toBe(true)
+    expect(store.apiKeys.map((k) => k.id)).toEqual(['k2'])
+  })
+
+  it('keeps the code and the list when revocation fails', async () => {
+    const store = useAuthStore()
+    store.apiKeys = [{ id: 'k1' }]
+    api.revokeAPIKey.mockRejectedValue({ code: 'forbidden' })
+    expect(await store.revokeAPIKey('k1')).toBe(false)
+    expect(store.errorCode).toBe('forbidden')
+    expect(store.apiKeys.map((k) => k.id)).toEqual(['k1'])
+  })
+})
+
+describe('sign-out', () => {
+  it('clears the session even when the endpoint fails', async () => {
+    // A cookie that already expired makes /api/auth/logout answer 401; the
+    // console still has to forget the identity it was holding.
+    const store = useAuthStore()
+    store.user = { id: 'u1' }
+    store.permissions = ['tasks:read']
+    store.sessions = [{ id: 's1' }]
+    store.apiKeys = [{ id: 'k1' }]
+    api.logout.mockRejectedValue({ code: 'unauthenticated' })
+    await store.logout()
+    expect(store.user).toBeNull()
+    expect(store.permissions).toEqual([])
+    expect(store.sessions).toEqual([])
+    expect(store.apiKeys).toEqual([])
+    expect(store.errorCode).toBe('')
+  })
+
+  it('does not remember the identity after a successful sign-out', async () => {
+    const store = useAuthStore()
+    store.user = { id: 'u1' }
+    await store.logout()
+    expect(store.signedIn).toBe(false)
   })
 })

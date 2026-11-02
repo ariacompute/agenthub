@@ -163,12 +163,6 @@ func (d Deps) visibleEntries(r *http.Request, entries []*registry.Entry) []*regi
 	return out
 }
 
-// canReadResource reports whether the caller may read one record: published, or
-// covered by a grant, or the caller is the platform owner.
-func (d Deps) canReadResource(r *http.Request, id string) bool {
-	return d.canAccess(r, id, false)
-}
-
 // canAccess reports whether the caller may read (or write) one resource. Write
 // paths call it explicitly: filtering a list is not what stops a direct PUT to
 // an id the caller never saw.

@@ -23,6 +23,11 @@ export const PERMISSIONS = [
   'registries:manage',
   'registry:curate',
   'sources:manage',
+  // Reading the trail is its own permission: an operator who may review what
+  // happened is not necessarily allowed to administer users. It was added to
+  // the backend with the audit table, and the matrix renders this list, so a
+  // missing entry here would make the permission un-grantable from the console.
+  'audit:read',
 ]
 
 function code(error) {
