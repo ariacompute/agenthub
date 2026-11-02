@@ -66,7 +66,8 @@ Agent 调用。
 - **机器可读 code**：`bad_request`(400) / `unauthorized`(401) / `not_found`(404) /
   `method_not_allowed`(405) / `payload_too_large`(413) / `internal_error`(500)。
 - **JSON-RPC 码**：标准 `-32700` / `-32600` / `-32601` / `-32602` / `-32603`；
-  自定义 `-32001 task_not_found` … `-32008 task_not_resumable`。
+  自定义 `-32001 task_not_found` … `-32008 task_not_resumable`，另有 `-32009 unauthenticated`
+  ——匿名调用者使用了需要身份的方法时返回。
 - **error.message 即 code 字符串**：不含空格与自然语言，多语言 100% 由前端 copy 层承担。
 - **适配器码**：`unknown_kind` / `cli_command_not_allowed` / `adapter_timeout` /
   `resource_unreachable`。
@@ -221,10 +222,12 @@ Agent 调用。
 - **`registry_sources`**：上游注册中心源与最近一次同步结果
   （`last_sync_at` / `status` / `count` / `error`）。
 - **`tasks` + 子表**：任务主体与状态；`task_artifacts`、`task_spans`、`task_pending`、
-  `task_push` 随任务级联删除。
+  `task_push` 随任务级联删除。它们与 `events` 都带 `owner_id`，行级策略（见十五）读的就是它。
 - **`events`**：每个 broker 帧，`(task_id, seq)` 主键，供 `since=<seq>` 回放。
 - **`push_records`**：每次回调留痕（url / state / config 快照），
   按 `AGENTHUB_PUSH_RECORD_LIMIT`（默认每任务 100 条）保留。
+- **`audit_log`**：只追加，每次 `/api` 与 `/a2a` 调用一行，逐行哈希链接——删或改任一行都会断开
+  其后所有链接（见十五）。不存请求体与响应体，路径已脱敏。
 - **`api_keys` / `api_key_scopes`**：长期持有的 bearer 凭据。库内只存令牌的
   `sha256`（`token_hash`）与展示用 `prefix`（`ahk_xxxxxxxx`），**绝不存密钥本身**；
   另含可选 `expires_at` 与软删除 `revoked_at`（吊销后仍保留行以留存审计线索，但
@@ -267,7 +270,7 @@ Agent 调用。
 Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面，也是 A2A 契约的可视化
 检查器。
 
-### 八屏
+### 九屏
 
 - **注册中心**：六类（含 `custom`）筛选 + 搜索、命名空间与状态筛选、健康指示与统计条、
   单资源「试跑」。注册抽屉改为按 kind 切换专属配置区块——model 看 router、MCP 看 transport、
@@ -281,6 +284,9 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 - **管理**：用户、组、角色、权限与资源授权，外加第四个子页「数据库检查点」
   （打点 / 下载 / 恢复 / 定时），以及新增的**API 密钥**子页——为非交互式访问
   签发、限定范围、轮换与吊销长期持有的 bearer 凭据。
+- **审计**（新增，需 `audit:read`）：时间窗预设与筛选、四枚水位指标、明细表（毫秒级时间、
+  请求 ID、主体、动作、资源、状态码与耗时条形图），以及并排展示 `prev_hash` 与 `hash` 的取证抽屉；
+  链校验会指出第一处断链的行。空态与无权限态都是正经界面，不是一张空表。
 - **文档**（`/docs`）：控制台自带文档，随构建发版、离线可读。五章——核心概念、A2A 方法、
   HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**完整路由表（约 100 条）**，
   逐条给出方法、路径、所需权限，以及取自各 handler 真实编解码结构的请求/响应示例。
@@ -350,13 +356,19 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   匿名，因此公开端点依旧可用。
 - **治理权限**：`registries:manage`（命名空间）、`registry:curate`
   （批准 / 驳回 / 废弃）、`sources:manage`（上游源与同步）、`apikeys:manage`
-  （为任意用户列出 / 创建 / 轮换 / 吊销 API 密钥——密钥可行动但不可再签发密钥）。
+  （为任意用户列出 / 创建 / 轮换 / 吊销 API 密钥——密钥可行动但不可再签发密钥），以及
+  `audit:read`（读审计；它是独立权限，避免「能查发生了什么」被顺带解释成「能管理用户」）。
   owner 持有全部权限。
+- **隔离与审计**（见十五）：`AGENTHUB_RLS`（默认 `enforce`；`off` 仅供本地，`AGENTHUB_ENV=prod`
+  下需 `AGENTHUB_RLS_ACK=1` 才放行）、`AGENTHUB_MIGRATE_DATABASE_URL`（DDL 连接，缺省回退
+  `DATABASE_URL` 并告警）、`AGENTHUB_AUDIT_ENABLED`（true）、`AGENTHUB_AUDIT_RETENTION`（2160h）、
+  `AGENTHUB_AUDIT_QUEUE`（8192）、`AGENTHUB_AUDIT_BATCH`（64）。
 - **加密与数据库加固**：`AGENTHUB_ENCRYPTION_KEY`（生产须 ≥ 32 字节，由 `config.Validate`
   强制；缺失则回退会话密钥并告警）隔离静态加密、并为备份归档加密。`AGENTHUB_PUSH_SECRET`
   （设置时须 ≥ 16 字节）开启 HMAC 签名的 A2A 回调。连接池经 `AGENTHUB_DB_MAX_OPEN_CONNS`（25）/
   `AGENTHUB_DB_MAX_IDLE_CONNS`（10）/ `AGENTHUB_DB_CONN_MAX_LIFETIME`（30m）可调；运行期凭据
-  改用 `scripts/provision-db-roles.sql` 生成的 `app` / `readonly` 最小权限角色。
+  改用 `scripts/provision-db-roles.sql` 生成的 migrator / `app` / `readonly` 角色，其中运行角色
+  **非表属主、无 `BYPASSRLS`**。
 - **日志**：`slog` JSON，不打正文、密钥与向量；DSN 经 `store.RedactDSN` 脱敏后再记录。
 
 ---
@@ -377,13 +389,23 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   per-kind 配置的 jsonb 往返、唯一索引拒绝重复、命名空间 CRUD、同步结果留痕。两者均以
   `DATABASE_URL` 门控。
 - **覆盖率**：`make test-cover` 跑 `-coverprofile` 并打印 `go tool cover -func`。
-  带库时：`a2a` 97.8%、`model` 93.9%、`registry` 89.7%、`authz` 87.9%、`hub` 87.8%、
-  `adapter` 83.3%、`config` 80.3%、`httputil` 91.5%、`handlers` 68.7%、`backup` 58.2%、
-  `auth` 56.9%、`store` 22.6%（未设 `DATABASE_URL` 时它的用例 skip，数字不代表真实覆盖）。
+  带库时：`identity` 与 `schedules` 100%、`sandbox` 98.2%、`a2a` 98%、`netutil` 97.4%、
+  `model` 95.7%、`adapter` 95.4%、`audit` 95.1%、`config` 94.4%、`httputil` 92.1%、
+  `authz` 91.8%、`middleware` 91%、`registry` 87.9%、`router` 82.2%、`hub` 82.1%、
+  `auth` 81.4%、`secure` 80.5%、`handlers` 73.1%、`channels` 71.4%、`backup` 57.3%、
+  `store` 3%（未设 `DATABASE_URL` 时它的用例 skip，数字不代表真实覆盖）。
+- **隔离与审计用例**：`internal/identity` 覆盖「没有身份」的四种形态；`internal/audit` 覆盖
+  重启续链、插入失败只计数不致命、队列满丢帧而不阻塞、`Verify` 定位断点、保留期两种分支；
+  `internal/handlers` 逐一驱动审计的每个筛选参数、非法游标/上限/窗口的 400、未接线的 503，
+  并断言「读审计不会被提权为 system 身份」。`model_test.go` 用 45 张表的表名钉住迁移，
+  `auth-store.spec.js` 直接读 Go 源码里的 `authz.AllPermissions`，两端词表无法再悄悄漂移。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
-- **前端**：`bunx vitest run` 14 个文件 **154 项通过**（languages / copy-fallback /
-  enums-copy / api / format / errors / backup-api / style 护栏）。
+- **前端**：`bunx vitest run` 17 个文件 **301 项通过**（languages / copy-fallback / enums-copy /
+  api / api-endpoints / audit / auth-store / format / errors / backup-api / docs-content /
+  playground / store / user-form / use-copy / use-dismiss / style 护栏）。
+  `bun run test:coverage`（v8，仅统计 `src/lib`——各屏是 `.vue` 模板，这些 node 用例根本不挂载）
+  报告：语句 98.5%、分支 91.5%、函数 92.6%。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
@@ -557,9 +579,11 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   加密；缺失时回退会话密钥并告警，并支持旧密钥回退的密钥轮换。
 - API 密钥以哈希存储（`token_hash`）；OAuth 客户端密钥是环境变量引用，绝不入库。注入审计确认全部
   SQL 均参数化。
-- **数据库**：运行期改用最小权限角色；`scripts/provision-db-roles.sql` 生成 `app`（负责迁移）与
-  `readonly` 两角色。连接池经 `AGENTHUB_DB_MAX_OPEN_CONNS`（25）/ `AGENTHUB_DB_MAX_IDLE_CONNS`（10）/
-  `AGENTHUB_DB_CONN_MAX_LIFETIME`（30m）可调；数据库连接是否启用 TLS 由 DSN 自行决定（`sslmode=…`）。
+- **数据库**：运行期改用最小权限角色，且该角色**不得是表属主、不得有 `BYPASSRLS`**——任一条件成立都会
+  静默跳过十五节的行级策略。`scripts/provision-db-roles.sql` 生成 `agenthub_migrator`（schema 属主，
+  执行 DDL）、`agenthub_app`（只有 DML）与 `agenthub_readonly`。连接池经 `AGENTHUB_DB_MAX_OPEN_CONNS`
+  （25）/ `AGENTHUB_DB_MAX_IDLE_CONNS`（10）/ `AGENTHUB_DB_CONN_MAX_LIFETIME`（30m）可调；
+  数据库连接是否启用 TLS 由 DSN 自行决定（`sslmode=…`）。
 - **备份加密**：设置 `AGENTHUB_ENCRYPTION_KEY` 时，检查点归档以 AES-256-GCM 静态加密为
   `<file>.tar.gz.enc` 并附 `<file>.enc.sha256` 清单；定期用 `scripts/backup-restore-drill.sh`
   演练可恢复性。
@@ -621,3 +645,62 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
 - `tests/sandbox_e2e_test.go`：真实 HTTP 打控制台端点、空命令被拒、未知租约 404、他人租约不可见、
   未接线 503、节点注册 → 领取 → 回报（第二台节点被拒），以及 SSE 回放。
 - agenthub 前端：`docs-content.spec.js` 钉住 13 语的沙盒文档分组，单色守卫继续覆盖新增文案。
+
+---
+
+## 十五、数据隔离与审计（M3）
+
+评估留下的两个缺口：隔离只活在应用层，少写一个过滤条件，任务连同它的 artifact 与事件就成了所有人的；
+而「谁在什么时候调用了什么」只存在于日志文本里——不可校验，且任何能执行 `DELETE` 的人都能裁掉一段。
+
+### 行级安全
+
+- **归属列**：`tasks` 及其子表（`task_artifacts`、`task_spans`、`task_pending`、`task_push`），
+  以及 `events` 与 `knowledge`，都带 `owner_id TEXT NOT NULL DEFAULT ''`；`''` 表示进程自己写入的行。
+  存量行**不做回填**——没有人去猜历史数据的归属。
+- **策略**（`026_rls_policies.sql`）：上述各表与 `audit_log` 一律 `ENABLE` + `FORCE ROW LEVEL
+  SECURITY`（`FORCE` 让表属主同样受约束），`agenthub_row_visible(owner_id)` 读三个事务内设置——
+  `app.owner_id`（登录用户）、`app.bypass`（管理员）、`app.system`（进程内路径：任务状态机、事件扇出、
+  seed、迁移、备份、审计写入）。设置未注入时读作 NULL，于是忘记注入身份的请求**什么也看不到**：
+  失败方向是关，不是开。
+- **短事务**：`internal/store.scoped` 每次仓储调用开一个事务并用 `set_config(..., true)` 注入身份。
+  请求不持连接——否则 SSE 路径会把 25 个连接吃光。
+- **角色分离**：`scripts/provision-db-roles.sql` 生成 `agenthub_migrator`（schema 属主，执行 DDL）、
+  `agenthub_app`（只有 DML、非表属主、无 `BYPASSRLS`）与 `agenthub_readonly`，并在任何受保护表缺
+  `FORCE` 策略时直接中断。DDL 走 `AGENTHUB_MIGRATE_DATABASE_URL`。
+- **`AGENTHUB_RLS=off`** 在 DSN 追加 `options=-c app.system=on`，让全部策略通过。它只用于本地开发与
+  测试：`AGENTHUB_ENV=prod` 下需 `AGENTHUB_RLS_ACK=1` 才放行，且无论哪种情况启动日志都会写明边界已放松。
+
+### 资源可见性改为显式（破坏性变更）
+
+- `resources.visibility` 取值 `restricted` / `public`，默认 **`restricted`**。可读判据是
+  `public || 有 grant`；`authz` 不再把「没有 grant」当作「可以」。既未公开也未授权的资源既不可见
+  也**不可调用**——匿名 A2A 对端同样如此。
+- 因此升级会隐藏所有过去「隐式公开」的资源，且没有回填：由运维标 `public` 或补 grant
+  （`requirements-isolation.md` §3.1）。演示数据以 `public` 写入。
+
+### 审计
+
+- **每次调用一行**：每个 `/api` 与 `/a2a` 请求追加 `event_id`、`ts`、`source`、`action`、`read_only`、
+  `actor_*`、`ip`、`method`、脱敏后的 `path`、`resource_*`、`status`、`error_code`、`latency_ms`、
+  `user_agent` 与 `request_id`。query 的**值**一律置 `REDACTED`；绝不存请求体与响应体，
+  `token` / `key` / `secret` / `password` / `authorization` / `cookie` 这些敏感键从不入库。
+- **两道关锁成只追加**：触发器对 `UPDATE` / `DELETE` / `TRUNCATE` 一律拒绝（**包括表属主**；
+  仅保留期清理在 `app.retention` 事务里例外），运行角色对该表只被授予 `INSERT` / `SELECT`。
+- **哈希链**：`hash = sha256(prev_hash ‖ canonical(event))`，canonical 是固定字段序且不含 hash 本身。
+  启动时读末行续链，因此重启不会另起一条链。单写者串行维护：有界队列 + 批量插入（默认 8192 / 64 条 /
+  500 ms），队列满则丢帧并计数，**绝不阻塞业务请求**。
+- **端点**：`GET /api/audit`（过滤 `from`、`to`、`actor`、`action`、`resource`、`source`、`outcome`、
+  `q`、`before`、`limit`）、`GET /api/audit/{id}`、`GET /api/audit/verify?from=&to=`
+  → `{ ok, checked, brokenAt }`，`brokenAt` 是第一处断链的行。三者都需要新权限 `audit:read`，
+  由 `027_audit_permission.sql` 授予 admin 角色。
+- **控制台**：第十屏——时间窗与筛选、水位指标、明细表，以及并排展示 `prev_hash` 与 `hash` 的取证抽屉。
+
+### A2A 授权与参数兼容
+
+- `message/send|stream` 必须先解析出具体 `resourceId`（来自 `metadata.resourceId`，或从选择反推），
+  解析不到就以 `resource_not_found` 拒绝。
+- `tasks/get|cancel|resume` 与 `tasks/pushNotification/set|get` 要求调用者是任务归属人或管理员；
+  他人任务一律返回 `task_not_found` 而非 403，避免 ID 枚举；匿名调用这些方法返回 `-32009 unauthenticated`。
+- `pushNotification/set` 用 `taskId`、`get` 用 `id` 的历史不一致：两个字段都接受，同时出现时以规范字段为准，
+  且全部任务维度方法共用一个解析函数——客户端一套实现即可覆盖全部。

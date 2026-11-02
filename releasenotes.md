@@ -81,7 +81,8 @@ protocol can discover, invoke, and take over task orchestration.
   `not_found` (404) / `method_not_allowed` (405) / `payload_too_large` (413) /
   `internal_error` (500).
 - **JSON-RPC codes**: standard `-32700` / `-32600` / `-32601` / `-32602` / `-32603`;
-  custom `-32001 task_not_found` … `-32008 task_not_resumable`.
+  custom `-32001 task_not_found` … `-32008 task_not_resumable`, plus `-32009
+  unauthenticated` for an anonymous caller that used a method requiring an identity.
 - **`error.message` is the code string itself**: no spaces, no natural language —
   localization is 100% the frontend copy layer's job.
 - **Adapter codes**: `unknown_kind` / `cli_command_not_allowed` / `adapter_timeout` /
@@ -281,11 +282,16 @@ while the container itself stays stateless.
 - **`registry_sources`**: upstream registry sources and the outcome of their last
   sync (`last_sync_at` / `status` / `count` / `error`).
 - **`tasks` plus children**: the task body and state; `task_artifacts`, `task_spans`,
-  `task_pending`, `task_push` cascade with the task.
+  `task_pending`, `task_push` cascade with the task. Every one of them carries
+  `owner_id` (and so does `events`), which is what the row-level policies in §15
+  read.
 - **`events`**: one row per broker frame, primary key `(task_id, seq)`, powering
   `since=<seq>` replay.
 - **`push_records`**: one row per callback (url / state / config snapshot), capped by
   `AGENTHUB_PUSH_RECORD_LIMIT` (default 100 per task).
+- **`audit_log`**: append-only, one row per `/api` and `/a2a` call, hash-chained so
+  a deleted or edited row breaks every later link (§15). No request or response
+  body is stored, and the paths are redacted.
 - **`api_keys` / `api_key_scopes`**: long-lived bearer credentials. Only the `sha256`
   of the token (`token_hash`) and a display `prefix` (`ahk_xxxxxxxx`) are stored — never
   the secret — alongside an optional `expires_at` and a soft `revoked_at` (a revoked
@@ -339,7 +345,7 @@ while the container itself stays stateless.
 The Vue 3 + Vite (bun) bundle is hosted at `/` by the Go process — both an operations
 screen and a visual inspector for the A2A contract.
 
-### Eight Screens
+### Nine Screens
 
 - **Registry**: six-kind (including `custom`) filtering + search, namespace and status
   filters, health indicators and a stats bar, and a per-resource "trial run". The register
@@ -360,6 +366,11 @@ screen and a visual inspector for the A2A contract.
   database checkpoints (dump / download / restore / schedule) as a fourth tab, and
   now an **API keys** tab for minting, scoping, rotating and revoking long-lived
   bearer credentials for non-interactive access.
+- **Audit** (new, `audit:read`): range presets and filters, four water-level counters,
+  the row table (time to the millisecond, request id, actor, action, resource, status and
+  a latency bar) and a forensics drawer showing `prev_hash` and `hash` side by side, plus
+  a verifier that reports the first row whose hash does not link. Empty state and the
+  denied state are both real screens, not a blank table.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
   sticky index that follows the reader. The endpoint table covers the full route table
@@ -448,7 +459,14 @@ screen and a visual inspector for the A2A contract.
 - **Governance permissions**: `registries:manage` (namespaces),
   `registry:curate` (approve / reject / deprecate), `sources:manage` (upstream sources and
   their synchronisation), `apikeys:manage` (list / create / rotate / revoke API keys for
-  any user — a key can act but never issue more keys). The owner holds all of them.
+  any user — a key can act but never issue more keys), and `audit:read` (read the trail;
+  its own permission, so reviewing what happened never implies administering users). The
+  owner holds all of them.
+- **Isolation & audit** (see §15): `AGENTHUB_RLS` (`enforce` default, `off` for local work
+  and refused under `AGENTHUB_ENV=prod` without `AGENTHUB_RLS_ACK=1`),
+  `AGENTHUB_MIGRATE_DATABASE_URL` (DDL connection; falls back to `DATABASE_URL` with a
+  warning), `AGENTHUB_AUDIT_ENABLED` (true), `AGENTHUB_AUDIT_RETENTION` (2160h),
+  `AGENTHUB_AUDIT_QUEUE` (8192) and `AGENTHUB_AUDIT_BATCH` (64).
 - **Encryption & database hardening**: `AGENTHUB_ENCRYPTION_KEY` (≥ 32 bytes in
   production, enforced by `config.Validate`; missing → session-key fallback with a warning)
   isolates static encryption at rest and encrypts backup archives. `AGENTHUB_PUSH_SECRET`
@@ -482,15 +500,30 @@ screen and a visual inspector for the A2A contract.
   index rejecting a repeat, namespace CRUD and the sync bookkeeping. Both gate on
   `DATABASE_URL`.
 - **Coverage**: `make test-cover` runs `-coverprofile` and prints
-  `go tool cover -func`. With a database attached, `a2a` 97.8%, `model` 93.9%, `registry`
-  89.7%, `hub` 87.8%, `authz` 87.9%, `adapter` 83.3%, `config` 80.3%, `httputil` 91.5%,
-  `handlers` 68.7%, `backup` 58.2%, `auth` 56.9%, `store` 22.6% (its cases skip without
-  `DATABASE_URL`, so that number says nothing until one is set).
+  `go tool cover -func`. With a database attached: `identity` and `schedules` 100%,
+  `sandbox` 98.2%, `a2a` 98%, `netutil` 97.4%, `model` 95.7%, `adapter` 95.4%, `audit`
+  95.1%, `config` 94.4%, `httputil` 92.1%, `authz` 91.8%, `middleware` 91%, `registry`
+  87.9%, `router` 82.2%, `hub` 82.1%, `auth` 81.4%, `secure` 80.5%, `handlers` 73.1%,
+  `channels` 71.4%, `backup` 57.3%, `store` 3% (its cases skip without `DATABASE_URL`,
+  so that number says nothing until one is set).
+- **Isolation & audit cases**: `internal/identity` covers the four shapes of "no
+  identity"; `internal/audit` covers chain continuation across a restart, a failed
+  insert that is counted rather than fatal, a full queue that drops instead of
+  blocking, `Verify` locating the break, and the retention branches;
+  `internal/handlers` drives every audit filter, the 400s for a bad cursor, limit or
+  window, the 503 when no store is wired, and asserts that reading the trail does not
+  escalate to the system identity. `model_test.go` pins all 45 table names against the
+  migrations, and `auth-store.spec.js` reads `authz.AllPermissions` out of the Go
+  source so the console vocabulary cannot drift.
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
-- **Frontend**: `bunx vitest run`, 154 tests passing across 14 files (languages /
-  copy-fallback / enums-copy / api / format / errors / backup-api / style guard).
+- **Frontend**: `bunx vitest run`, 301 tests passing across 17 files (languages /
+  copy-fallback / enums-copy / api / api-endpoints / audit / auth-store / format /
+  errors / backup-api / docs-content / playground / store / user-form / use-copy /
+  use-dismiss / style guard). `bun run test:coverage` (v8, `src/lib` only — the screens
+  are `.vue` templates these node tests never mount) reports 98.5% statements, 91.5%
+  branches and 92.6% functions.
 - **A2A & control-plane smoke**: send (once per kind), stream (no `[DONE]`, terminal frame
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
@@ -709,8 +742,10 @@ implementation log in `task-security.md`).
   the session key with a startup warning and supports key rotation with old-key fallback.
 - API keys are stored hashed (`token_hash`); OAuth client secrets are environment-variable
   references, never rows. An injection audit confirmed every SQL statement is parameterised.
-- **Database**: run with a least-privilege role; `scripts/provision-db-roles.sql` provisions
-  `app` (runs migrations) and `readonly` roles. The connection pool is tunable via
+- **Database**: run with a least-privilege role that is **not** the table owner and has no
+  `BYPASSRLS` — either would skip the row-level policies in §15.
+  `scripts/provision-db-roles.sql` provisions `agenthub_migrator` (schema owner, runs DDL),
+  `agenthub_app` (DML only) and `agenthub_readonly`. The connection pool is tunable via
   `AGENTHUB_DB_MAX_OPEN_CONNS` (25) / `AGENTHUB_DB_MAX_IDLE_CONNS` (10) /
   `AGENTHUB_DB_CONN_MAX_LIFETIME` (30m). Whether the DB connection uses TLS is left to the
   DSN (`sslmode=…`).
@@ -786,3 +821,82 @@ agent runs as the host process any more.
   report (and a second node refused), and the SSE replay.
 - agenthub web: `docs-content.spec.js` pins the sandbox docs group across all 13 languages, and the
   monochrome guard still runs over the new copy.
+
+---
+
+## 15. Data Isolation & Audit Trail (M3)
+
+Two gaps a review left open: isolation lived in the application layer, so forgetting one
+filter made a task, its artifacts and its events everybody's; and "who called what" existed
+only as log text — unverifiable, and trimmable by anyone with a `DELETE`.
+
+### Row level security
+
+- **Ownership columns**: `tasks` and its children (`task_artifacts`, `task_spans`,
+  `task_pending`, `task_push`), plus `events` and `knowledge`, carry
+  `owner_id TEXT NOT NULL DEFAULT ''`; `''` means the row was produced by the process
+  itself. Existing rows are **not** backfilled — nobody guesses the owner of history.
+- **Policies** (`026_rls_policies.sql`): those tables and `audit_log` are `ENABLE` +
+  `FORCE ROW LEVEL SECURITY` (`FORCE` binds the table owner too), and
+  `agenthub_row_visible(owner_id)` reads three per-transaction settings — `app.owner_id`
+  (the signed-in user), `app.bypass` (administrator) and `app.system` (in-process paths:
+  the task state machine, the broker, seed, migrations, backups, the audit writer). An
+  unset setting reads as NULL, so a request that forgets to scope itself sees **nothing**:
+  the failure mode is closed, not open.
+- **Short transactions**: `internal/store.scoped` opens one transaction per repository
+  call and injects the identity with `set_config(..., true)`. A request never holds a
+  connection — the SSE paths would otherwise starve the 25-connection pool.
+- **Separated roles**: `scripts/provision-db-roles.sql` provisions `agenthub_migrator`
+  (schema owner, runs DDL), `agenthub_app` (DML only, not the table owner, no
+  `BYPASSRLS`) and `agenthub_readonly`, and aborts while any guarded table lacks
+  `FORCE` RLS. DDL goes through `AGENTHUB_MIGRATE_DATABASE_URL`.
+- **`AGENTHUB_RLS=off`** appends `options=-c app.system=on` to the DSN so every policy
+  passes. That is for local work and tests: `AGENTHUB_ENV=prod` refuses it without
+  `AGENTHUB_RLS_ACK=1`, and either way the startup log says the boundary is relaxed.
+
+### Resource visibility is explicit (breaking)
+
+- `resources.visibility` is `restricted` or `public`, default **`restricted`**.
+  Readability is `public || a grant`; `authz` no longer treats "no grant" as "yes".
+  A record that is neither published nor granted is invisible *and* uncallable —
+  including to anonymous A2A peers.
+- Upgrading therefore hides every resource that used to be implicitly public, and there
+  is no backfill: an operator marks it `public` or grants access, as described in
+  `requirements-isolation.md` §3.1. Demo records are seeded as `public`.
+
+### Audit trail
+
+- **One row per call**: every `/api` and `/a2a` request appends `event_id`, `ts`,
+  `source`, `action`, `read_only`, `actor_*`, `ip`, `method`, a redacted `path`,
+  `resource_*`, `status`, `error_code`, `latency_ms`, `user_agent` and `request_id`.
+  Query *values* become `REDACTED`; no request or response body is ever stored, and the
+  sensitive keys (`token` / `key` / `secret` / `password` / `authorization` / `cookie`)
+  never reach the table.
+- **Append-only twice over**: a trigger rejects `UPDATE` / `DELETE` / `TRUNCATE` for
+  every role including the owner (retention deletes run under `app.retention`), and the
+  runtime role holds only `INSERT` / `SELECT` on the table.
+- **Hash chain**: `hash = sha256(prev_hash ‖ canonical(event))`, with the canonical form
+  a fixed field order that excludes the hash itself. Startup continues from the last
+  row, so a restart does not fork the chain. A single writer serialises it behind a
+  bounded queue with batched inserts (8192 / 64 / 500 ms by default); a full queue drops
+  frames and counts them, and never blocks a request.
+- **Endpoints**: `GET /api/audit` (filters `from`, `to`, `actor`, `action`, `resource`,
+  `source`, `outcome`, `q`, `before`, `limit`), `GET /api/audit/{id}` and
+  `GET /api/audit/verify?from=&to=` → `{ ok, checked, brokenAt }`, where `brokenAt` is
+  the first row whose hash does not link. All three need the new `audit:read`
+  permission, granted to the admin role by `027_audit_permission.sql`.
+- **Console**: a tenth screen — range and filters, water-level counters, the row table
+  and a forensics drawer that shows `prev_hash` and `hash` side by side.
+
+### A2A authorization and parameter compatibility
+
+- `message/send|stream` must resolve a concrete `resourceId` (from
+  `metadata.resourceId`, or inferred from the selection) before anything runs; if it
+  cannot, the call is refused with `resource_not_found`.
+- `tasks/get|cancel|resume` and `tasks/pushNotification/set|get` require the caller to
+  own the task or be an administrator. Somebody else's task answers `task_not_found`
+  rather than 403, so ids cannot be enumerated; an anonymous caller that needs one of
+  those methods gets `-32009 unauthenticated`.
+- `pushNotification/set` used `taskId` while `get` used `id`. Both are accepted now, the
+  canonical field wins when they disagree, and every task-scoped method shares one
+  resolver — so one client implementation works across all of them.
