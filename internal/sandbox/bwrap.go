@@ -29,11 +29,13 @@ func (b *BwrapProvider) Describe(context.Context) (Descriptor, error) {
 		Name:      "bwrap",
 		Layer:     LayerProcess,
 		Isolation: IsolationNamespace,
-		Network:   []string{NetworkNone, NetworkBridge, NetworkAllowlist},
-		Requires:  []string{b.bin},
-		Source:    SourceBuiltin,
-		License:   "LGPL-2.0-or-later",
-		DocsURL:   "https://github.com/containers/bubblewrap",
+		// NetworkAllowlist is not advertised: the mode parses, but nothing here
+		// implements host filtering, and the descriptor sells only what runs.
+		Network:  []string{NetworkNone, NetworkBridge, NetworkPlatform},
+		Requires: []string{b.bin},
+		Source:   SourceBuiltin,
+		License:  "LGPL-2.0-or-later",
+		DocsURL:  "https://github.com/containers/bubblewrap",
 	}, nil
 }
 
@@ -96,9 +98,12 @@ func (b *BwrapProvider) Status(context.Context, Handle) (string, error) { return
 
 // bwrapArgs is pure, and asserted in a unit test: --unshare-all without
 // --share-net must appear whenever the profile does not grant network access.
+// GrantsNetwork is the one authority for that: egress_allowlist is a "no" here
+// exactly as it is in the container provider, because an allowlist without a
+// filter process would hand the sandbox the host's whole network.
 func bwrapArgs(p Profile, req ExecRequest) []string {
 	args := []string{"--unshare-all", "--die-with-parent", "--new-session"}
-	if NormalizeNetwork(p.Network) != NetworkNone || p.Network == NetworkPlatform {
+	if GrantsNetwork(p) {
 		args = append(args, "--share-net")
 	}
 	args = append(args,

@@ -290,10 +290,69 @@ func TestBwrapUnsharesTheNetworkUnlessItIsGranted(t *testing.T) {
 		t.Fatalf("an unnamed workdir must be an in-sandbox tmpfs: %v", closed)
 	}
 
-	for _, network := range []string{NetworkBridge, NetworkAllowlist, NetworkPlatform} {
+	for _, network := range []string{NetworkBridge, NetworkPlatform} {
 		open := bwrapArgs(Profile{Network: network}, ExecRequest{Command: "true"})
 		if !hasElement(open, "--share-net") {
 			t.Fatalf("network %q must share the host netns: %v", network, open)
+		}
+	}
+}
+
+// TestBothProvidersReadEgressAllowlistTheSameWay pins the bug that made this
+// matrix necessary: bubblewrap used to hand out --share-net for a policy under
+// which docker cut the container off, so "只允许名单内主机" meant "the whole host
+// network" on one backend and "no network" on the other. Neither is a filtered
+// network; both must now be the closed one.
+func TestBothProvidersReadEgressAllowlistTheSameWay(t *testing.T) {
+	docker := NewDockerProvider(ProviderDocker, "", "", "")
+	cases := []struct {
+		network string
+		granted bool
+	}{
+		{NetworkNone, false},
+		{NetworkAllowlist, false},
+		{"egress", false},
+		{"allowlist", false},
+		{"", false},
+		{"typo-bridge", false},
+		{NetworkBridge, true},
+		{NetworkPlatform, true},
+	}
+	for _, tc := range cases {
+		profile := Profile{Network: tc.network}
+
+		argv := docker.createArgs(Spec{LeaseID: "l1", Profile: profile})
+		bridge := hasPair(argv, "--network", NetworkBridge)
+		off := hasPair(argv, "--network", NetworkNone)
+		if !bridge && !off {
+			t.Fatalf("docker must always name a network for %q: %v", tc.network, argv)
+		}
+		if bridge != tc.granted {
+			t.Fatalf("docker granted network for %q = %v, want %v", tc.network, bridge, tc.granted)
+		}
+
+		bwrap := bwrapArgs(profile, ExecRequest{Command: "true"})
+		if shared := hasElement(bwrap, "--share-net"); shared != tc.granted {
+			t.Fatalf("bwrap granted network for %q = %v, want %v", tc.network, shared, tc.granted)
+		}
+	}
+}
+
+// TestTheProviderDescriptorsDoNotSellAFilterTheyLack keeps the console honest: a
+// capability list is what an operator reads before writing a policy.
+func TestTheProviderDescriptorsDoNotSellAFilterTheyLack(t *testing.T) {
+	for _, provider := range []Provider{
+		NewDockerProvider(ProviderDocker, "", "", ""),
+		NewBwrapProvider(),
+	} {
+		described, err := provider.Describe(context.Background())
+		if err != nil {
+			t.Fatalf("describe %s: %v", provider.Name(), err)
+		}
+		for _, network := range described.Network {
+			if network == NetworkAllowlist {
+				t.Fatalf("%s advertises %q, which it cannot honour: %v", provider.Name(), NetworkAllowlist, described.Network)
+			}
 		}
 	}
 }

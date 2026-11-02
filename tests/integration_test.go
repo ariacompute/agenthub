@@ -37,7 +37,9 @@ func openDBReal(t *testing.T) *gorm.DB {
 	// Opened with RLS relaxed: these cases exercise repository behaviour and
 	// clean up with raw SQL, which a row level security policy would (correctly)
 	// refuse for a connection that carries no identity. The policies themselves
-	// are covered by rls_test.go, which enforces them.
+	// are covered by rls_test.go, which opens the same database with
+	// store.OpenOptions{RLSEnforce: true} and asserts both the catalog flags and
+	// what each identity can see.
 	db, err := store.OpenWithOptions(dsn, store.OpenOptions{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

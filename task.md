@@ -91,7 +91,7 @@
 33. [x] `errors.js` + `copy/errors-copy.js`：机器可读 code → 本地化文案，缺失 key 显示 code 本身
 33.1 [x] **文档屏 `/docs`**（侧边栏「管理」之后，无权限门控）：
      `lib/docs-content.js`（语言中立：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状、
-     **66 条 HTTP 路由**的方法/路径/权限/请求体/响应体、错误码按状态码分组、适配器码）+
+     **132 条 HTTP 路由**（17 个分组）的方法/路径/权限/请求体/响应体、错误码按状态码分组、适配器码）+
      `lib/copy/docs-copy.js`（仅散文，13 语 × 120 键）+ `views/DocsView.vue`
      （sticky 章节索引 + 滚动高亮、概念/任务状态机/健康图例、端点表就地展开示例、
      鉴权与错误码、页头 `version@commit`）；`use-copy.js` 登记 `docs` 命名空间、
@@ -507,10 +507,11 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 
 ## M3 — 后续项（未开始）
 
-94. [ ] 真实适配器落地：~~model（OpenAI 兼容端点 + 回退链，M2-64/65 已落地）~~、agent（`aria-agent-cloud`
-      SSE → A2A）、mcp（stdio / Streamable HTTP 子进程与 HTTP 客户端）、skill（本地/远端手册加载）、
-      cli（`exec.CommandContext`，沿用白名单/超时/截断）
-95. [ ] pushNotification 真实回调（HTTP POST + 鉴权 + 重试；留痕表已就位）
+94. [x] 真实适配器落地：model（OpenAI 兼容端点 + 回退链，M2-64/65）、agent（Agent Card + `message/send`）、
+     mcp（Streamable HTTP JSON-RPC）、skill（本地手册加载）、cli（租约沙箱内 `exec`，沿用白名单/超时/截断）。
+     仍留 `TODO(real)`：MCP **stdio 子进程**、agent 与模型的**流式**输出、speech / custom 的 mock
+95. [x] pushNotification 真实回调（`hub.HTTPNotifier`：https-only + SSRF 白名单 + HMAC-SHA256 签名 +
+     `(taskId, state)` 一小时去重 + 留痕落 `push_records`；未配置 `AGENTHUB_PUSH_SECRET` 时仍是只留痕的 mock）
 96. [ ] 多实例联邦：Agent Network（跨 agenthub 的 Agent Card 聚合与路由）
 97. [ ] eval 钩子接评测编排（**仍不产出分数**；缺凭据 skip 并写 reason）
 98. [ ] 控制台增强：拓扑时间窗口持久化、任务筛选与分页、artifact 下载
@@ -518,3 +519,63 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
      语义检索走外部检索源接入、全量 API 调用审计留痕
 100. [ ] 覆盖率后续项：`internal/auth` 的 OAuth `Exchange`（端点为常量，需可注入才能离线断言）、
      `internal/backup` 的 `copy.go` / `pgdump.go`（需真实 PostgreSQL 与 `pg_dump` 客户端）
+
+## M4 — 完整度补齐（2026-11-02，对照《agenthub + agentbuddy 完整度评估》§6）
+
+### 1. 沙盒出网语义（D1）
+- [x] `sandbox.GrantsNetwork(profile)` 成为「给不给网」的唯一判定：只有 `bridge` / `platform` 返回 true，
+      `none` 与 **`egress_allowlist` 都返回 false**。
+- [x] `bwrap.go`：`--share-net` 只在 `GrantsNetwork` 为真时出现（此前 `egress_allowlist` 落进给网分支，
+      等于把宿主机整个网络交给沙盒）；`Describe().Network` 移除 `NetworkAllowlist`。
+- [x] `docker.go`：改用同一判定，`platform` 对齐为守护进程默认网络（此前只有 `bridge` 给网），
+      `Describe()` 同样不再宣称 allowlist。
+- [x] `types.go` / `requirements-sandbox.md` §2.1：写明词表保留、名单需 egress sidecar（`TODO(real)`）才生效。
+- [x] `providers_test.go`：四值 × 两 provider 的参数矩阵 + 「descriptor 不卖自己没有的能力」两条用例；
+      `policy_test.go` 补 `GrantsNetwork` 用例。
+
+### 2. RLS 可执行断言（D3）
+- [x] 新增 `tests/rls_test.go`：`DATABASE_URL` 未设即 skip；**必须** `store.OpenOptions{RLSEnforce: true}`
+      （零值会 `relaxRLS`，否则整份文件假绿）。
+- [x] 结构层：8 张表 `ENABLE + FORCE` 与 10 条策略名（`tasks_owner_access` … `audit_log_retention`）逐一断言。
+- [x] 行为层：无身份 / 空身份 → 0 行；本人 → 自己的行；他人 → 0 行；`bypass` / `system` → 全量；
+      审计表「普通请求不可见、审计员可读不可写、只有 `retention` 能删」。
+- [x] `022_task_ownership.sql` 的子表 owner 继承触发器逐表断言（`task_artifacts`/`task_spans`/`task_pending`/
+      `task_push`/`events`）；`knowledge` 按 owner 隔离；仓库路径（`identity.With` + `TaskRepository`）闭环。
+- [x] `tests/integration_test.go` 的注释从「空承诺」改为指向真实文件与 gating 方式。
+
+### 3. 机器码文案与沙盒策略表单（D5/D6）
+- [x] `errors.js` 补 38 个码（channel / delivery / connector / audio / speech / computer / schedule /
+      skill / router / sandbox / account_locked / feature_unavailable）；顺带补上此前遗漏的 4 个
+      （`invalid_health` / `invalid_transport` / `unknown_kind` / `no_resource_available`），
+      现在 **104 个机器码 ↔ 104 个文案键**一一对应，13 语全译。
+- [x] `errors.spec.js`：新增「新码可本地化」与「`CODE_KEYS` ↔ `errorsCopy.en` 双向键集一致」两条守卫。
+- [x] 新增 `lib/copy/sandbox-copy.js`（13 语，27 键）与 `lib/sandbox-form.js`（纯函数：trim / 数字 / 三态 /
+      列表 / 词表校验 / 空对象删除），`ResourceKindForm.vue` 增加「执行沙盒」分区（仅 `agent`/`mcp`/`cli` 渲染；
+      `readonly_root` 三态；`network=egress_allowlist` 时直接提示「当前按断网执行」）。
+- [x] `docs-content.spec.js` 钉住 132 条端点、`sandbox` 15 条、`router` 14 条、`collaboration` 20 条。
+- [x] `sandbox-form.spec.js`：正常路径 + 非法值/清空/词表外取值 + 13 语文案覆盖。
+
+### 4. hub 覆盖率（82.4% → 91.0%）
+- [x] `internal/hub/coverage_test.go`：`SendAs`/`StreamAs`、`scopeOf`（ticket/contextID/默认）、
+      `ResolveResource`（三种选择键、kind 回退、空注册中心、无注册中心）、`lastUserText`、
+      `transitionError`/`isNotFound`、`Events` 仓库失败、`notifyPush` 四重早退、`TaskStore` 读失败降级。
+- [x] `HTTPNotifier` 真实投递路径：签名头可由接收端用同一份 body 复算、`(taskId,state)` 去重、
+      `Reset` 清缓存、peer 5xx 与传输失败都只留痕、`http://` 目标在拨号前被拒、nonce 随机与
+      `markSeen` 的过期清扫。
+
+### 5. Persona 控制台字段（F10 服务端契约）
+- [x] `registry.Persona` 增加 `role` / `instruction` / `mbti` / `avatar_ref`（与 agentbuddy 表单字段名一致），
+      全部 `omitempty`，老记录序列化不变，无迁移（复用 `resources.persona` jsonb）。
+- [x] `normalizePersona`：标签 ≤256、`instruction` ≤4096（`maxInstructionLen`）、MBTI 按 16 型白名单
+      （`NormalizeMBTI`，非法值清空而不是入库）、整体为空归 nil；`registry_test.go` 三条用例覆盖。
+
+### 6. 规格回填（D8）
+- [x] `requirements.md` §1.1 适配器现状改写成「真实路径 + 回退 mock」；§1.2 范围外移除已落地的
+      真实 CLI 与 MCP Streamable HTTP，只留 stdio 子进程、流式输出与 speech/custom 的 mock；
+      §1.4 Persona 段落对齐 `avatar_ref` 与归一化规则。
+- [x] `task.md`：「66 条 HTTP 路由」→ 132 条（17 分组）；M3 的 94/95 勾选并写清真实边界。
+- [x] `internal/adapter/connector.go` 头注释经核对已准确（不再是「only mock」），无需改动；
+      `internal/handlers/schedules.go` 的过时 `TODO(real)` 已不存在（现为正常注释）。
+- [x] `README.md` 沙盒表把 Console 行拆成 **API** 与 **Console** 两行（交互式控制台在 agentbuddy
+      的 `ComputersView`），并补一行 Network 语义；`task-sandbox.md` S8 的两条声称（`sandbox-copy.js`、
+      `ResourceKindForm` 沙盒区块 + 错误码 13 语）本轮之后与代码一致。

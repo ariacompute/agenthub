@@ -176,6 +176,55 @@ func TestNormalizePersona(t *testing.T) {
 	}
 }
 
+// TestNormalizePersonaKeepsTheConsoleFields covers the four fields the desktop
+// editor sends (F10.2). Before they existed the server dropped them on the floor:
+// the form looked like it saved, and the value was gone after the next reload.
+func TestNormalizePersonaKeepsTheConsoleFields(t *testing.T) {
+	p := normalizePersona(&Persona{
+		Role:        "  Research lead  ",
+		Instruction: "  always cite sources  ",
+		MBTI:        " intj ",
+		AvatarRef:   "  avatar-2  ",
+	})
+	if p == nil {
+		t.Fatal("a persona made only of console fields must be kept")
+	}
+	if p.Role != "Research lead" || p.Instruction != "always cite sources" || p.AvatarRef != "avatar-2" {
+		t.Fatalf("trim = %+v", p)
+	}
+	if p.MBTI != "INTJ" {
+		t.Fatalf("MBTI = %q, want the upper-cased known type", p.MBTI)
+	}
+}
+
+func TestNormalizePersonaClearsAnInventedMBTI(t *testing.T) {
+	// The console renders a fixed badge per type, so an unknown code has to be
+	// dropped rather than stored: a badge nobody can label is worse than none.
+	for _, code := range []string{"XXXX", "INFP-T", "int", "🎉"} {
+		if got := NormalizeMBTI(code); got != "" {
+			t.Fatalf("NormalizeMBTI(%q) = %q, want empty", code, got)
+		}
+	}
+	for _, code := range MBTITypes {
+		if got := NormalizeMBTI(strings.ToLower(code)); got != code {
+			t.Fatalf("NormalizeMBTI(%q) = %q, want %q", strings.ToLower(code), got, code)
+		}
+	}
+	if p := normalizePersona(&Persona{MBTI: "NOPE"}); p != nil {
+		t.Fatalf("a persona with only an invalid type must become nil, got %+v", p)
+	}
+}
+
+func TestNormalizePersonaCapsTheInstruction(t *testing.T) {
+	// The instruction is a paragraph, not a label, so it gets its own limit: a
+	// shared 256 byte cap would cut a real instruction in half.
+	long := strings.Repeat("y", maxInstructionLen+50)
+	p := normalizePersona(&Persona{Instruction: long})
+	if p == nil || len(p.Instruction) != maxInstructionLen {
+		t.Fatalf("instruction length = %d, want %d", len(p.Instruction), maxInstructionLen)
+	}
+}
+
 func TestNormalizeConnectorPolicy(t *testing.T) {
 	cases := map[string]string{
 		"allowed":   ConnectorPolicyAllowed,

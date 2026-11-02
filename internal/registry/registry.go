@@ -191,13 +191,23 @@ type Entry struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// Persona is the human-facing presentation of a resource (display label, tagline
-// and avatar). It is descriptive only: nothing here changes routing or auth.
+// Persona is the human-facing presentation of a resource (display label, role,
+// tagline and avatar). It is descriptive only: nothing here changes routing or
+// auth, and the instruction is context for the console, not a system prompt the
+// server injects anywhere.
+//
+// Role, Instruction, MBTI and AvatarRef use the snake_case names the desktop
+// console sends (F10.2 in its requirements); the four original fields keep their
+// camelCase spelling so existing records and clients are untouched.
 type Persona struct {
 	DisplayName string `json:"displayName,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Tagline     string `json:"tagline,omitempty"`
 	AvatarURL   string `json:"avatarUrl,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Instruction string `json:"instruction,omitempty"`
+	MBTI        string `json:"mbti,omitempty"`
+	AvatarRef   string `json:"avatar_ref,omitempty"`
 }
 
 // EffectiveNamespace returns the namespace of an entry, falling back to the
@@ -233,31 +243,66 @@ func (e *Entry) EffectiveDisplayName() string {
 // is not http(s). A malformed or dangerous URL is dropped rather than rejected so
 // an older client can still save the rest of the record; an all-empty persona is
 // reduced to nil so the column stays null and the wire shape stays compact.
+//
+// The instruction is capped far higher than the labels because it is a paragraph,
+// and the MBTI is validated against the sixteen real types: an invented code is
+// cleared rather than stored, because the console renders a fixed badge for each
+// type and would otherwise print a value it cannot explain.
 func normalizePersona(p *Persona) *Persona {
 	if p == nil {
 		return nil
 	}
 	const maxLen = 256
-	trim := func(s string) string {
+	trim := func(s string, limit int) string {
 		s = strings.TrimSpace(s)
-		if len(s) > maxLen {
-			s = s[:maxLen]
+		if len(s) > limit {
+			s = s[:limit]
 		}
 		return s
 	}
-	p.DisplayName = trim(p.DisplayName)
-	p.Title = trim(p.Title)
-	p.Tagline = trim(p.Tagline)
+	p.DisplayName = trim(p.DisplayName, maxLen)
+	p.Title = trim(p.Title, maxLen)
+	p.Tagline = trim(p.Tagline, maxLen)
+	p.Role = trim(p.Role, maxLen)
+	p.Instruction = trim(p.Instruction, maxInstructionLen)
+	p.MBTI = NormalizeMBTI(p.MBTI)
+	p.AvatarRef = trim(p.AvatarRef, maxLen)
 	p.AvatarURL = strings.TrimSpace(p.AvatarURL)
 	if p.AvatarURL != "" {
 		if u, err := url.Parse(p.AvatarURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			p.AvatarURL = ""
 		}
 	}
-	if p.DisplayName == "" && p.Title == "" && p.Tagline == "" && p.AvatarURL == "" {
+	if p.DisplayName == "" && p.Title == "" && p.Tagline == "" && p.AvatarURL == "" &&
+		p.Role == "" && p.Instruction == "" && p.MBTI == "" && p.AvatarRef == "" {
 		return nil
 	}
 	return p
+}
+
+// maxInstructionLen bounds the persona instruction. It is generous enough for a
+// paragraph and small enough that the jsonb column cannot be used as blob storage.
+const maxInstructionLen = 4096
+
+// MBTITypes lists the sixteen types, in the order the console renders them.
+var MBTITypes = []string{
+	"INTJ", "INTP", "ENTJ", "ENTP",
+	"INFJ", "INFP", "ENFJ", "ENFP",
+	"ISTJ", "ISFJ", "ESTJ", "ESFJ",
+	"ISTP", "ISFP", "ESTP", "ESFP",
+}
+
+// NormalizeMBTI upper-cases a code and returns it only when it names a real type;
+// anything else becomes empty, which the console renders as "not set" instead of
+// a badge it cannot label.
+func NormalizeMBTI(code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	for _, known := range MBTITypes {
+		if code == known {
+			return code
+		}
+	}
+	return ""
 }
 
 // Registry owns the resource catalogue.

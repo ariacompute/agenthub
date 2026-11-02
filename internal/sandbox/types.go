@@ -84,6 +84,12 @@ const (
 )
 
 // Network modes a profile may ask for.
+//
+// NetworkAllowlist is kept in the vocabulary so an existing record that names it
+// still parses, but it grants nothing: no provider filters hosts yet, so the
+// value is read as NetworkNone (see GrantsNetwork). Removing the constant would
+// be the honest alternative and is what an egress sidecar would let us avoid —
+// a TODO(real) lives on GrantsNetwork for that reason.
 const (
 	NetworkNone      = "none"
 	NetworkAllowlist = "egress_allowlist"

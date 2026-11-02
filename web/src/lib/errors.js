@@ -3,7 +3,9 @@
 // itself so a server string is never shown as if it were prose.
 import { useCopy } from './use-copy.js'
 
-const CODE_KEYS = {
+// Exported for the guard test: the mapping and the copy table must stay the
+// same size, or a code silently degrades to its machine spelling.
+export const CODE_KEYS = {
   bad_request: 'badRequest',
   unauthorized: 'unauthorized',
   not_found: 'notFound',
@@ -74,6 +76,47 @@ const CODE_KEYS = {
   api_key_expired: 'apiKeyExpired',
   api_key_revoked: 'apiKeyRevoked',
   api_key_name_required: 'apiKeyNameRequired',
+  // Collaboration, routing and execution. These arrived with channels,
+  // connectors, speech, the router and the sandbox control plane; leaving them
+  // unmapped made the console print the machine code at the operator.
+  account_locked: 'accountLocked',
+  channel_disabled: 'channelDisabled',
+  channel_not_found: 'channelNotFound',
+  channel_signature_missing: 'channelSignatureMissing',
+  channel_signature_invalid: 'channelSignatureInvalid',
+  channel_timestamp_expired: 'channelTimestampExpired',
+  channel_payload_invalid: 'channelPayloadInvalid',
+  delivery_failed: 'deliveryFailed',
+  delivery_not_found: 'deliveryNotFound',
+  delivery_not_retryable: 'deliveryNotRetryable',
+  connector_not_found: 'connectorNotFound',
+  connector_action_denied: 'connectorActionDenied',
+  connector_policy_off: 'connectorPolicyOff',
+  audio_too_large: 'audioTooLarge',
+  audio_unsupported: 'audioUnsupported',
+  audio_transcribe_failed: 'audioTranscribeFailed',
+  speech_disabled: 'speechDisabled',
+  computer_not_found: 'computerNotFound',
+  schedule_not_found: 'scheduleNotFound',
+  schedule_invalid: 'scheduleInvalid',
+  skill_distill_disabled: 'skillDistillDisabled',
+  feature_unavailable: 'featureUnavailable',
+  router_ticket_not_found: 'routerTicketNotFound',
+  router_trigger_not_found: 'routerTriggerNotFound',
+  router_thread_not_found: 'routerThreadNotFound',
+  router_ticket_closed: 'routerTicketClosed',
+  router_handback_exhausted: 'routerHandbackExhausted',
+  router_policy_invalid: 'routerPolicyInvalid',
+  router_resource_unset: 'routerResourceUnset',
+  sandbox_disabled: 'sandboxDisabled',
+  sandbox_unsupported: 'sandboxUnsupported',
+  sandbox_unknown_provider: 'sandboxUnknownProvider',
+  sandbox_policy_denied: 'sandboxPolicyDenied',
+  sandbox_timeout: 'sandboxTimeout',
+  sandbox_lease_lost: 'sandboxLeaseLost',
+  sandbox_limit_reached: 'sandboxLimitReached',
+  sandbox_node_offline: 'sandboxNodeOffline',
+  sandbox_not_found: 'sandboxNotFound',
 }
 
 /** Returns the localised message for a machine readable code. */

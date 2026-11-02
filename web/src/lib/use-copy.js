@@ -21,6 +21,7 @@ import { docsCopy } from './copy/docs-copy.js'
 import { enumsCopy } from './copy/enums-copy.js'
 import { errorsCopy } from './copy/errors-copy.js'
 import { providerCopy } from './copy/providers-copy.js'
+import { sandboxCopy } from './copy/sandbox-copy.js'
 
 export const STORAGE_KEY = 'agenthub.lang'
 
@@ -40,6 +41,7 @@ const COPIES = {
   docs: docsCopy,
   errors: errorsCopy,
   providers: providerCopy,
+  sandbox: sandboxCopy,
 }
 
 /** Shallow merge with English fallback. */

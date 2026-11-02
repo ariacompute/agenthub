@@ -43,7 +43,7 @@
 | `AGENTHUB_SANDBOX_MAX_TTL` | `2h` | 单租约最长存活（续租也不能超过，且 ≥ `IDLE_TTL`） |
 | `AGENTHUB_SANDBOX_MAX_PER_OWNER` | `4` | 每归属人租约上限（1..64） |
 | `AGENTHUB_SANDBOX_MAX_TOTAL` | `16` | 全局租约上限（≥ `MAX_PER_OWNER`，≤ 256，且 ≥ `AGENTHUB_ROUTER_MAX_TICKETS`） |
-| `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` | 空 | 出网白名单（host 后缀匹配） |
+| `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` | 空 | 出网白名单（**尚未生效**：当前没有 provider 做 host 过滤，见 §2.1） |
 | `AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT` | `25s` | 节点长轮询挂起时长（1s..60s） |
 | `AGENTHUB_SANDBOX_SWEEP_INTERVAL` | `30s` | 回收节拍（1s..10m） |
 
@@ -54,6 +54,19 @@
 校验（`AGENTHUB_SANDBOX_ENABLED=false` 时整块跳过）：`PROVIDER` 属于已注册类型或 `off`；
 声明式条目加载失败（未知占位符 / 空 argv / 非绝对路径）**拒绝启动**；各上限范围如上；
 `MAX_TOTAL ≥ ROUTER_MAX_TICKETS`（沙盒不能悄悄把调度器串行化）；时长与字节数为正。
+
+### 2.1 网络模式的真实语义
+
+profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四个取值，但**只有后两个真的给网**：
+
+| 取值 | bubblewrap | docker / podman | 说明 |
+| --- | --- | --- | --- |
+| `none`（默认） | `--unshare-all`（无 `--share-net`） | `--network none` | 断网 |
+| `egress_allowlist` | 同上（断网） | `--network none` | **名单暂不生效**：host 过滤需要 egress sidecar（`TODO(real)`）；在它出现前该取值按 `none` 执行（fail-closed），词表保留以让存量记录仍可解析 |
+| `bridge` | `--share-net` | `--network bridge` | 给网 |
+| `platform` | `--share-net` | `--network bridge` | 交给平台默认 |
+
+两个 provider 共用 `sandbox.GrantsNetwork` 判定，因此不会再出现「同一个取值在一种后端断网、在另一种后端放全量网络」的分叉；provider 的 `Describe().Network` 也不再宣称支持 `egress_allowlist`。
 
 ## 3. API
 

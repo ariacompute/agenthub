@@ -211,6 +211,28 @@ func TestNormalizeNetworkAndArgsPolicy(t *testing.T) {
 	}
 }
 
+// TestGrantsNetworkIsTheSingleAnswer: the allowlist value stays in the
+// vocabulary (records reference it) but must never grant network on its own.
+func TestGrantsNetworkIsTheSingleAnswer(t *testing.T) {
+	cases := map[string]bool{
+		"":                    false,
+		NetworkNone:           false,
+		NetworkAllowlist:      false,
+		"egress":              false,
+		"allowlist":           false,
+		" bridge ":            true,
+		"BRIDGE":              true,
+		"host":                true,
+		NetworkPlatform:       true,
+		"something-unrelated": false,
+	}
+	for in, want := range cases {
+		if got := GrantsNetwork(Profile{Network: in}); got != want {
+			t.Fatalf("GrantsNetwork(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestValidateProfileRejectsImpossibleLimits(t *testing.T) {
 	cases := []struct {
 		name string

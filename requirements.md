@@ -30,11 +30,13 @@
   env / transport / endpoint / capabilities / health / metadata`）。
   支持**导出**（每个资源渲染为一个 Agent Card skill；整册导出为 MCP server 描述），
   与消费对称。
-- **适配器层**：统一 `Connector` 接口 + `For(kind)` 工厂；首版五类全为**确定性 mock**
-  （同输入必同输出，便于 `-race` 断言），真实实现以 `// TODO(real)` 标注：
-  model→OpenAI 兼容端点（Model Router 形态：单一 `Generate/Stream` + provider 注册表 + 回退链）、
-  agent→`aria-agent-cloud` SSE、mcp→stdio / Streamable HTTP JSON-RPC、skill→本地手册加载、
-  cli→`exec.Command` + 白名单。CLI 必须实现「白名单前置校验 → 单次超时 → 输出截断 → 结构化 JSON」。
+- **适配器层**：统一 `Connector` 接口 + `For(kind)` 工厂。是否走真实路径由「资源有没有说明去哪儿找」决定，
+  没有可用的端点或执行环境时回退**确定性 mock**（同输入必同输出，mock 结果一律带 `provider=mock`，
+  便于 `-race` 断言且不至于把编造的答案当成真的）：
+  model→OpenAI 兼容端点（`model_openai.go`，非流式；Model Router 形态：单一 `Generate/Stream` +
+  provider 注册表 + 回退链）、agent→取 Agent Card 后 `message/send`、mcp→Streamable HTTP JSON-RPC、
+  skill→本地手册加载、cli→在租约沙箱内 `exec`（白名单前置校验 → 单次超时 → 输出截断 → 结构化 JSON）。
+  speech / custom 仍为 mock，各自保留 `TODO(real)` 边界。
 - **Hub 编排与任务机**：入站消息 → 资源选择 → 适配执行 → 状态机 → artifact 累积 →
   事件广播（SSE fan-out）→ pushNotification 回调（落 `push_records`；设置 `AGENTHUB_PUSH_SECRET`
   后改走**真实投递**——https-only、SSRF 白名单、HMAC-SHA256 签名、`(taskId, state)` 一小时内去重，
@@ -67,8 +69,8 @@
 - RAG / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
 - 浏览器自动化、多语言 SDK、Agent 网络跨实例联邦。
 - LLM-as-judge 评分与评测闭环（eval 仅留钩子，**不产出分数**）。
-- 真实 MCP stdio 子进程、真实 CLI `exec`、模型**流式**输出（非流式的 OpenAI 兼容端点已可用，见 §6；
-  其余统一留 `TODO(real)`）。
+- MCP **stdio 子进程**传输、agent 与模型**流式**输出（非流式的 MCP Streamable HTTP 与 OpenAI 兼容端点
+  已可用，CLI 已是真实 `exec`，见 §1.1；其余统一留 `TODO(real)`）。
 
 ### 1.3 范围内（M2，已实现）
 
@@ -97,8 +99,10 @@ RAG 检索保持确定性 mock 并标 `TODO(real)`。
   新机器码 `schedule_not_found`(404) / `schedule_invalid`(400)。落 `schedules` 表（`018_schedules.sql`）。
 - **Knowledge（F14）**：`GET /api/knowledge` 暴露 mock RAG 检索（确定性片段），真实向量检索标 `TODO(real)`；
   技能蒸馏仅记录触发点（`skill_distill_disabled`(403)）。落 `knowledge` 表（`019_knowledge.sql`）。
-- **Persona（F10）**：`Entry.Persona` 扩展角色画像（`role`/`instruction`/`mbti`/`avatar`），
-  经 `POST/PUT /api/resources` 写入，`resources.persona` JSONB 列（复用 `013_persona.sql`）。
+- **Persona（F10）**：`Entry.Persona` 扩展角色画像（`role` / `instruction` / `mbti` / `avatar_ref`，
+  与 agentbuddy 表单的字段名一致），经 `POST/PUT /api/resources` 写入，`resources.persona` JSONB 列
+  （复用 `013_persona.sql`）。`normalizePersona` 负责 trim、标签 ≤256 字符、`instruction` ≤4096、
+  `mbti` 按 **16 型白名单**校验（拼错的代码清空而不是入库，控制台才能画出可解释的徽章）、整体为空归 nil。
 - **复用与约束**：上述端点复用既有 `resources:*` / `tasks:*` 权限，不新增角色或用户组；
   迁移均为 `017/018/019`（接 `016_wechat_login.sql` 之后），全 `IF NOT EXISTS`。
 

@@ -167,6 +167,26 @@ func NormalizeNetwork(s string) string {
 	}
 }
 
+// GrantsNetwork reports whether a profile may reach the network at all.
+//
+// Only "bridge" (a NAT'd interface) and "platform" (whatever the host's default
+// is) grant it. "egress_allowlist" deliberately does not: the vocabulary keeps
+// the value so records written against the documented modes still parse, but no
+// provider implements host filtering yet — that is an egress sidecar's job
+// (TODO(real)). Until one exists the value is read as "none", which is the
+// fail-closed answer.
+//
+// This function is the single place that decides the question, because the bug
+// it replaces was two providers answering it differently: bubblewrap granted the
+// whole host netns for the same policy under which docker cut the container off.
+func GrantsNetwork(p Profile) bool {
+	switch NormalizeNetwork(p.Network) {
+	case NetworkBridge, NetworkPlatform:
+		return true
+	}
+	return false
+}
+
 // NormalizeArgsPolicy maps an unknown or empty policy onto "none".
 func NormalizeArgsPolicy(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {

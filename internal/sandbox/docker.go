@@ -47,11 +47,14 @@ func (d *DockerProvider) Describe(context.Context) (Descriptor, error) {
 		Name:      d.name,
 		Layer:     layer,
 		Isolation: isolation,
-		Network:   []string{NetworkNone, NetworkBridge, NetworkAllowlist},
-		Requires:  []string{d.bin},
-		Source:    SourceBuiltin,
-		License:   "Apache-2.0",
-		DocsURL:   "https://docs.docker.com/engine/security/",
+		// NetworkAllowlist is not advertised: see bwrap.go — the mode parses but
+		// needs an egress sidecar to mean anything, and a descriptor must not
+		// claim a filter that does not exist.
+		Network:  []string{NetworkNone, NetworkBridge, NetworkPlatform},
+		Requires: []string{d.bin},
+		Source:   SourceBuiltin,
+		License:  "Apache-2.0",
+		DocsURL:  "https://docs.docker.com/engine/security/",
 	}, nil
 }
 
@@ -196,7 +199,10 @@ func (d *DockerProvider) createArgs(spec Spec) []string {
 	if d.runtime != "" {
 		args = append(args, "--runtime", d.runtime)
 	}
-	if NormalizeNetwork(p.Network) == NetworkBridge {
+	// GrantsNetwork is shared with the bubblewrap provider so the two cannot
+	// drift: egress_allowlist is "none" in both, and "platform" means the
+	// daemon's default network here.
+	if GrantsNetwork(p) {
 		args = append(args, "--network", "bridge")
 	} else {
 		args = append(args, "--network", "none")

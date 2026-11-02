@@ -506,7 +506,9 @@ The shape is the scheduler's, deliberately: consumer-defined ports (`store.go`),
 | Reuse | renewed on every hit, reclaimed after `AGENTHUB_SANDBOX_IDLE_TTL`; anonymous callers never reuse |
 | Ceiling | `AGENTHUB_SANDBOX_MAX_PER_OWNER` / `_MAX_TOTAL`, cross-checked against `AGENTHUB_ROUTER_MAX_TICKETS`; a refused lease is a **retryable** `sandbox_limit_reached`, consumed by the scheduler's back-off |
 | Audit | command digest, exit code, duration and the output's sha256 — never the output itself |
-| Console | `/api/sandboxes`, `/api/sandboxes/{id}`, `/api/sandboxes/stats`, `/api/sandbox-providers`, `/api/sandbox-nodes`, `/api/sandboxes/events` (SSE with `since`) |
+| API | `/api/sandboxes`, `/api/sandboxes/{id}`, `/api/sandboxes/stats`, `/api/sandbox-providers`, `/api/sandbox-nodes`, `/api/sandboxes/events` (SSE with `since`) |
+| Console | the interactive sandbox screen lives in **agentbuddy** (`ComputersView`); this repository ships the API and the `/docs` table only |
+| Network | `none` / `egress_allowlist` cut the network on **both** backends, `bridge` / `platform` grant it; the allowlist itself still needs an egress sidecar, so it is read as `none` (fail-closed) |
 
 A backend is a catalogue entry, not a code path. Three ways to add one without touching the control
 plane:
