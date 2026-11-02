@@ -49,6 +49,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'A hosted runtime (E2B, Daytona, CubeSandbox, OpenHands) reached through a declarative template: no vendor SDK is compiled in.',
     sandboxLayerRemoteDesc: 'A node you enrolled — agentbuddy on your own machine. The server queues a job and the node runs it inside its own root and allowlist.',
     sandboxLayerNoneDesc: 'off refuses every execution. Nothing runs, and the console says so instead of falling back.',
+    sandboxPolicyTitle: 'Resource execution policy',
+    sandboxPolicyBody:
+      'A resource that runs something can narrow the instance default through kind_config.sandbox. Every field is optional: an absent field inherits what the operator set, so a resource can lower a limit but never raise one by omission. The block is validated when the record is saved, not when a task first runs into it.',
+    sandboxPolicyNote:
+      'Network is the one field that is not a promise of reach. Only bridge and platform hand out connectivity; egress_allowlist records the hosts a resource would like and is executed as none until an egress proxy exists, because accepting the value must not turn into a filter that is not there. readonly_root is tri-state: unset inherits a read-only root, and an explicit false is the only way to ask for a writable one.',
+    sandboxNetworkTitle: 'Network modes',
+    colSandboxMode: 'Mode',
+    sandboxNetworkNoneDesc:
+      'No interface at all. An empty or unrecognised value becomes this too, because a typo must not turn into network access.',
+    sandboxNetworkAllowlistDesc:
+      'A host list, kept so existing records still parse. Executed as none: no provider filters hosts yet, so neither backend grants connectivity for it.',
+    sandboxNetworkBridgeDesc:
+      "A NAT'd interface with outbound access and no route in. A container gets its own bridge; bubblewrap shares the host's network namespace.",
+    sandboxNetworkPlatformDesc:
+      "Whatever the host runtime calls its default. A container gets the daemon's bridge; bubblewrap shares the host network.",
 
     conceptsBody:
       'agenthub registers five kinds of resource plus a custom lane, then runs them over A2A. Every call resolves to one resource, produces one task, and reports one health value that it actually measured.',
@@ -271,6 +286,18 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: '托管运行时（E2B、Daytona、CubeSandbox、OpenHands）经声明式模板接入，不编译任何厂商 SDK。',
     sandboxLayerRemoteDesc: '你接入的执行节点——自己机器上的 agentbuddy。服务端投递任务，节点在自己的根目录与白名单内执行。',
     sandboxLayerNoneDesc: 'off 拒绝一切执行。什么都不跑，控制台如实显示而不会降级。',
+    sandboxPolicyTitle: '资源执行策略',
+    sandboxPolicyBody:
+      '会执行东西的资源可以用 kind_config.sandbox 收窄实例默认值。每个字段都可选：留空即继承运维的设定，所以资源能调低上限，却不会因为省略而抬高。校验发生在保存记录时，而不是任务第一次撞上它时。',
+    sandboxPolicyNote:
+      'network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发放连通性；egress_allowlist 只是记下资源希望访问的主机，在出网代理落地之前一律按 none 执行，因为接受这个取值不能变成一层并不存在的过滤。readonly_root 是三态：不写即继承只读根，只有显式 false 才是申请可写的方式。',
+    sandboxNetworkTitle: '网络模式',
+    colSandboxMode: '模式',
+    sandboxNetworkNoneDesc: '完全没有网络接口。未设置或无法识别的取值也归到这里，因为拼错不能变成放行。',
+    sandboxNetworkAllowlistDesc:
+      '一份主机清单，保留它是为了让存量记录仍能解析。实际按 none 执行：目前没有任何 provider 做主机过滤，两个后端都不为它发放连通性。',
+    sandboxNetworkBridgeDesc: 'NAT 出去的接口，只能出不能进。容器拿到自己的 bridge；bubblewrap 直接共享宿主网络命名空间。',
+    sandboxNetworkPlatformDesc: '宿主运行时所谓的默认网络。容器取守护进程的 bridge；bubblewrap 直接共享宿主网络。',
 
     conceptsBody:
       'agenthub 登记五类资源外加一个自定义通道，再通过 A2A 调用它们。每次调用都会定位到一个资源、产生一个任务，并上报一个它真正实测过的健康值。',
@@ -485,6 +512,18 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: '託管執行環境（E2B、Daytona、CubeSandbox、OpenHands）經宣告式樣板接入，不編譯任何廠商 SDK。',
     sandboxLayerRemoteDesc: '你接入的執行節點——自己機器上的 agentbuddy。伺服器投遞任務，節點在自己的根目錄與白名單內執行。',
     sandboxLayerNoneDesc: 'off 拒絕一切執行。什麼都不跑，主控台如實顯示而不會降級。',
+    sandboxPolicyTitle: '資源執行策略',
+    sandboxPolicyBody:
+      '會執行東西的資源可以用 kind_config.sandbox 收窄執行個體預設值。每個欄位都可選：留空即繼承維運的設定，所以資源能調低上限，卻不會因為省略而抬高。驗證發生在儲存記錄時，而不是任務第一次撞上它時。',
+    sandboxPolicyNote:
+      'network 是唯一不承諾「能通」的欄位。只有 bridge 與 platform 發放連線能力；egress_allowlist 只是記下資源希望存取的主機，在出網代理落地之前一律以 none 執行，因為接受這個取值不能變成一層並不存在的過濾。readonly_root 是三態：不寫即繼承唯讀根，只有明確 false 才是申請可寫的方式。',
+    sandboxNetworkTitle: '網路模式',
+    colSandboxMode: '模式',
+    sandboxNetworkNoneDesc: '完全沒有網路介面。未設定或無法辨識的取值也歸到這裡，因為打錯字不能變成放行。',
+    sandboxNetworkAllowlistDesc:
+      '一份主機清單，保留它是為了讓既有記錄仍能解析。實際以 none 執行：目前沒有任何 provider 做過主機過濾，兩個後端都不為它發放連線。',
+    sandboxNetworkBridgeDesc: 'NAT 出去的介面，只能出不能進。容器拿到自己的 bridge；bubblewrap 則直接共用主機網路命名空間。',
+    sandboxNetworkPlatformDesc: '主機執行環境所謂的預設網路。容器取守護程序的 bridge；bubblewrap 直接共用主機網路。',
 
     conceptsBody:
       'agenthub 登錄五類資源外加一個自訂通道，再透過 A2A 呼叫它們。每次呼叫都會定位到一個資源、產生一個任務，並回報一個它真正實測過的健康值。',
@@ -699,6 +738,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'Un runtime alojado (E2B, Daytona, CubeSandbox, OpenHands) alcanzado con una plantilla declarativa: no se compila ningún SDK de proveedor.',
     sandboxLayerRemoteDesc: 'Un nodo que enrolaste: agentbuddy en tu propia máquina. El servidor encola un trabajo y el nodo lo corre dentro de su raíz y su lista.',
     sandboxLayerNoneDesc: 'off rechaza toda ejecución. No corre nada y la consola lo dice en vez de degradar.',
+    sandboxPolicyTitle: 'Política de ejecución del recurso',
+    sandboxPolicyBody:
+      'Un recurso que ejecuta algo puede estrechar el valor por defecto de la instancia mediante kind_config.sandbox. Todos los campos son opcionales: el campo ausente hereda lo que fijó el operador, así que un recurso puede bajar un límite pero nunca subirlo por omisión. El bloque se valida al guardar el registro, no cuando una tarea choca con él.',
+    sandboxPolicyNote:
+      'network es el único campo que no promete alcance. Solo bridge y platform entregan conectividad; egress_allowlist anota los hosts que el recurso desearía y se ejecuta como none hasta que exista un proxy de salida, porque aceptar el valor no debe convertirse en un filtro que no está. readonly_root tiene tres estados: sin definir hereda una raíz de solo lectura, y un false explícito es la única forma de pedir una escribible.',
+    sandboxNetworkTitle: 'Modos de conexión',
+    colSandboxMode: 'Modo',
+    sandboxNetworkNoneDesc:
+      'Ninguna interfaz. Es también lo que resulta de un valor vacío o desconocido: una errata no puede convertirse en acceso a la conexión.',
+    sandboxNetworkAllowlistDesc:
+      'Una lista de hosts, conservada para que los registros existentes sigan parseando. Se ejecuta como none: ningún proveedor filtra hosts todavía, así que ninguno de los dos backends concede conectividad por ella.',
+    sandboxNetworkBridgeDesc:
+      'Una interfaz NAT con salida y sin ruta de entrada. El contenedor recibe su propio bridge; bubblewrap comparte la conexión del host.',
+    sandboxNetworkPlatformDesc:
+      'Lo que el runtime del host llama su conexión por defecto. El contenedor toma el bridge del daemon; bubblewrap comparte la conexión del host.',
 
     conceptsBody:
       'agenthub registra cinco clases de recurso más un carril personalizado y los ejecuta sobre A2A. Cada llamada se resuelve en un recurso, produce una tarea y reporta un valor de salud que realmente midió.',
@@ -918,6 +972,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'Un runtime hébergé (E2B, Daytona, CubeSandbox, OpenHands) joint par un modèle déclaratif : aucun SDK d’éditeur n’est compilé.',
     sandboxLayerRemoteDesc: 'Un nœud que vous avez enrôlé — agentbuddy sur votre machine. Le serveur met un travail en file et le nœud l’exécute dans sa racine et sa liste.',
     sandboxLayerNoneDesc: 'off refuse toute exécution. Rien ne tourne, et la console le dit au lieu de se rabattre.',
+    sandboxPolicyTitle: 'Politique d’exécution de la ressource',
+    sandboxPolicyBody:
+      'Une ressource qui exécute quelque chose peut resserrer la valeur par défaut de l’instance via kind_config.sandbox. Tous les champs sont facultatifs : un champ absent hérite du réglage de l’exploitant, donc une ressource peut abaisser une limite mais jamais la relever par omission. Le bloc est validé à l’enregistrement, pas au moment où une tâche s’y heurte.',
+    sandboxPolicyNote:
+      'network est le seul champ qui ne promet pas d’accès. Seuls bridge et platform accordent de la connectivité ; egress_allowlist note les hôtes souhaités par la ressource et s’exécute comme none tant qu’aucun proxy de sortie n’existe, car accepter la valeur ne doit pas se transformer en filtre absent. readonly_root a trois états : non défini hérite d’une racine en lecture seule, et un false explicite est le seul moyen d’en demander une inscriptible.',
+    sandboxNetworkTitle: 'Modes réseau',
+    colSandboxMode: 'Mode réseau',
+    sandboxNetworkNoneDesc:
+      'Aucune interface. C’est aussi ce que devient une valeur vide ou inconnue : une faute de frappe ne doit pas ouvrir le réseau.',
+    sandboxNetworkAllowlistDesc:
+      'Une liste d’hôtes, conservée pour que les enregistrements existants restent analysables. Exécutée comme none : aucun fournisseur ne filtre encore les hôtes, donc aucun des deux moteurs n’accorde de connectivité pour elle.',
+    sandboxNetworkBridgeDesc:
+      'Une interface NAT sortante, sans route entrante. Le conteneur obtient son propre bridge ; bubblewrap partage l’espace de noms réseau de l’hôte.',
+    sandboxNetworkPlatformDesc:
+      'Ce que l’exécuteur de l’hôte appelle son réseau par défaut. Le conteneur prend le bridge du démon ; bubblewrap partage le réseau de l’hôte.',
 
     conceptsBody:
       'agenthub enregistre cinq types de ressource plus une voie personnalisée, puis les exécute via A2A. Chaque appel se résout en une ressource, produit une tâche et rapporte une valeur de santé qu’il a réellement mesurée.',
@@ -1137,6 +1206,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'Eine gehostete Laufzeit (E2B, Daytona, CubeSandbox, OpenHands) über eine deklarative Vorlage: kein Anbieter-SDK wird einkompiliert.',
     sandboxLayerRemoteDesc: 'Ein von dir angemeldeter Knoten — agentbuddy auf deinem Rechner. Der Server stellt einen Auftrag ein, der Knoten führt ihn in seiner Wurzel und Liste aus.',
     sandboxLayerNoneDesc: 'off lehnt jede Ausführung ab. Es läuft nichts, und die Konsole sagt das, statt sich zu beugen.',
+    sandboxPolicyTitle: 'Ausführungsrichtlinie der Ressource',
+    sandboxPolicyBody:
+      'Eine Ressource, die etwas ausführt, kann den Instanzstandard über kind_config.sandbox einengen. Jedes Feld ist optional: ein fehlendes Feld erbt die Einstellung des Betriebs, eine Ressource kann ein Limit also senken, durch Auslassen aber nie erhöhen. Der Block wird beim Speichern des Eintrags geprüft, nicht wenn eine Aufgabe darauf trifft.',
+    sandboxPolicyNote:
+      'network ist das einzige Feld, das keine Erreichbarkeit verspricht. Nur bridge und platform vergeben Konnektivität; egress_allowlist merkt sich die gewünschten Hosts und wird als none ausgeführt, bis es einen Egress-Proxy gibt – den Wert anzunehmen darf nicht zu einem Filter werden, den es nicht gibt. readonly_root hat drei Zustände: nicht gesetzt erbt ein schreibgeschütztes Root, nur ein ausdrückliches false fordert ein beschreibbares an.',
+    sandboxNetworkTitle: 'Netzwerkmodi',
+    colSandboxMode: 'Modus',
+    sandboxNetworkNoneDesc:
+      'Keine Schnittstelle. Dazu wird auch ein leerer oder unbekannter Wert: ein Tippfehler darf nicht zu Netzzugang werden.',
+    sandboxNetworkAllowlistDesc:
+      'Eine Hostliste, die bleibt, damit bestehende Einträge weiter parsen. Ausgeführt als none: noch kein Provider filtert Hosts, also vergibt keiner der beiden Backends dafür Konnektivität.',
+    sandboxNetworkBridgeDesc:
+      'Eine NAT-Schnittstelle nach außen, ohne Route nach innen. Der Container bekommt seine eigene Bridge; bubblewrap teilt den Netzwerk-Namespace des Hosts.',
+    sandboxNetworkPlatformDesc:
+      'Was die Host-Laufzeit ihr Standardnetz nennt. Der Container nimmt die Bridge des Daemons; bubblewrap teilt das Hostnetz.',
 
     conceptsBody:
       'agenthub registriert fünf Ressourcenarten plus eine eigene Spur und führt sie über A2A aus. Jeder Aufruf löst eine Ressource auf, erzeugt eine Aufgabe und meldet einen Gesundheitswert, den er wirklich gemessen hat.',
@@ -1356,6 +1440,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'Un runtime ospitato (E2B, Daytona, CubeSandbox, OpenHands) raggiunto con un modello dichiarativo: nessun SDK del fornitore viene compilato.',
     sandboxLayerRemoteDesc: 'Un nodo che hai registrato: agentbuddy sulla tua macchina. Il server accoda un lavoro e il nodo lo esegue nella propria radice e nel proprio elenco.',
     sandboxLayerNoneDesc: 'off rifiuta ogni esecuzione. Non gira nulla e la console lo dice invece di ripiegare.',
+    sandboxPolicyTitle: 'Criterio di esecuzione della risorsa',
+    sandboxPolicyBody:
+      'Una risorsa che esegue qualcosa può restringere il valore predefinito dell’istanza tramite kind_config.sandbox. Ogni campo è facoltativo: il campo assente eredita ciò che ha fissato chi gestisce, quindi una risorsa può abbassare un limite ma mai alzarlo per omissione. Il blocco viene validato al salvataggio, non quando un’attività lo incontra.',
+    sandboxPolicyNote:
+      'network è l’unico campo che non promette raggiungibilità. Solo bridge e platform concedono connettività; egress_allowlist annota gli host desiderati e viene eseguito come none finché non esisterà un proxy di uscita, perché accettare il valore non deve diventare un filtro che non c’è. readonly_root ha tre stati: non impostato eredita una radice in sola lettura, e un false esplicito è l’unico modo per chiederne una scrivibile.',
+    sandboxNetworkTitle: 'Modalità di rete',
+    colSandboxMode: 'Modalità',
+    sandboxNetworkNoneDesc:
+      'Nessuna interfaccia. È anche ciò in cui diventa un valore vuoto o sconosciuto: un refuso non deve trasformarsi in accesso alla rete.',
+    sandboxNetworkAllowlistDesc:
+      'Un elenco di host, mantenuto perché i record esistenti continuino a essere letti. Eseguito come none: nessun provider filtra ancora gli host, quindi nessuno dei due backend concede connettività per esso.',
+    sandboxNetworkBridgeDesc:
+      'Un’interfaccia NAT in uscita, senza rotte in ingresso. Il container ottiene la propria bridge; bubblewrap condivide il namespace di rete dell’host.',
+    sandboxNetworkPlatformDesc:
+      'Quella che il runtime dell’host chiama rete predefinita. Il container prende la bridge del daemon; bubblewrap condivide la rete dell’host.',
 
     conceptsBody:
       'agenthub registra cinque tipi di risorsa più una categoria personalizzata e li esegue tramite A2A. Ogni chiamata si risolve in una risorsa, produce un task e riporta un valore di salute che ha davvero misurato.',
@@ -1575,6 +1674,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'Облачная среда (E2B, Daytona, CubeSandbox, OpenHands) через декларативный шаблон: ни один SDK поставщика не вкомпилируется.',
     sandboxLayerRemoteDesc: 'Узел, который вы подключили, — agentbuddy на вашей машине. Сервер ставит задание в очередь, узел выполняет его в своём корне и по своему списку.',
     sandboxLayerNoneDesc: 'off отклоняет любое выполнение. Ничего не запускается, и консоль говорит это прямо, а не подставляет замену.',
+    sandboxPolicyTitle: 'Политика выполнения ресурса',
+    sandboxPolicyBody:
+      'Ресурс, который что-то выполняет, может сузить значение по умолчанию инстанса через kind_config.sandbox. Все поля необязательны: отсутствующее поле наследует настройку эксплуатации, поэтому ресурс может понизить лимит, но не поднять его умолчанием. Блок проверяется при сохранении записи, а не тогда, когда задача в него упрётся.',
+    sandboxPolicyNote:
+      'network — единственное поле, которое не обещает доступности. Связность дают только bridge и platform; egress_allowlist запоминает желаемые хосты и выполняется как none, пока не появится прокси выхода, потому что принятое значение не должно превращаться в фильтр, которого нет. readonly_root имеет три состояния: пусто — наследуется корень только для чтения, и только явный false запрашивает записываемый.',
+    sandboxNetworkTitle: 'Режимы сети',
+    colSandboxMode: 'Режим',
+    sandboxNetworkNoneDesc:
+      'Сетевого интерфейса нет вовсе. Сюда же попадает пустое или неизвестное значение: опечатка не должна становиться доступом в сеть.',
+    sandboxNetworkAllowlistDesc:
+      'Список хостов, сохранённый, чтобы старые записи продолжали разбираться. Выполняется как none: ни один провайдер пока не фильтрует хосты, поэтому ни один из двух бэкендов не даёт для него связности.',
+    sandboxNetworkBridgeDesc:
+      'Интерфейс с NAT наружу и без маршрута внутрь. Контейнер получает собственный bridge; bubblewrap делит сетевое пространство имён хоста.',
+    sandboxNetworkPlatformDesc:
+      'То, что среда хоста называет сетью по умолчанию. Контейнер берёт bridge демона; bubblewrap делит сеть хоста.',
 
     conceptsBody:
       'agenthub регистрирует пять видов ресурсов плюс собственную категорию и запускает их через A2A. Каждый вызов разрешается в один ресурс, создаёт одну задачу и сообщает значение состояния, которое действительно измерил.',
@@ -1794,6 +1908,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'ホスト型ランタイム（E2B、Daytona、CubeSandbox、OpenHands）を宣言的テンプレート経由で利用します。ベンダー SDK は組み込みません。',
     sandboxLayerRemoteDesc: 'あなたが登録したノード、つまり自分のマシン上の agentbuddy です。サーバーがジョブを積み、ノードが自分のルートと許可リストの中で実行します。',
     sandboxLayerNoneDesc: 'off はあらゆる実行を拒否します。何も走らず、コンソールは代替に落ちずにそのまま伝えます。',
+    sandboxPolicyTitle: 'リソースの実行ポリシー',
+    sandboxPolicyBody:
+      '何かを実行するリソースは kind_config.sandbox でインスタンス既定値を狭められます。各フィールドは任意で、省略した項目は運用側の設定を継承します。つまりリソースは上限を下げられても、省略によって上げることはできません。検証は保存時に行われ、タスクが初めて突き当たったときではありません。',
+    sandboxPolicyNote:
+      'network は「到達できる」を約束しない唯一のフィールドです。接続性を与えるのは bridge と platform だけです。egress_allowlist は希望するホストを記録するだけで、外向きプロキシができるまでは none として実行されます。値を受け付けることが、存在しないフィルタに化けてはいけないからです。readonly_root は三状態で、未設定なら読み取り専用のルートを継承し、明示的な false だけが書き込み可能を要求します。',
+    sandboxNetworkTitle: 'ネットワークモード',
+    colSandboxMode: 'モード',
+    sandboxNetworkNoneDesc:
+      'ネットワークインターフェースは一切ありません。空値や未知の値もここに落ちます。打ち間違いが通信の許可になってはいけないからです。',
+    sandboxNetworkAllowlistDesc:
+      'ホストの一覧で、既存レコードが引き続き解釈できるように残しています。実行は none です。ホストを絞り込むプロバイダはまだなく、どちらのバックエンドもこれに対して接続性を与えません。',
+    sandboxNetworkBridgeDesc:
+      '外向きだけの NAT インターフェースで、内向きの経路はありません。コンテナは自前の bridge を得て、bubblewrap はホストのネットワーク名前空間を共有します。',
+    sandboxNetworkPlatformDesc:
+      'ホストのランタイムが既定ネットワークと呼ぶものです。コンテナはデーモンの bridge を使い、bubblewrap はホストのネットワークを共有します。',
 
     conceptsBody:
       'agenthub は 5 種類のリソースとカスタム区分を登録し、A2A で実行します。各呼び出しは 1 つのリソースに解決され、1 つのタスクを生成し、実際に測定した 1 つの健全性値を報告します。',
@@ -2013,6 +2142,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: '호스팅 런타임(E2B, Daytona, CubeSandbox, OpenHands)을 선언적 템플릿으로 연결합니다. 벤더 SDK는 컴파일하지 않습니다.',
     sandboxLayerRemoteDesc: '직접 등록한 노드, 즉 내 컴퓨터의 agentbuddy입니다. 서버가 작업을 넣으면 노드가 자기 루트와 허용 목록 안에서 실행합니다.',
     sandboxLayerNoneDesc: 'off 는 모든 실행을 거부합니다. 아무것도 돌지 않으며 콘솔은 대체하지 않고 그대로 알립니다.',
+    sandboxPolicyTitle: '리소스 실행 정책',
+    sandboxPolicyBody:
+      '무언가를 실행하는 리소스는 kind_config.sandbox로 인스턴스 기본값을 좁힐 수 있습니다. 모든 필드는 선택 사항이고 비어 있는 필드는 운영자가 정한 값을 상속합니다. 즉 리소스는 상한을 낮출 수는 있어도 생략으로 높일 수는 없습니다. 검증은 작업이 처음 부딪힐 때가 아니라 레코드를 저장할 때 이루어집니다.',
+    sandboxPolicyNote:
+      'network는 “연결된다”를 약속하지 않는 유일한 필드입니다. 연결성을 주는 것은 bridge와 platform뿐입니다. egress_allowlist는 원하는 호스트를 적어 둘 뿐이며, 이그레스 프록시가 생기기 전까지는 none으로 실행됩니다. 값을 받아들인다는 이유로 없는 필터가 되어서는 안 되기 때문입니다. readonly_root는 세 가지 상태로, 비우면 읽기 전용 루트를 상속하고 명시적인 false만이 쓰기 가능을 요청합니다.',
+    sandboxNetworkTitle: '네트워크 모드',
+    colSandboxMode: '모드',
+    sandboxNetworkNoneDesc:
+      '네트워크 인터페이스가 전혀 없습니다. 비어 있거나 알 수 없는 값도 여기로 옵니다. 오타가 통신 허용이 되어서는 안 되기 때문입니다.',
+    sandboxNetworkAllowlistDesc:
+      '기존 레코드가 계속 해석되도록 남겨 둔 호스트 목록입니다. 실행은 none입니다. 아직 호스트를 걸러내는 프로바이더가 없어 두 백엔드 모두 이 값으로 연결성을 주지 않습니다.',
+    sandboxNetworkBridgeDesc:
+      '나가는 방향만 있는 NAT 인터페이스이고 들어오는 경로는 없습니다. 컨테이너는 자체 bridge를 받고, bubblewrap은 호스트의 네트워크 네임스페이스를 공유합니다.',
+    sandboxNetworkPlatformDesc:
+      '호스트 런타임이 기본 네트워크라고 부르는 것입니다. 컨테이너는 데몬의 bridge를 쓰고, bubblewrap은 호스트 네트워크를 공유합니다.',
 
     conceptsBody:
       'agenthub는 다섯 종류의 리소스와 사용자 정의 구분을 등록한 뒤 A2A로 실행합니다. 모든 호출은 하나의 리소스로 해석되어 하나의 태스크를 만들고, 실제로 측정한 하나의 상태 값을 보고합니다.',
@@ -2232,6 +2376,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'Um runtime hospedado (E2B, Daytona, CubeSandbox, OpenHands) alcançado por um modelo declarativo: nenhum SDK de fornecedor é compilado.',
     sandboxLayerRemoteDesc: 'Um nó que você registrou: agentbuddy na sua máquina. O servidor enfileira um trabalho e o nó o executa dentro da própria raiz e lista.',
     sandboxLayerNoneDesc: 'off recusa toda execução. Nada roda, e o console diz isso em vez de recuar.',
+    sandboxPolicyTitle: 'Política de execução do recurso',
+    sandboxPolicyBody:
+      'Um recurso que executa algo pode estreitar o padrão da instância através de kind_config.sandbox. Todos os campos são opcionais: o campo ausente herda o que o operador definiu, então um recurso pode baixar um limite mas nunca aumentá-lo por omissão. O bloco é validado ao guardar o registo, não quando uma tarefa esbarra nele.',
+    sandboxPolicyNote:
+      'network é o único campo que não promete alcance. Só bridge e platform concedem conectividade; egress_allowlist anota os hosts desejados e é executado como none até existir um proxy de saída, porque aceitar o valor não pode transformar-se num filtro que não existe. readonly_root tem três estados: sem valor herda uma raiz só de leitura, e um false explícito é a única forma de pedir uma escrevível.',
+    sandboxNetworkTitle: 'Modos de rede',
+    colSandboxMode: 'Modo',
+    sandboxNetworkNoneDesc:
+      'Nenhuma interface. É também onde cai um valor vazio ou desconhecido: um erro de escrita não pode tornar-se acesso à rede.',
+    sandboxNetworkAllowlistDesc:
+      'Uma lista de hosts, mantida para que registos existentes continuem a ser lidos. Executado como none: nenhum fornecedor filtra hosts ainda, por isso nenhum dos dois backends concede conectividade por ele.',
+    sandboxNetworkBridgeDesc:
+      'Uma interface NAT de saída, sem rota de entrada. O contentor recebe a sua própria bridge; o bubblewrap partilha o espaço de nomes de rede do anfitrião.',
+    sandboxNetworkPlatformDesc:
+      'Aquilo a que o runtime do anfitrião chama rede predefinida. O contentor usa a bridge do daemon; o bubblewrap partilha a rede do anfitrião.',
 
     conceptsBody:
       'O agenthub registra cinco tipos de recurso mais uma categoria personalizada e os executa via A2A. Cada chamada se resolve em um recurso, produz uma tarefa e reporta um valor de saúde que realmente mediu.',
@@ -2451,6 +2610,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'بيئة مستضافة (E2B، Daytona، CubeSandbox، OpenHands) تُبلغ بقالب تصريحي: لا تُدمَج أي حزمة SDK للمزوّد.',
     sandboxLayerRemoteDesc: 'عقدة سجّلتها أنت — agentbuddy على حاسوبك. يضع الخادم مهمة في الطابور وتنفّذها العقدة داخل جذرها وقائمتها.',
     sandboxLayerNoneDesc: 'off يرفض كل تنفيذ. لا شيء يعمل، ولوحة التحكّم تقول ذلك بدل أن تتراجع.',
+    sandboxPolicyTitle: 'سياسة تنفيذ المورد',
+    sandboxPolicyBody:
+      'المورد الذي ينفّذ شيئًا يمكنه تضييق القيمة الافتراضية للنُسخة عبر kind_config.sandbox. كل الحقول اختيارية: الحقل الغائب يرث ما ضبطه المشغّل، أي أن المورد يستطيع خفض حدّ لكنه لا يستطيع رفعه بالإغفال. يُتحقّق من الكتلة عند حفظ السجل، لا عندما تصطدم بها مهمة لأول مرة.',
+    sandboxPolicyNote:
+      'network هو الحقل الوحيد الذي لا يَعِد بالوصول. لا يمنح الاتصال إلا bridge وplatform؛ أما egress_allowlist فيسجّل المضيفين المرغوبة ويُنفَّذ بوصفه none حتى يوجد وكيل خروج، لأن قبول القيمة يجب ألا يتحوّل إلى مُرشِّح غير موجود. وreadonly_root ثلاثيّ الحالات: تركه فارغًا يرث جذرًا للقراءة فقط، وfalse الصريح هو السبيل الوحيد لطلب جذر قابل للكتابة.',
+    sandboxNetworkTitle: 'أنماط الشبكة',
+    colSandboxMode: 'النمط',
+    sandboxNetworkNoneDesc:
+      'لا واجهة شبكة إطلاقًا. وإلى هنا أيضًا تؤول القيمة الفارغة أو المجهولة، لأن خطأً مطبعيًا يجب ألا يصبح إذنًا بالشبكة.',
+    sandboxNetworkAllowlistDesc:
+      'قائمة مضيفين تُحفظ كي تبقى السجلات القديمة قابلة للقراءة. تُنفَّذ بوصفها none: لا يوجد مزوّد يرشّح المضيفين بعد، لذا لا تمنح أي من الخلفيتين اتصالًا من أجلها.',
+    sandboxNetworkBridgeDesc:
+      'واجهة NAT للخارج دون مسار للداخل. تحصل الحاويات على جسرها الخاص، أما bubblewrap فيشارك فضاء أسماء شبكة المضيف.',
+    sandboxNetworkPlatformDesc:
+      'ما تسمّيه بيئة المضيف شبكتها الافتراضية. تأخذ الحاوية جسر الخدمة، ويشارك bubblewrap شبكة المضيف.',
 
     conceptsBody:
       'يسجّل agenthub خمسة أنواع من الموارد إضافةً إلى فئة مخصّصة، ثم يشغّلها عبر A2A. تُحَل كل استدعاءة إلى مورد واحد، وتنتج مهمة واحدة، وتُبلّغ عن قيمة حالة قاسها فعلياً.',
@@ -2670,6 +2844,21 @@ export const docsCopy = {
     sandboxLayerPlatformDesc: 'होस्टेड रनटाइम (E2B, Daytona, CubeSandbox, OpenHands) घोषणात्मक टेम्पलेट से जुड़ता है: कोई विक्रेता SDK संकलित नहीं होता।',
     sandboxLayerRemoteDesc: 'आपका जोड़ा नोड — अपनी मशीन पर agentbuddy। सर्वर कार्य कतार में डालता है और नोड उसे अपने रूट और अनुमति-सूची के भीतर चलाता है।',
     sandboxLayerNoneDesc: 'off हर निष्पादन अस्वीकार करता है। कुछ नहीं चलता, और कंसोल पीछे न हटकर यही बताता है।',
+    sandboxPolicyTitle: 'संसाधन निष्पादन नीति',
+    sandboxPolicyBody:
+      'जो संसाधन कुछ चलाता है, वह kind_config.sandbox के ज़रिए इंस्टेंस के डिफ़ॉल्ट को सँकरा कर सकता है। हर फ़ील्ड वैकल्पिक है: छूटा हुआ फ़ील्ड ऑपरेटर की सेटिंग विरासत में लेता है, इसलिए संसाधन सीमा घटा सकता है पर छोड़कर कभी बढ़ा नहीं सकता। जाँच रिकॉर्ड सहेजते समय होती है, तब नहीं जब कोई कार्य पहली बार उससे टकराए।',
+    sandboxPolicyNote:
+      'network ही एकमात्र फ़ील्ड है जो पहुँच का वादा नहीं करता। कनेक्टिविटी केवल bridge और platform देते हैं; egress_allowlist सिर्फ़ मनचाहे होस्ट दर्ज करता है और ईग्रेस प्रॉक्सी बनने तक none की तरह चलता है, क्योंकि मान स्वीकार करना ऐसा फ़िल्टर नहीं बन सकता जो मौजूद ही न हो। readonly_root तीन अवस्थाओं वाला है: खाली छोड़ने पर केवल-पढ़ने योग्य रूट विरासत में मिलता है, और स्पष्ट false ही लिखने योग्य रूट माँगने का एकमात्र तरीका है।',
+    sandboxNetworkTitle: 'नेटवर्क मोड',
+    colSandboxMode: 'मोड',
+    sandboxNetworkNoneDesc:
+      'कोई नेटवर्क इंटरफ़ेस नहीं। खाली या अपरिचित मान भी यहीं आते हैं, क्योंकि टाइपिंग की गलती नेटवर्क की अनुमति नहीं बन सकती।',
+    sandboxNetworkAllowlistDesc:
+      'होस्ट की सूची, जो इसलिए रखी गई है कि पुराने रिकॉर्ड पढ़े जा सकें। इसे none की तरह चलाया जाता है: अभी कोई प्रोवाइडर होस्ट फ़िल्टर नहीं करता, इसलिए दोनों बैकएंड इसके लिए कनेक्टिविटी नहीं देते।',
+    sandboxNetworkBridgeDesc:
+      'बाहर जाने वाला NAT इंटरफ़ेस, अंदर आने का कोई रास्ता नहीं। कंटेनर को अपना bridge मिलता है; bubblewrap होस्ट का नेटवर्क नेमस्पेस साझा करता है।',
+    sandboxNetworkPlatformDesc:
+      'जिसे होस्ट रनटाइम अपना डिफ़ॉल्ट नेटवर्क कहता है। कंटेनर डेमॉन का bridge लेता है; bubblewrap होस्ट का नेटवर्क साझा करता है।',
 
     conceptsBody:
       'agenthub पाँच प्रकार के संसाधन और एक कस्टम श्रेणी पंजीकृत करता है, फिर उन्हें A2A पर चलाता है। हर कॉल एक संसाधन पर सुलझती है, एक टास्क बनाती है, और एक स्वास्थ्य मान बताती है जिसे उसने वास्तव में मापा है।',

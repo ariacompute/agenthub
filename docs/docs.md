@@ -359,6 +359,48 @@ Every agent action that touches the outside world runs inside a leased environme
 | `remote` | A node you enrolled — agentbuddy on your own machine. The server queues a job and the node runs it inside its own root and allowlist. |
 | `none` | off refuses every execution. Nothing runs, and the console says so instead of falling back. |
 
+### Resource execution policy
+
+A resource that runs something can narrow the instance default through kind_config.sandbox. Every field is optional: an absent field inherits what the operator set, so a resource can lower a limit but never raise one by omission. The block is validated when the record is saved, not when a task first runs into it.
+
+`kind_config.sandbox` · `agent` · `mcp` · `cli`
+
+```json
+{
+  "kind": "cli",
+  "name": "ruff",
+  "kind_config": {
+    "sandbox": {
+      "provider": "docker",
+      "runtime": "runsc",
+      "image": "python:3.12-slim",
+      "work_dir": "/work",
+      "readonly_root": false,
+      "network": "none",
+      "cpu": 1.5,
+      "memory_mb": 512,
+      "pids_limit": 128,
+      "timeout_ms": 30000,
+      "max_output_bytes": 262144,
+      "env_allowlist": ["PATH", "HOME"],
+      "args_policy": "prefix",
+      "args_allowlist": ["--check", "--select"]
+    }
+  }
+}
+```
+
+Network is the one field that is not a promise of reach. Only bridge and platform hand out connectivity; egress_allowlist records the hosts a resource would like and is executed as none until an egress proxy exists, because accepting the value must not turn into a filter that is not there. readonly_root is tri-state: unset inherits a read-only root, and an explicit false is the only way to ask for a writable one.
+
+### Network modes
+
+| Mode | Boundary |
+| --- | --- |
+| `none` | No interface at all. An empty or unrecognised value becomes this too, because a typo must not turn into network access. |
+| `egress_allowlist` | A host list, kept so existing records still parse. Executed as none: no provider filters hosts yet, so neither backend grants connectivity for it. |
+| `bridge` | A NAT'd interface with outbound access and no route in. A container gets its own bridge; bubblewrap shares the host's network namespace. |
+| `platform` | Whatever the host runtime calls its default. A container gets the daemon's bridge; bubblewrap shares the host network. |
+
 ## Errors
 
 Failures answer with a machine-readable code. Grouped here by the HTTP status they map to.

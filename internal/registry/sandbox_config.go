@@ -22,7 +22,10 @@ type SandboxConfig struct {
 	WorkDir string `json:"work_dir,omitempty"`
 	// ReadonlyRoot defaults to true; an explicit false is the only opt-out.
 	ReadonlyRoot *bool `json:"readonly_root,omitempty"`
-	// Network is none | egress_allowlist | bridge. Empty means none.
+	// Network is none | egress_allowlist | bridge | platform. Empty means none.
+	// egress_allowlist is accepted and then executed as none: no provider filters
+	// hosts yet (see sandbox.GrantsNetwork), so a resource that names it gets no
+	// network rather than the host's whole namespace.
 	Network        string   `json:"network,omitempty"`
 	EgressAllow    []string `json:"egress_allowlist,omitempty"`
 	CPU            float64  `json:"cpu,omitempty"`

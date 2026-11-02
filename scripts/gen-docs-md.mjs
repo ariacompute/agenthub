@@ -23,6 +23,9 @@ import {
   recordStatuses,
   resourceKinds,
   sandboxLayers,
+  sandboxNetworkModes,
+  sandboxPolicyKinds,
+  sandboxPolicySample,
   taskStates,
 } from '../web/src/lib/docs-content.js'
 import { docsCopy } from '../web/src/lib/copy/docs-copy.js'
@@ -231,6 +234,30 @@ function render(lang) {
     table(
       [t(dict, 'colSandboxLayer'), t(dict, 'colSandboxBoundary')],
       sandboxLayers.map((entry) => [`\`${entry.layer}\``, t(dict, entry.descKey)]),
+    ),
+    '',
+  )
+
+  // The resource-level policy: the kinds stay verbatim (they are wire values),
+  // and the sample is the exact JSON the register drawer writes.
+  out.push(
+    `### ${t(dict, 'sandboxPolicyTitle')}`,
+    '',
+    t(dict, 'sandboxPolicyBody'),
+    '',
+    `\`kind_config.sandbox\` · ${sandboxPolicyKinds.map((kind) => `\`${kind}\``).join(' · ')}`,
+    '',
+    '```json',
+    sandboxPolicySample,
+    '```',
+    '',
+    t(dict, 'sandboxPolicyNote'),
+    '',
+    `### ${t(dict, 'sandboxNetworkTitle')}`,
+    '',
+    table(
+      [t(dict, 'colSandboxMode'), t(dict, 'colSandboxBoundary')],
+      sandboxNetworkModes.map((mode) => [`\`${mode.mode}\``, t(dict, mode.descKey)]),
     ),
     '',
   )

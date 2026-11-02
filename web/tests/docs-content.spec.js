@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { docsSections, endpointGroups, httpEndpoints, sandboxLayers } from '../src/lib/docs-content.js'
+import {
+  docsSections,
+  endpointGroups,
+  httpEndpoints,
+  sandboxLayers,
+  sandboxNetworkModes,
+  sandboxPolicyKinds,
+  sandboxPolicySample,
+} from '../src/lib/docs-content.js'
 import { docsCopy } from '../src/lib/copy/docs-copy.js'
 
 // The /docs screen renders keys, not prose: a key with no translation renders its
@@ -43,6 +51,61 @@ describe('docs content', () => {
 
   it('keeps the sandbox section among the rendered sections', () => {
     expect(docsSections.map((section) => section.id)).toContain('sandbox')
+  })
+
+  it('resolves the resource policy and network-mode prose in every language', () => {
+    for (const lang of LANGS) {
+      const dict = resolve(lang)
+      for (const key of [
+        'sandboxPolicyTitle',
+        'sandboxPolicyBody',
+        'sandboxPolicyNote',
+        'sandboxNetworkTitle',
+        'colSandboxMode',
+      ]) {
+        expect(dict[key], `${lang}.${key} missing`).toBeTruthy()
+      }
+      for (const mode of sandboxNetworkModes) {
+        expect(dict[mode.descKey], `${lang}.${mode.descKey} missing`).toBeTruthy()
+      }
+    }
+  })
+
+  it('lists the network modes from "no network" outwards', () => {
+    // Order is part of the contract: the console renders them in this order, and
+    // the reader must meet the default before any mode that opens a path.
+    expect(sandboxNetworkModes.map((mode) => mode.mode)).toEqual([
+      'none',
+      'egress_allowlist',
+      'bridge',
+      'platform',
+    ])
+  })
+
+  it('keeps egress_allowlist documented as executed like none', () => {
+    // The value stays in the vocabulary so old records parse, but no provider
+    // filters hosts. If this sentence ever loses the "none" fact, the docs would
+    // be advertising a boundary the code does not draw.
+    const allowlist = sandboxNetworkModes.find((mode) => mode.mode === 'egress_allowlist')
+    expect(docsCopy.en[allowlist.descKey]).toContain('none')
+    expect(docsCopy.en.sandboxPolicyNote).toContain('none')
+  })
+
+  it('documents the policy block only for the kinds that execute', () => {
+    expect(sandboxPolicyKinds).toEqual(['agent', 'mcp', 'cli'])
+  })
+
+  it('shows a policy sample whose keys are the wire names', () => {
+    // The sample is the shape the register drawer writes and the server parses.
+    // camelCase here would document a block ValidateKind cannot read.
+    const sample = JSON.parse(sandboxPolicySample)
+    const policy = sample.kind_config.sandbox
+    expect(Object.keys(policy).length).toBeGreaterThan(0)
+    for (const key of Object.keys(policy)) {
+      expect(key, `${key} is not snake_case`).toMatch(/^[a-z][a-z0-9_]*$/)
+    }
+    expect(policy.network).toBe('none')
+    expect(sandboxPolicyKinds).toContain(sample.kind)
   })
 
   it('resolves every endpoint description and noun in every language', () => {

@@ -359,6 +359,48 @@ API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证�
 | `remote` | 你接入的执行节点——自己机器上的 agentbuddy。服务端投递任务，节点在自己的根目录与白名单内执行。 |
 | `none` | off 拒绝一切执行。什么都不跑，控制台如实显示而不会降级。 |
 
+### 资源执行策略
+
+会执行东西的资源可以用 kind_config.sandbox 收窄实例默认值。每个字段都可选：留空即继承运维的设定，所以资源能调低上限，却不会因为省略而抬高。校验发生在保存记录时，而不是任务第一次撞上它时。
+
+`kind_config.sandbox` · `agent` · `mcp` · `cli`
+
+```json
+{
+  "kind": "cli",
+  "name": "ruff",
+  "kind_config": {
+    "sandbox": {
+      "provider": "docker",
+      "runtime": "runsc",
+      "image": "python:3.12-slim",
+      "work_dir": "/work",
+      "readonly_root": false,
+      "network": "none",
+      "cpu": 1.5,
+      "memory_mb": 512,
+      "pids_limit": 128,
+      "timeout_ms": 30000,
+      "max_output_bytes": 262144,
+      "env_allowlist": ["PATH", "HOME"],
+      "args_policy": "prefix",
+      "args_allowlist": ["--check", "--select"]
+    }
+  }
+}
+```
+
+network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发放连通性；egress_allowlist 只是记下资源希望访问的主机，在出网代理落地之前一律按 none 执行，因为接受这个取值不能变成一层并不存在的过滤。readonly_root 是三态：不写即继承只读根，只有显式 false 才是申请可写的方式。
+
+### 网络模式
+
+| 模式 | 边界 |
+| --- | --- |
+| `none` | 完全没有网络接口。未设置或无法识别的取值也归到这里，因为拼错不能变成放行。 |
+| `egress_allowlist` | 一份主机清单，保留它是为了让存量记录仍能解析。实际按 none 执行：目前没有任何 provider 做主机过滤，两个后端都不为它发放连通性。 |
+| `bridge` | NAT 出去的接口，只能出不能进。容器拿到自己的 bridge；bubblewrap 直接共享宿主网络命名空间。 |
+| `platform` | 宿主运行时所谓的默认网络。容器取守护进程的 bridge；bubblewrap 直接共享宿主网络。 |
+
 ## 错误
 
 失败时返回机器可读的错误码。这里按它们映射到的 HTTP 状态码分组。

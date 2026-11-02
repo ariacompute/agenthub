@@ -34,6 +34,53 @@ export const sandboxLayers = [
   { layer: 'none', descKey: 'sandboxLayerNoneDesc' },
 ]
 
+/**
+ * The kinds that edit `kind_config.sandbox`, in the order the register drawer
+ * offers them. A model endpoint and a skill manual execute nothing, so a policy
+ * block there would draw a boundary that does not exist.
+ */
+export const sandboxPolicyKinds = ['agent', 'mcp', 'cli']
+
+/**
+ * Network modes as `GrantsNetwork` decides them.
+ *
+ * `mode` is the wire value and renders verbatim. Only `bridge` and `platform`
+ * hand out connectivity; `egress_allowlist` stays in the vocabulary so records
+ * written against the earlier docs still parse, but it is executed as `none`
+ * until an egress proxy exists. That asymmetry is the reason this table is not
+ * "the four ways to get network".
+ */
+export const sandboxNetworkModes = [
+  { mode: 'none', descKey: 'sandboxNetworkNoneDesc' },
+  { mode: 'egress_allowlist', descKey: 'sandboxNetworkAllowlistDesc' },
+  { mode: 'bridge', descKey: 'sandboxNetworkBridgeDesc' },
+  { mode: 'platform', descKey: 'sandboxNetworkPlatformDesc' },
+]
+
+/** A resource-level policy written the way the drawer writes it: snake_case. */
+export const sandboxPolicySample = `{
+  "kind": "cli",
+  "name": "ruff",
+  "kind_config": {
+    "sandbox": {
+      "provider": "docker",
+      "runtime": "runsc",
+      "image": "python:3.12-slim",
+      "work_dir": "/work",
+      "readonly_root": false,
+      "network": "none",
+      "cpu": 1.5,
+      "memory_mb": 512,
+      "pids_limit": 128,
+      "timeout_ms": 30000,
+      "max_output_bytes": 262144,
+      "env_allowlist": ["PATH", "HOME"],
+      "args_policy": "prefix",
+      "args_allowlist": ["--check", "--select"]
+    }
+  }
+}`
+
 /** Six resource lanes. `kind` renders through enumLabel, never translated here. */
 export const resourceKinds = [
   { kind: 'model', descKey: 'kindModelDesc' },

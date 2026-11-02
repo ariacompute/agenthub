@@ -20,6 +20,9 @@ import {
   recordStatuses,
   resourceKinds,
   sandboxLayers,
+  sandboxNetworkModes,
+  sandboxPolicyKinds,
+  sandboxPolicySample,
   taskStates,
 } from '../lib/docs-content.js'
 
@@ -28,6 +31,9 @@ const { t } = useCopy('docs')
 
 const active = ref(docsSections[0].id)
 const open = reactive({})
+
+/** Where the block lives, and which kinds accept it. Wire values, untranslated. */
+const policyCaption = `kind_config.sandbox · ${sandboxPolicyKinds.join(' / ')}`
 
 /** Endpoint rows are templated: only the verb needs a noun substituted in. */
 function descFor(endpoint) {
@@ -283,6 +289,35 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
                 <tr v-for="entry in sandboxLayers" :key="entry.layer">
                   <td class="mono">{{ entry.layer }}</td>
                   <td>{{ t(entry.descKey) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4>{{ t('sandboxPolicyTitle') }}</h4>
+          <p>{{ t('sandboxPolicyBody') }}</p>
+          <!-- The caption carries the kinds that execute, as wire values: only
+               these three accept a block, so naming them here is the honest
+               scope of the sample below it. -->
+          <div class="shape">
+            <div class="shape-title mono">{{ policyCaption }}</div>
+            <pre class="code mono">{{ sandboxPolicySample }}</pre>
+          </div>
+          <p class="note">{{ t('sandboxPolicyNote') }}</p>
+
+          <h4>{{ t('sandboxNetworkTitle') }}</h4>
+          <div class="table-scroll">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>{{ t('colSandboxMode') }}</th>
+                  <th>{{ t('colSandboxBoundary') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="mode in sandboxNetworkModes" :key="mode.mode">
+                  <td class="mono">{{ mode.mode }}</td>
+                  <td>{{ t(mode.descKey) }}</td>
                 </tr>
               </tbody>
             </table>
