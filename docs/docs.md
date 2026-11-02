@@ -213,6 +213,8 @@ The control plane the console itself talks to. Each route needs a session cookie
 | `GET` | `/api/backups/{id}/download` | `backups:manage` — Manage database checkpoints | Download one checkpoint archive. | — | `application/gzip` |
 | `POST` | `/api/backups/{id}/restore` | `backups:manage` — Manage database checkpoints | Restore a checkpoint; confirm echoes its id. | `{ confirm } — must echo the checkpoint id` | `{ checkpoint }` |
 
+A checkpoint carries application tables only: the catalogue and the append-only audit ledger are neither dumped nor truncated, so a rewind keeps both the archive’s own record and the trail it restores around. The built-in engine empties the schema with one TRUNCATE, so a table guarded by a BEFORE TRUNCATE trigger is refused with backup_table_guarded — use the pg_dump engine where such a table exists.
+
 ### API keys
 
 | Method | Path | Permission | What it does | Request | Response |

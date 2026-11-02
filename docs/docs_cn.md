@@ -213,6 +213,8 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `GET` | `/api/backups/{id}/download` | `backups:manage` — 管理数据库检查点 | 下载一个检查点归档。 | — | `application/gzip` |
 | `POST` | `/api/backups/{id}/restore` | `backups:manage` — 管理数据库检查点 | 恢复一个检查点；confirm 需回显其 id。 | `{ confirm } — must echo the checkpoint id` | `{ checkpoint }` |
 
+检查点只携带应用表：检查点目录与只追加审计账本既不导出也不被清空，因此一次回退既保留归档自身的记录，也保留它周围的审计轨迹。内置引擎以一条 TRUNCATE 清空 schema，所以带 BEFORE TRUNCATE 触发器的表会被 backup_table_guarded 拒绝——存在这类表时请改用 pg_dump 引擎。
+
 ### API 密钥
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |

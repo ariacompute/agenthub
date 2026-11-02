@@ -111,6 +111,13 @@ describe('actorLabel', () => {
   it('falls back to the bare id when no label was resolved', () => {
     expect(actorLabel({ actorId: 'u1' }, t)).toBe('u1')
   })
+
+  it('survives a caller that hands it no translator', () => {
+    // The view always passes one; the default exists so a caller that does not
+    // prints the key instead of "undefined".
+    expect(actorLabel({})).toBe('anonymous')
+    expect(actorLabel({ actorId: 'u1' })).toBe('u1')
+  })
 })
 
 describe('shortId', () => {

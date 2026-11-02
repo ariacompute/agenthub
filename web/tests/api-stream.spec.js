@@ -106,6 +106,21 @@ describe('streamTask', () => {
     expect(logged).toHaveBeenCalled()
   })
 
+  it('skips a frame with no data line and passes an unenveloped payload through', async () => {
+    // An event-only frame (a keep-alive, a comment) carries nothing to hand over;
+    // a payload that is neither result nor error must reach the caller unchanged,
+    // otherwise a custom frame would be swallowed as undefined.
+    const body = readFrames([
+      'event: task_status_update\n\n',
+      'event: message\ndata: {"kind":"message","text":"raw"}\n\n',
+    ])
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, body })))
+
+    const seen = []
+    await streamTask({}, (frame) => seen.push(frame))
+    expect(seen).toEqual([{ event: 'message', data: { kind: 'message', text: 'raw' } }])
+  })
+
   it('reports stream_unavailable when the server refuses to stream', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ code: 'internal_error' }, 500)))
     await expect(streamTask({}, () => {})).rejects.toMatchObject({ code: 'stream_unavailable' })

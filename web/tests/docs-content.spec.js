@@ -138,6 +138,20 @@ describe('docs content', () => {
     expect(counts.capabilities).toBe(10)
   })
 
+  it('says what a checkpoint does not contain, in every language', () => {
+    // The route table can say `/api/backups` exists; only prose can say the
+    // ledger stays out of the archive and what a guarded table does. Both facts
+    // are pinned because they are the behaviour, not the wording — lose one and
+    // the screen documents a different tool.
+    const backups = endpointGroups.find((group) => group.id === 'backups')
+    expect(backups?.noteKey).toBe('groupBackupsNote')
+    for (const lang of LANGS) {
+      expect(resolve(lang)[backups.noteKey], `${lang}.${backups.noteKey} missing`).toBeTruthy()
+    }
+    expect(docsCopy.en.groupBackupsNote).toContain('audit ledger')
+    expect(docsCopy.en.groupBackupsNote).toContain('backup_table_guarded')
+  })
+
   it('files every endpoint under a group the table renders', () => {
     const declared = endpointGroups.map((group) => group.id)
     expect(new Set(declared).size).toBe(declared.length)

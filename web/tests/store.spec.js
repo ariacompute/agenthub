@@ -223,6 +223,22 @@ describe('partial payloads', () => {
     await store.refreshResources()
     expect(store.errorCode).toBe('internal_error')
   })
+
+  it('falls back the same way on every reader, not just the first one', async () => {
+    // Each slice has its own catch block; one that forgot the fallback would put
+    // "undefined" in the banner instead of a code the console can localise.
+    api.listApprovals.mockRejectedValue(new Error('network down'))
+    api.listSources.mockRejectedValue(new Error('network down'))
+    api.syncSource.mockRejectedValue(new Error('network down'))
+
+    const store = useHubStore()
+    await store.refreshApprovals()
+    expect(store.errorCode).toBe('internal_error')
+    await store.refreshSources()
+    expect(store.errorCode).toBe('internal_error')
+    expect(await store.syncSource('s1')).toBeNull()
+    expect(store.errorCode).toBe('internal_error')
+  })
 })
 
 describe('every action records a failure the same way', () => {

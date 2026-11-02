@@ -925,3 +925,60 @@ backup: the dump engine failed: truncate: ERROR: audit_log is append-only: TRUNC
 - 两条破坏性用例加前置清理（`DELETE FROM resources WHERE name LIKE 'it-%'`）：恢复会把检查点
   捕获的行写回，否则同一库第二次跑会撞 dedup 唯一索引。
 - web：21 文件 / 413 用例全绿。
+- **文档面同步**：`/docs` 屏的备份分组新增 `groupBackupsNote`（13 语，说明「归档只含应用表、
+  账本既不导出也不回滚、带 `BEFORE TRUNCATE` 的表以 `backup_table_guarded` 拒绝」），
+  由 `endpointGroups[].noteKey` 驱动、`DocsView` 渲染；`scripts/gen-docs-md.mjs` 同一位置输出，
+  `docs/docs.md` 与 `docs/docs_cn.md` 重新生成。`docs-content.spec.js` 加一条钉住该说明
+  （13 语齐全 + 两个事实：`audit ledger`、`backup_table_guarded`）。`README_cn.md` 同步补齐
+  沙盒表 2 行、持久化表 1 行、检查点 2 条。web 414 用例全绿，`bun run build` 通过。
+
+## M15 — 覆盖率补强：store 的仓储与 backup 的引擎（2026-11-02，测试为主）
+
+只加用例，不改生产代码。目标是两处**结构性缺口**：`internal/store` 的仓储实现几乎
+没有包内用例（`internal/store` 只有 20.2%，而 `./tests/` 跑通它并不计入包覆盖率），
+`internal/backup` 的两个引擎其 Dump/Restore 在包内 0%。
+
+### 1. 服务端
+
+| 包 | 改前 | 改后 |
+| --- | --- | --- |
+| `internal/store`（有库） | 20.2% | **35.6%** |
+| `internal/backup`（有库） | 57.9% | **70.1%**（加 `AGENTHUB_TEST_BACKUP_RESTORE=true` 时 **77.3%**） |
+
+- `internal/store/scope_test.go`：RLS 作用域管道——`scoped` 在无身份时不发布任何设置、
+  有身份时五个 `app.*` 按 `flag()` 的 on/off 写入且 `is_local` 使其随事务消失、失败时整体回滚；
+  `ownedWhere` 的**空 owner 不是通配**（alice 1 行 / bob 0 行 / "" 0 行）、`relaxRLS` 的三种 DSN 形态、
+  连接池 env 的读取与钳制、`Ping`/`Close` 的 nil 语义、`Applied` 排序与行数一致、
+  `applyMigration` 对已记录迁移是 no-op 且未知文件报读失败、`Seed` 幂等且 demo 行必须 `public`。
+- `internal/store/audit_store_test.go`：账本只能经 `Prune` 清理，因此全部用例用 2001/2003 的
+  人造时间戳写、用 2002/2004 的 cutoff 清，**不碰真实行**。覆盖 Append（含空批、重复 event_id、
+  metadata 无法编码时丢 metadata 保住事件）、Get 命中/未命中、LastHash 续链、List 的
+  outcome/action/source/search/before/limit 钳制、Stats 与 List 同源、Segment 的游标与 from 窗口、
+  Prune 不动 cutoff 之后的行。
+- `internal/store/task_store_test.go`：任务及其 artifact/span/pending/push 的往返；
+  **owner 隔离**（别人的行一律 `ErrTaskNotFound`，系统身份可见）；`SetState` 的条件更新
+  （过期写入 `ErrStateConflict`）；`AppendHistory` 三次追加不丢回合；`AddSpan` 重试去重；
+  `SetPending`/`SetPush` 的「没有就是 nil」与 upsert 语义。
+- `internal/backup/engine_db_test.go`：copy 引擎的 Dump **在 manifest 与帧两个层面**都证明
+  `excludedTables` 不在内；表带 `BEFORE TRUNCATE` 触发器时 Dump 以 `ErrTableGuarded` 拒绝并点名；
+  pg_dump 引擎产出 `PGDMP` 自定义格式且表清单不含账本；破坏性用例（`AGENTHUB_TEST_BACKUP_RESTORE=true`）
+  走 Dump→插入标记行→Restore，并额外塞一帧 `audit_log`，证明恢复**跳过**该帧而不是拒绝整个归档。
+
+### 2. web：21 文件 / **417 用例**，语句与行 **100%**、分支 **95.79%**、函数 **100%**
+
+- `tests/audit.spec.js`：补 `actorLabel` 不传 translator 的默认臂（此前 9 个函数里唯一未执行的）。
+- `tests/api-stream.spec.js`：没有 `data:` 行的事件帧被跳过、payload 既非 result 也非 error 时原样透传
+  （否则自定义帧会被吞成 undefined）。
+- `tests/store.spec.js`：未带 code 的拒绝在**每个** reader 上都要落到 `internal_error`，
+  不只是 `refreshResources` 那一个。
+
+### 3. 仍然欠着的（下一步）
+
+`internal/store` 仍是全仓最低：`authz_store.go`（333 条未覆盖语句）、`router_store.go`（214）、
+`sandbox_store.go`（118）、`audit_store` 已补、`apikey_store.go`（74）、`schedules_store.go`（60）、
+`computers_store.go`（50）、`backup_store.go`（49）、`event_store.go`（36）尚无包内用例。
+web 侧剩余分支集中在 `auth-store.js` 的 `?? []` 回退臂与 `playground.js` 的缺省值，属等价分支。
+
+验证：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、无库 `go test ./...` 全绿；
+有库 `go test -race ./tests/ ./internal/store/ ./internal/backup/` 三包 ok；
+`bun run test`（417）×2 通过，`bun run test:coverage` 见上表。

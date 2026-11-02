@@ -50,6 +50,9 @@ const grouped = computed(() =>
   endpointGroups.map((group) => ({
     id: group.id,
     label: t(group.groupKey),
+    // A group may carry one prose note: a table of methods and paths cannot say
+    // what a call leaves alone.
+    note: group.noteKey ? t(group.noteKey) : '',
     rows: httpEndpoints.filter((endpoint) => endpoint.group === group.id),
   })),
 )
@@ -246,6 +249,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
                 </tbody>
               </table>
             </div>
+            <p v-if="group.note" class="note">{{ group.note }}</p>
           </div>
           <p class="note">{{ t('endpointsNote') }}</p>
         </section>

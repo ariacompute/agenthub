@@ -191,6 +191,8 @@ function render(lang) {
       ),
       '',
     )
+    // Same slot the screen uses: a group's one prose note, under its table.
+    if (group.noteKey) out.push(t(dict, group.noteKey), '')
   }
   out.push(t(dict, 'endpointsNote'), '')
 
