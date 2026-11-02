@@ -1,0 +1,89 @@
+# agenthub — continuous integration.
+#
+# Two jobs, mirroring the documented test targets:
+#   • go     → `go test -race ./...` under the repo root. Unit cases run
+#              offline; the store/hub integration cases skip themselves when
+#              DATABASE_URL is unset, so a Postgres service is provided to let
+#              them exercise the real GORM path. `go vet ./...` runs alongside
+#              as a fast static gate.
+#   • web     → `bunx vitest run` under web/ (the console's Vitest suite:
+#              monochrome guard, 13-language copy completeness, smoke).
+#
+# The console is built and served from backend/static at runtime; CI does not
+# need to build it to run the web unit tests, so only the test runner is set up.
+
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# One CI run per ref; a newer push cancels an in-progress one so results are
+# never a mix of two commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPROXY: https://goproxy.cn,direct
+
+jobs:
+  # ------------------------------------------------------------ go (test + vet)
+  go:
+    name: go — test -race
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agenthub
+          POSTGRES_PASSWORD: agenthub
+          POSTGRES_DB: agenthub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U agenthub"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      # Lets the store/hub integration cases run against a real Postgres instead
+      # of self-skipping. The server runs its own idempotent Migrate on Open.
+      DATABASE_URL: postgres://agenthub:agenthub@localhost:5432/agenthub?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race)
+        run: go test -race ./...
+
+  # -------------------------------------------------------------- web (vitest)
+  web:
+    name: web — vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Vitest (run)
+        run: bunx vitest run
