@@ -21,8 +21,8 @@ import (
 )
 
 // HTTPNotifier delivers the terminal callback registered for a task by POSTing
-// its A2A payload to cfg.URL. It is the real implementation of the MockNotifier's
-// TODO(real):
+// its A2A payload to cfg.URL. It is what main wires once AGENTHUB_PUSH_SECRET is
+// set; without one the record-only MockNotifier stays in place. It offers:
 //
 //   - SSRF guard: the destination is https only and never resolves to a private,
 //     loopback or link-local address (see netutil.SafeClient).

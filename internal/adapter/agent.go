@@ -59,8 +59,12 @@ func (c *agentConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 // mockAgentInvoke emulates an autonomous agent: it plans, executes steps and can
 // park the task in input-required when the request needs approval.
 //
-// TODO(real): forward to aria-agent-cloud /v1/agents/sessions/{id}/events/stream
-// and translate the agent.* SSE frames into A2A artifacts.
+// It only runs when the entry names no Agent Card URL; with one, invokeA2A above
+// performs the real fetch plus message/send.
+//
+// TODO(real): stream instead of waiting for a single response — forward to
+// aria-agent-cloud /v1/agents/sessions/{id}/events/stream and translate the
+// agent.* SSE frames into A2A artifacts.
 func mockAgentInvoke(req InvokeRequest) InvokeResult {
 	if requiresApproval(req.Prompt) {
 		return InvokeResult{

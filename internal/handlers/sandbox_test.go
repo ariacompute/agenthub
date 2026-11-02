@@ -406,6 +406,8 @@ func TestSandboxNodeEnrollment(t *testing.T) {
 		t.Fatalf("capabilities = %v, want the remote default", node.Capabilities)
 	}
 
+	// A bad identity is a malformed request, not a policy refusal: the desktop
+	// must not go looking for a sandbox_policy_denied rule that does not exist.
 	for _, tc := range []struct {
 		name string
 		body string
@@ -419,6 +421,10 @@ func TestSandboxNodeEnrollment(t *testing.T) {
 		w := do(t, h, http.MethodPost, "/api/sandbox-nodes", tc.body, nil)
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400 (%s)", tc.name, w.Code, w.Body.String())
+			continue
+		}
+		if code := errorCode(t, w); code != "bad_request" {
+			t.Errorf("%s: code = %q, want bad_request", tc.name, code)
 		}
 	}
 

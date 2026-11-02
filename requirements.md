@@ -1,11 +1,13 @@
 # requirements.md — agenthub（A2A 互连平台）
 
 > 功能边界 / 协议契约 / 数据模型 / 接口 / 异常 / 多语言与视觉约束 / 验收标准。
-> 须经人工逐项审核后，方可据其生成 `task.md` 实施。当前实现对应 **M1（已落地）**。
+> 须经人工逐项审核后，方可据其生成 `task.md` 实施。当前实现对应
+> **M1 / M2 / Router / M3（全部已落地）**。
 >
-> 子领域方案：安全加固 `requirements-security.md`（实施 `task-security.md`）、
+> 正文按渐进式披露组织：M1–M2 的能力在这里写全；M3 的三块只写边界与落点，明细在各自子文档——
+> 安全加固 `requirements-security.md`（实施 `task-security.md`）、
 > 执行沙盒 `requirements-sandbox.md`（实施 `task-sandbox.md`）、
-> **数据隔离（RLS）与全 API 审计 `requirements-isolation.md`（实施 `task-isolation.md`）**。
+> 数据隔离（RLS）与全 API 审计 `requirements-isolation.md`（实施 `task-isolation.md`）。
 
 ## 1. 功能边界
 
@@ -34,18 +36,27 @@
   agent→`aria-agent-cloud` SSE、mcp→stdio / Streamable HTTP JSON-RPC、skill→本地手册加载、
   cli→`exec.Command` + 白名单。CLI 必须实现「白名单前置校验 → 单次超时 → 输出截断 → 结构化 JSON」。
 - **Hub 编排与任务机**：入站消息 → 资源选择 → 适配执行 → 状态机 → artifact 累积 →
-  事件广播（SSE fan-out）→ pushNotification 回调（**落 `push_records`，不发真实网络请求**）。
+  事件广播（SSE fan-out）→ pushNotification 回调（落 `push_records`；设置 `AGENTHUB_PUSH_SECRET`
+  后改走**真实投递**——https-only、SSRF 白名单、HMAC-SHA256 签名、`(taskId, state)` 一小时内去重，
+  失败只告警、不改变终态；未设置时仍是只留痕的 mock）。`AGENTHUB_PUSH_ENABLED=false` 关闭整个能力。
   编排支持 **flow 三原语 `then / branch / parallel`**，用于多资源接力。
 - **可观测**：每任务生成 **span 时间线**（kind、耗时、状态、错误 code），作为「任务追踪」屏数据源；
   首版只埋点，不接外部 exporter。
 - **PostgreSQL 持久化（GORM）**：`DATABASE_URL` **必填**，缺失即拒绝启动。资源条目、任务主体、
   artifact、span、挂起问题、回调配置、事件流与回调留痕全部入库；未注入 GORM 仓库时
   registry/hub/broker/notifier 退化为**原有内存行为**（公开签名零变更），单测因此零外部依赖。
-- **控制面与运维**：`/api/*` 管理接口 + `/healthz`（版本、适配器、资源计数、当前模式、鉴权模式、
-  **数据库可达性**）；admin token 鉴权，open 模式仅本地可用。
-- **Web 控制台八屏**：注册中心（六类 CRUD + per-kind 配置 + 审批状态 + **单资源「试跑」**）、
+- **控制面与运维**：`/api/*` 管理接口 + `/healthz`（版本、提交、适配器、资源计数、当前模式、
+  鉴权模式、**数据库可达性**）。鉴权为**会话 cookie + RBAC 权限矩阵**：共享 admin token
+  （`AGENTHUB_ADMIN_TOKEN`）已不再读取，`AGENTHUB_ENV=prod` 缺 `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL`
+  即拒绝启动；另有 API Key（只存 `token_hash`）供脚本与执行节点使用。
+- **部署形态**：单二进制 + PostgreSQL；另提供 Kubernetes Operator（`operator/`，CRD
+  `agenthub.ai/v1alpha1`）按 CR 渲染 ConfigMap / Secret / Deployment / Service / PVC
+  （owner reference 随 CR 回收），详见 `releasenotes.md` §12。
+- **Web 控制台十屏**：注册中心（六类 CRUD + per-kind 配置 + 审批状态 + **单资源「试跑」**）、
   命名空间与待审批队列、上游注册中心源、任务追踪（任务列表 + 事件/span 时间线 + artifact 原始内容）、
-  拓扑视图（五列资产 + 调用边）、登录/注册、管理后台（用户 / 权限矩阵 / 资源授权 / 数据库检查点）、
+  拓扑视图（五列资产 + 调用边）、**试跑台**（`/playground`，`tasks:write`）、登录/注册、
+  管理后台（用户 / 用户组 / 权限矩阵 / 资源授权 / 数据库检查点 / API Key）、
+  **审计**（`/audit`，`audit:read`；全 API 账本 + 哈希链校验）、
   **文档**（`/docs`，控制台自带的功能与接口说明，13 语，无权限门控；详见 §9）。
 - **多语言 13 种**：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`（`ar` 为 RTL）。
 - **纯黑/白/灰单色视觉**：禁止任何有彩色相，靠明度分级 + 线型 + 图形 + 动效编码语义。
@@ -56,7 +67,8 @@
 - RAG / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
 - 浏览器自动化、多语言 SDK、Agent 网络跨实例联邦。
 - LLM-as-judge 评分与评测闭环（eval 仅留钩子，**不产出分数**）。
-- 真实 MCP stdio 子进程、真实 CLI `exec`、真实模型端点（统一留 `TODO(real)`）。
+- 真实 MCP stdio 子进程、真实 CLI `exec`、模型**流式**输出（非流式的 OpenAI 兼容端点已可用，见 §6；
+  其余统一留 `TODO(real)`）。
 
 ### 1.3 范围内（M2，已实现）
 
@@ -67,18 +79,21 @@
 - **Connectors（策略网关）**：对 `kind=mcp` 资源暴露外部调用，`GET /api/connectors` 列出、`PUT /api/connectors/{id}/policy` 设置 `off / ask_first / allowed` 策略；`ask_first` 经 `Hub.ParkConnector` 挂起一个 `input-required` 任务等待人工批准。`GET/POST /api/connectors/{id}/actions` 触发动作。
 - **Speech（语音）**：`POST /api/threads/{id}/audio` 上传语音片段，服务端离线转写（STT mock）后作为 `origin=voice` 的消息委派进线程，并把 agent 回复合成 TTS 音频作为 artifact 附回。受 `AGENTHUB_SPEECH_MODE` / `AGENTHUB_AUDIO_MAX_BYTES` 控制（迁移 `015_thread_origin.sql` 为 `thread_messages` 增加 `origin` 列）。
 
-上述端点复用既有 `resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组；详见 `releasenotes.md` §12 与 `/docs` 控制台的 Collaboration 分组。
+上述端点复用既有 `resources:read` / `tasks:read` / `tasks:write` 权限，不新增角色或用户组；详见 `releasenotes.md` §11 与 `/docs` 控制台的 Collaboration 分组。
 
-### 1.4 范围内（本轮新增，已落地）
+### 1.4 范围内（M2.5：agent 能力 F10–F16，已落地）
 
-参考 agentbuddy `requirements.md` 的 F10–F16 标杆特性分析，agenthub 侧落地「服务端契约 + mock 适配器」：
-真实计算机控制 / 调度引擎 / 向量检索统一标 `TODO(real)`，首版为确定性 mock。
+参考 agentbuddy `requirements.md` 的 F10–F16 标杆特性分析，agenthub 侧落地「服务端契约」：
+computers 已接真实执行租约（§1.6）、schedules 已由 Router 接管（§1.5）；仍未接真实后端的
+RAG 检索保持确定性 mock 并标 `TODO(real)`。
 
-- **Computers（F11）**：`GET/POST /api/computers`、`GET /api/computers/{id}` 暴露 agent 沙箱
-  （browser / shell / screen）；handler 走 mock 适配器返回占位会话与动作回显，真实控制标 `TODO(real)`。
-  新机器码 `computer_not_found`(404) / `feature_unavailable`(503，store 未接入时的统一哨兵)。落 `computers` 表（`017_computers.sql`）。
+- **Computers（F11）**：`GET/POST /api/computers`、`GET/DELETE /api/computers/{id}` 暴露 agent 沙箱
+  （browser / shell / screen）；创建时**真实申请执行环境租约**并回写 `provider` / `lease_id` /
+  `node_id` / `expires_at`（申请失败回滚该行并返回机器码），删除先终止租约再删行；控制面未接线时
+  该行本身即全部功能。新机器码 `computer_not_found`(404) / `feature_unavailable`(503，store 未接入
+  时的统一哨兵)。落 `computers` 表（`017_computers.sql`）。
 - **Schedules（F13）**：`GET/POST /api/schedules`、`PUT/DELETE /api/schedules/{id}` 暴露目标 / 周期任务；
-  mock 调度器用内存 ticker 复用 hub 创建 task，真实调度引擎标 `TODO(real)`。
+  调度执行已由 §1.5 的 Router 接管（内存 ticker 的 mock 调度器退场）。
   新机器码 `schedule_not_found`(404) / `schedule_invalid`(400)。落 `schedules` 表（`018_schedules.sql`）。
 - **Knowledge（F14）**：`GET /api/knowledge` 暴露 mock RAG 检索（确定性片段），真实向量检索标 `TODO(real)`；
   技能蒸馏仅记录触发点（`skill_distill_disabled`(403)）。落 `knowledge` 表（`019_knowledge.sql`）。
@@ -87,7 +102,7 @@
 - **复用与约束**：上述端点复用既有 `resources:*` / `tasks:*` 权限，不新增角色或用户组；
   迁移均为 `017/018/019`（接 `016_wechat_login.sql` 之后），全 `IF NOT EXISTS`。
 
-### 1.5 范围内（本轮新增：调度器 / Router 层，已落地）
+### 1.5 范围内（M2.5：调度器 / Router 层，已落地）
 
 参考《Super-agent 设计探索》与 dsh-superagent-prototype 的 router 实现，把 agenthub 从「注册即被调用」
 的被动目录升级为 **Router 层 + Worker 层** 双层调度：环境事件先入 Trigger 队列，程序规则快速筛除噪音，
@@ -110,6 +125,49 @@
 
 详见 §10。
 
+### 1.6 范围内（M3：执行沙盒，已落地）
+
+把「执行」从适配器里的一次性动作升级为**带租约的一等资源**，大脑（Router/Hub）与双手（执行环境）解耦；
+结构上与 `internal/router` 同构：消费方定义端口、单写者、节拍单飞、内存 / GORM 双实现。
+
+- **租约**：按 `(owner_id, resource_id, scope)` 复用（`scope` 取 ticket → `contextId` → `default`），
+  空闲回收 + 最长存活 + 每归属人 / 全局上限；任务取消或重启**不销毁**租约，租约丢失时下次调用透明重建。
+- **类型目录**：内置 `mock` / `docker` / `podman` / `gvisor` / `kata` / `bwrap` / `remote`，声明式预设
+  `nsjail` / `isolate` / `systemd-run` / `local` / `nerdctl`，平台层 `e2b` / `microsandbox` / `daytona` /
+  `cubesandbox` / `openhands`；默认 `docker`，`AGENTHUB_SANDBOX_PROVIDER=off` 拒绝一切执行。
+  声明式条目**逐 argv 展开、绝不拼 shell**，未知占位符或非绝对路径**拒绝启动**。
+- **执行节点**：本机可注册为节点（`/api/sandbox-nodes/{id}` 长轮询领取任务、回传结果），凭证复用 API Key。
+- **审计**：每次执行只存命令摘要、退出码、耗时、输出 sha256 与截断标记，不存原始输出。
+- **computers 收口**：`POST /api/computers` 申请租约、`DELETE /api/computers/{id}` 终止租约（见 §1.4）。
+- **不新增权限码**：沿用 `resources:*` / `tasks:*`；未接线 → 503 `feature_unavailable`，后端不可用 →
+  409 `sandbox_unsupported`（重试无用）。迁移 `021_sandboxes.sql`（5 张表 + `computers` 增列）。
+
+明细（配置项、API 表、声明式 schema、错误码、验收）见 `requirements-sandbox.md`。
+
+### 1.7 范围内（M3：数据隔离与全 API 审计，已落地）
+
+把「谁能看见哪一行」从应用层约定下沉为数据库承诺，并把「谁在何时调用了什么」从日志文本升级为
+可校验的只追加账本。
+
+- **归属**：`tasks` 及全部子表、`knowledge` 增 `owner_id`（`''` = 系统产生，仅系统身份 / 管理员可见）；
+  子表冗余归属列以避免 JOIN；**不做存量回填**。
+- **RLS**：八张表 `ENABLE` + `FORCE ROW LEVEL SECURITY`，策略
+  `system || bypass || (owner_id <> '' AND owner_id = app.owner_id)`；身份经 `internal/identity` 进
+  `context`，由 `store.scoped` 在**短事务**内 `set_config` 注入——策略未设置即拒绝（fail-closed）。
+  `AGENTHUB_RLS=enforce`（默认）/ `off`（追加 `app.system=on`；`env=prod` 需 `AGENTHUB_RLS_ACK=1`）。
+  角色分离：`agenthub_migrator`（DDL）/ `agenthub_app`（DML、`NOBYPASSRLS`、非表属主）/ `agenthub_readonly`。
+- **资源可见性**：`resources.visibility`（`public` / `restricted`）——**破坏性变更**，未显式 `public`
+  且无 grant 的记录从所有人列表消失，调用返回 404（不是 403，避免 ID 枚举）。
+- **审计**：`audit_log` 对齐 CloudTrail（`event_id` / `action` / `actor_*` / `ip` / `path` 脱敏 /
+  `status` / `error_code` / `latency_ms` / `prev_hash` + `hash`），应用只 `INSERT`、触发器拒绝
+  `UPDATE/DELETE/TRUNCATE`（保留期清理例外），写入走有界队列 + 批量，绝不阻塞业务；
+  `GET /api/audit/verify` 重算哈希链。新增权限码 `audit:read`。`AGENTHUB_AUDIT_RETENTION` 默认 90 天。
+- **`/a2a` 授权**：`message/send|stream` 必须解析出具体资源；`tasks/*` 必须已认证且归属调用者
+  （或管理员），否则按「不存在」返回；匿名只能触达 `public` 资源。
+
+明细（升级指引、策略 SQL、表结构）见 `requirements-isolation.md`；传输 / 认证 / SSRF / 密钥等
+既有加固见 `requirements-security.md`。
+
 ## 2. 协议契约
 
 ### 2.1 传输与信封
@@ -124,6 +182,8 @@
 | params 缺失/含未知字段 | `-32602 invalid_params` |
 | 流式 | `Content-Type: text/event-stream`，帧名 `task_status_update` /
   `task_artifact_update` / `message`；错误帧名 `error`；**无 `[DONE]`** |
+| 授权 | 匿名只可触达 `visibility=public` 的资源；`tasks/*` 需已认证且任务归属调用者或管理员
+  （否则按不存在返回）；匿名调用需认证的方法 → `-32009 unauthenticated`（见 §1.7） |
 
 ### 2.2 任务状态
 
@@ -205,7 +265,8 @@
 
 ### 3.2 任务与追踪
 
-- `Task`：`id`、`contextId`、`status`、`artifacts[]`、`history[]`、`metadata`、`resourceId`。
+- `Task`：`id`、`contextId`、`status`、`artifacts[]`、`history[]`、`metadata`、`resourceId`，
+  以及归属 `owner_id`（`''` 表示系统产生；越权访问一律按不存在返回，见 §1.7）。
 - `Span`：`id`、`taskId`、`resourceId`、`kind`、`label`、`startAt`、`endAt`、`durationMs`、
   `status`（`ok`/`error`/`input-required`/`skipped`）、`code`。
 - `Event`（broker 帧）：`seq`、`taskId`、`kind`（`status`/`artifact`/`message`/`span`）、`at`、载荷。
@@ -227,12 +288,24 @@
 | `push_records` | 每次回调留痕，按 `AGENTHUB_PUSH_RECORD_LIMIT` 保留最近 N 条/任务 |
 | `computers` | agent 沙箱（browser/shell/screen）：状态 + 最近动作回显（迁移 `017`） |
 | `schedules` | 目标/周期任务：cron_expr / enabled / next_run / last_run（迁移 `018`） |
-| `knowledge` | mock RAG 片段：agent_id / chunk_text / source_ref（迁移 `019`） |
+| `knowledge` | mock RAG 片段：agent_id / chunk_text / source_ref / `owner_id`（`019`/`023`） |
+| `users` / `sessions` / `oauth_accounts` | 账号、会话、OAuth 绑定（`005` / `016`） |
+| `groups` / `roles` / `permissions` 及 `user_groups` / `user_roles` / `group_roles` / `role_permissions` | RBAC 解析（`006`） |
+| `resource_grants` | 资源级授权（`006`） |
+| `api_keys` / `api_key_scopes` | 程序化凭证，只存 `token_hash`（`010`） |
+| `backup_checkpoints` / `backup_schedules` | 检查点清单与定期打点策略（`007`） |
+| `threads` / `thread_messages` | 协作线程与消息（`012` / `015`） |
+| `channels` / `channel_messages` | 外部消息通道绑定与入站/出站留痕（`014`） |
+| `sandbox_leases` / `sandbox_execs` / `sandbox_nodes` / `sandbox_jobs` / `sandbox_events` | 执行租约、执行摘要、节点、作业与事件（`021`） |
+| `audit_log` | 只追加审计账本（哈希链；`025`，`audit:read` 授权见 `027`） |
 | `schema_migrations` | 已执行的迁移文件 |
+
+共 47 张表（含关联表）；归属列、`resources.visibility` 与 RLS 策略见 §1.7。
 
 约束：
 
 - 迁移为 `migrations/*.sql`（`//go:embed` 内嵌），按文件名顺序、每文件单事务执行，SQL 自身幂等。
+  当前已到 `027_audit_permission.sql`，新增只加新文件，并同步 `store_test.go` 的 `want` 清单。
 - 任务状态迁移必须 **条件更新**（`WHERE id=? AND state=?`），0 行时区分「任务不存在」与「并发冲突」。
 - 事件与回调写入**不得阻塞任务执行**：有界队列 + 异步写入，队列满或写入失败只告警。
 - `jsonb` 载荷通过自实现 `model.JSONField`（`driver.Valuer` / `sql.Scanner`）承载，**不引入**
@@ -253,9 +326,16 @@
 | `tasks/pushNotification/get` | `{id}` | `PushNotificationConfig` |
 
 资源选择优先级：`metadata.resourceId|resource_id|resource`（精确 id → 名称 → kind）→
-`metadata.kind` 兜底 → 无选择器时优先 agent，否则按 id 字典序首个。
+`metadata.kind` 兜底 → 无选择器时优先 agent，否则按 id 字典序首个；解析不到 → `resource_not_found`。
 
-### 4.2 控制面（`/api/*`，admin token）
+任务维度方法共用 `ResolveTaskID()`：`tasks/pushNotification/set` 用 `taskId`、`get` 用 `id` 的历史
+不一致按向后兼容处理（两字段都接受，同时出现以规范字段为准，都缺 → `-32602`）。
+
+### 4.2 控制面（`/api/*`，会话 + RBAC）
+
+鉴权：`/api/auth/*` 可匿名（否则没人拿得到会话），其余一律 `requireAuth` + 具体权限码；
+路由与权限逐条登记在 `internal/handlers/handlers.go`，并须同步 `handlers/listen.go` 的
+`Listeners()` 与 `listen_test.go` 的 `probes`。下列为 M1–M2 的逐条清单，M2.5 起按组给出索引（§4.2.1）。
 
 ```
 GET    /api/resources[?kind=&q=&namespace=&status=] → {resources, counts, health}
@@ -320,11 +400,42 @@ POST   /api/router/passes                     → 202 {kicked:true}（tasks:writ
 GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 router_event，先回放再实时）
 ```
 
+#### 4.2.1 路由分组索引（当前 127 条 `/api` 路由）
+
+不逐条罗列，避免与 `handlers.go` 反复漂移；每条路径的请求/响应示例由控制台 `/docs` 屏给出
+（`web/src/lib/docs-content.js`），路由搬动时两处必须同步。
+
+| 分组 | 条数 | 路径 | 权限 |
+| --- | --- | --- | --- |
+| 身份 | 9 | `/api/auth/config`、`register`、`login`、`logout`、`me`、`sessions`、`sessions/{id}`、`oauth/{provider}`、`oauth/{provider}/callback` | 前三条匿名；其余 `requireAuth` |
+| 审计 | 3 | `/api/audit`、`/api/audit/verify`、`/api/audit/{id}` | `audit:read` |
+| 资源 | 8 | `/api/resources`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/health`、`{id}/probe`、`{id}/status` | `resources:read` / `resources:write`；status 为 `registry:curate` |
+| 命名空间 | 5 | `/api/registries`（GET/POST）、`{id}`（PUT/DELETE）、`/api/registries/approvals` | `registries:manage`；approvals 为 `registry:curate` |
+| 上游源 | 5 | `/api/registry-sources`（GET/POST）、`{id}`（PUT/DELETE）、`{id}/sync` | `sources:manage` |
+| 任务 | 6 | `/api/tasks`、`{id}`、`{id}/spans`、`{id}/events`、`{id}/cancel`、`{id}/resume` | `tasks:read` / `tasks:write` |
+| 导出 | 2 | `/api/export/mcp`、`/api/export/agent-card` | `resources:read` |
+| 工作台与线程 | 7 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`、`{id}/messages`、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
+| 通道 | 8 | `/api/channels`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/deliveries`、`{id}/webhook`（**公开，签名校验**）、`{id}/deliver` | `tasks:read` / `tasks:write`；webhook 无会话 |
+| 连接器 | 4 | `/api/connectors`、`{id}/policy`（PUT）、`{id}/actions`（GET/POST） | `resources:read` / `resources:write` |
+| 计算机 | 4 | `/api/computers`（GET/POST）、`{id}`（GET/DELETE） | `resources:read` / `resources:write` |
+| 目标与周期 | 6 | `/api/schedules`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/run` | `tasks:read` / `tasks:write` |
+| 调度器 | 13 | `/api/router/*`（stats / triggers / tickets / policies / passes / events） | `tasks:read` / `tasks:write` |
+| 沙盒 | 7 | `/api/sandboxes`、`stats`、`events`、`{id}`、`{id}/exec`、`{id}/renew`、`{id}`（DELETE） | `resources:read` / `resources:write` |
+| 类型目录 | 2 | `/api/sandbox-providers`、`/api/sandbox-providers/refresh` | `resources:read` / `resources:write` |
+| 执行节点 | 6 | `/api/sandbox-nodes`（GET/POST）、`{id}`（DELETE）、`{id}/heartbeat`、`{id}/jobs`（长轮询）、`{id}/jobs/{job}` | `resources:read` / `resources:write` / `tasks:write` |
+| 知识 | 1 | `/api/knowledge` | `resources:read` |
+| 用户与授权 | 18 | `/api/users`（5）、`{id}/sessions`、`/api/permissions`、`/api/roles`（4）、`/api/groups`（4）、`/api/grants`（3） | `users:manage` / `roles:manage` / `sessions:manage` / `grants:manage` |
+| 备份 | 8 | `/api/backups`（GET/POST）、`schedule`（GET/PUT）、`{id}`（GET/DELETE）、`{id}/download`、`{id}/restore` | `backups:manage` |
+| API Key | 5 | `/api/api-keys`（GET/POST）、`{id}`（GET/PUT/DELETE） | `requireAuth`（各自持有者的 key） |
+
+分组内不新增权限码：沙盒复用 `resources:*` / `tasks:*`，审计新增唯一的 `audit:read`。
+
 ### 4.3 健康检查
 
-`/healthz`：`status`、`version`、`protocolVersion`、`env`、`mode`(mock)、`resources`(按 kind 计数)、
-`health`(按健康计数)、`tasks`、`methods`、`legacyMethods`、`pushEnabled`、`auth`(`token`|`open`)、
-`database`(`up`|`down`|`unknown`，注入 DB 句柄时存在)；库不可达时返回 503。
+`/healthz`：`status`、`version`、`commit`、`buildNote`、`protocolVersion`、`env`、`mode`(mock)、
+`resources`(按 kind 计数)、`health`(按健康计数)、`tasks`、`methods`、`legacyMethods`、`pushEnabled`、
+`auth`(`session`|`anonymous`|`disabled`)、`database`(`up`|`down`|`unknown`，注入 DB 句柄时存在)；
+库不可达时返回 503。
 
 ## 5. 异常
 
@@ -343,6 +454,34 @@ agent 能力码（F10–F16）：`computer_not_found`·`schedule_not_found` → 
 `router_thread_not_found` → 404、`router_policy_invalid` → 400、`router_ticket_closed`·
 `router_handback_exhausted`·`router_resource_unset` → 409；未注入 `Deps.Router` 时全部 503 `feature_unavailable`。
 
+身份与授权码：`unauthenticated`·`session_expired`·`invalid_credentials` → 401，`account_locked` → 429
+（5 次失败锁 15 分钟，未知账号同一错误以防枚举）；`forbidden`·`user_disabled`·`builtin_role` → 403；
+`email_taken`·`role_already_exists`·`group_already_exists` → 409；
+`weak_password`·`invalid_email`·`password_required`·`invalid_grant`·`unknown_permission` → 400；
+`oauth_not_configured`·`oauth_state_mismatch`·`oauth_failed`·`oauth_no_email` → 502。
+API Key 码：`api_key_not_found` → 404、`api_key_expired`·`api_key_revoked` → 401、
+`api_key_name_required`·`api_key_invalid_scope` → 400。
+
+通道码：`channel_not_found` → 404、`channel_disabled` → 403（控制面未接线时 503）、`channel_payload_invalid` → 400、
+`channel_signature_missing`·`channel_signature_invalid`·`channel_timestamp_expired` → 401、`delivery_failed` → 502。
+连接器码：`connector_not_found` → 404、`connector_action_denied` → 400、`connector_policy_off` → 403。
+语音码：`audio_too_large` → 413、`audio_unsupported` → 400/415、`audio_transcribe_failed` → 422、
+`speech_disabled` → 503。
+
+沙盒码：`sandbox_disabled`·`sandbox_policy_denied` → 403、`sandbox_unsupported`·`sandbox_lease_lost` → 409、
+`sandbox_unknown_provider` → 400、`sandbox_not_found` → 404、`sandbox_limit_reached` → 429、
+`sandbox_node_offline` → 503、`sandbox_timeout` → 504；未注入 `Deps.Sandboxes` 时 503 `feature_unavailable`。
+
+备份码：`backup_not_found` → 404；`backups_disabled`·`backup_in_progress`·`backup_checksum_mismatch`·
+`backup_schema_mismatch`·`backup_invalid_archive` → 409；`backup_schedule_invalid`·`restore_confirm_required` → 400；
+`backup_engine_unavailable`·`restore_busy`·`restore_in_progress` → 503；
+`backup_engine_failed`·`backup_failed`·`backup_interrupted`·`restore_failed` → 500。
+
+可见性码：`invalid_visibility` → 400；越权资源统一 404（不泄露存在性，见 §1.7）。
+
+限流：`429` + `Retry-After`——认证端点 10 req/min/IP，`/api` 与 `/a2a` 合计 200 req/min/IP，
+loopback 客户端豁免；静态资源、`/healthz`、发现路径不限。
+
 ### 5.2 JSON-RPC 错误码
 
 标准：`-32700 parse_error`、`-32600 invalid_request`、`-32601 method_not_found`、
@@ -350,7 +489,8 @@ agent 能力码（F10–F16）：`computer_not_found`·`schedule_not_found` → 
 自定义：`-32001 task_not_found`、`-32002 task_not_cancelable`、
 `-32003 push_notification_not_supported`、`-32004 unsupported_operation`、
 `-32005 invalid_state_transition`、`-32006 resource_not_found`、
-`-32007 resource_unreachable`、`-32008 task_not_resumable`。
+`-32007 resource_unreachable`、`-32008 task_not_resumable`、
+`-32009 unauthenticated`（仅用于「匿名调用需要认证的方法」）。
 `error.message` **就是 code 字符串**（不含空格与自然语言）。
 
 ### 5.3 适配器码
@@ -415,7 +555,7 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
 - 拓扑连线只用线型（实线 / 流动虚线 / 点线）与线宽区分；手写 SVG，不引带调色板的图表库。
 - `prefers-contrast: more` 提亮次级文本与描边；`prefers-reduced-motion` 降级为静态。
 
-## 8. 验收标准（M1）
+## 8. 验收标准（M1 — 核心契约）
 
 1. `go vet ./...` 无告警；`go test -race ./...` **全绿**（a2a、config、registry、adapter、hub、
    model、store、handlers、httputil 单测 + `tests/e2e_test.go` 真实 HTTP 端到端），
@@ -430,8 +570,9 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
    v0.1 别名、flow 分支 + 并行、错误码路径（`-32001`/`-32601`/`resource_not_found` 帧）。
 5. 控制面冒烟全通：注册资源 → 出现在列表/导出/Agent Card → 立即被 A2A 调用 → 删除。
 6. 前端零硬编码自然语言、零有彩色值；13 语切换与 RTL 不破版。
-7. **不产出任何评分/评测分数**；pushNotification 只留痕（内存或 `push_records`，可断言），
-   不发真实网络请求。
+7. **不产出任何评分/评测分数**；pushNotification 每次回调都落 `push_records` 可断言。
+   真实投递在设置 `AGENTHUB_PUSH_SECRET` 后启用（https-only + SSRF 白名单 + HMAC 签名），
+   未设置时保持只留痕；`AGENTHUB_PUSH_ENABLED=false` 关闭整个能力。
 8. 持久化验收：`DATABASE_URL` 缺失时拒绝启动；迁移可重复执行（第二次为 no-op）；
    资源/任务/artifact/span/事件/回调重启后仍可回读，事件可按 `since` 回放；
    **集成用例在未设置 `DATABASE_URL` 时 skip，绝不伪造结果**。
@@ -466,6 +607,22 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
 9. 覆盖率：`make test-cover` 可复现；`registry` / `model` / `a2a` / `hub` / `authz` 均在 85% 以上，
    `store` 在 `DATABASE_URL` 未设置时 skip（此时数值不代表真实覆盖）。
 
+## 8.3 验收标准（M3 — 安全加固 / 沙盒 / 隔离与审计）
+
+M3 各块的逐项验收写在对应子文档（`requirements-security.md` §验收、`requirements-sandbox.md` §7、
+`requirements-isolation.md` §7），主文档只钉住不可退让的三条：
+
+1. **安全加固**：安全响应头、per-IP 限流（429 + `Retry-After`）、CSRF 同源校验、账号锁定、
+   SSRF 安全出站、签名 push、密钥加密全部有单测；`AGENTHUB_ENV=prod` 缺
+   `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL`、或 `AGENTHUB_ENCRYPTION_KEY` < 32 字节时**拒绝启动**。
+2. **沙盒**：租约复用 / 上限 / 回收有单测；声明式条目加载期校验（未知占位符、非绝对路径）拒绝启动；
+   `AGENTHUB_SANDBOX_PROVIDER=off` 时执行被拒；未接线端点返回 503 `feature_unavailable`，
+   后端缺失返回 409 `sandbox_unsupported`——两者语义不得混用。
+3. **隔离与审计**：`AGENTHUB_RLS=enforce` 下越权读写返回「不存在」；`resources.visibility`
+   未标记 `public` 且无 grant 的记录不可见（升级为破坏性变更）；`audit_log` 只追加、哈希链
+   `GET /api/audit/verify` 可复算、审计写失败不阻塞业务；迁移 `021`–`027` 幂等并已登记
+   `store_test.go` 的 `want` 清单。
+
 ## 9. 控制台文档屏（`/docs`）
 
 控制台自带一份说明自身功能与接口的文档，随控制台发版、离线可读，不依赖外部文档站。
@@ -480,8 +637,10 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
 
 - 功能：六类资源通道、任务状态机（`submitted → working → input-required → completed/failed/canceled`）、
   健康值**只由探测或运行写入**的语义、记录审批状态机。
-- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 66 条路由**，逐条给出方法、
-  路径、所需权限、请求体与响应体示例，按协议/鉴权/资源/命名空间/上游源/任务/导出/用户与授权/备份/运维分组。
+- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 127 条路由**，逐条给出方法、
+  路径、所需权限、请求体与响应体示例，按 §4.2.1 的分组组织（协议/鉴权/资源/命名空间/上游源/任务/
+  导出/工作台与线程/通道/连接器/计算机/目标与周期/调度器/沙盒与节点/知识/用户与授权/备份/API Key/审计）。
+- 沙盒：隔离层概念、类型目录与执行节点协议（与 `requirements-sandbox.md` 同源）。
 - 鉴权与错误码：会话 cookie、权限模型与 owner 语义；错误码按 HTTP 状态码分组 + 适配器码。
 
 ### 9.3 内容与文案的边界
@@ -499,6 +658,8 @@ Model router 的真实 provider 只在 `provider_mode=openai_compatible` 时启�
 
 - `docs` 已加入 `tests/copy-fallback.spec.js` 的 `PROSE` 表：13 语键位齐全且非英语译文异于英文。
 - 端点清单与 `internal/handlers/handlers.go` 注册一致（增删路由须同步 `docs-content.js`）。
+  **已知差距（待补）**：`docs-content.js` 目前 116 条，缺 `DELETE /api/computers/{id}` 与 15 条
+  沙盒/类型目录/执行节点路由（含 13 语 `descKey`）。
 - 完成后必须 `make web-build`：`backend/static` 由 Go 在 3500 端口直接托管，不重建则新屏不可见。
 
 ## 10. 调度器（Router 层）

@@ -7,9 +7,10 @@ import (
 	"hash/crc32"
 )
 
-// Speech transcribes audio to text (STT) and synthesises text to audio (TTS). The
-// first release ships a deterministic mock so the whole voice path runs offline with
-// no network and no subprocess, matching the other five adapters.
+// Speech transcribes audio to text (STT) and synthesises text to audio (TTS). It
+// is a deterministic mock so the whole voice path runs offline with no network
+// and no subprocess, like skill and custom — the model, agent, cli and mcp
+// adapters are the ones that reach a real endpoint or a leased environment.
 //
 // TODO(real): replace Transcribe/Synthesize with a real provider behind the same
 // signature (e.g. an OpenAI-compatible audio endpoint configured via KindConfig),

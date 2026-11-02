@@ -42,13 +42,13 @@ type PushNotifier interface {
 }
 
 // MockNotifier records callbacks: it never performs network I/O, so push
-// notification behaviour stays assertable in tests.
+// notification behaviour stays assertable in tests. It is also the notifier the
+// server keeps until AGENTHUB_PUSH_SECRET is set; with one, main swaps in
+// HTTPNotifier (notifier.go) for the signed, SSRF-guarded POST to cfg.URL.
 //
 // When Repo is set the callback is persisted as well, so the history of a task
 // survives a restart; a failing write only degrades to the in-memory record and
 // must never influence the terminal state of a task.
-//
-// TODO(real): POST the A2A task payload to cfg.URL with the configured auth.
 type MockNotifier struct {
 	mu      sync.Mutex
 	records []PushRecord

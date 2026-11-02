@@ -247,7 +247,10 @@ func Register(d Deps) http.Handler {
 
 	// Execution nodes: a desktop (agentbuddy) that runs commands on its own
 	// machine on this instance's behalf. Enrollment and revocation are an
-	// operator act; polling and reporting are the node's own credentials.
+	// operator act (resources:write). The node protocol itself — heartbeat,
+	// long poll, result report — authenticates with the node's own API key and
+	// needs tasks:write, the same permission that lets it run work; there is no
+	// separate node credential to issue or rotate.
 	mux.HandleFunc("GET /api/sandbox-nodes", d.requirePermission(authz.PermResourcesRead, d.handleListSandboxNodes))
 	mux.HandleFunc("POST /api/sandbox-nodes", d.requirePermission(authz.PermResourcesWrite, d.handleRegisterSandboxNode))
 	mux.HandleFunc("DELETE /api/sandbox-nodes/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleRemoveSandboxNode))

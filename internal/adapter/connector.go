@@ -1,9 +1,13 @@
 // Package adapter turns every kind of registered resource into one uniform
 // invocation surface.
 //
-// The first release ships deterministic mock connectors only: no network, no
-// subprocess, no filesystem. Each real implementation is marked with a
-// TODO(real) boundary so the swap is a localised change.
+// A connector is real as far as its resource says where to reach it: model talks
+// to an OpenAI compatible endpoint (model_openai.go), agent fetches an Agent Card
+// and sends message/send (agent.go), and cli / mcp run inside a leased sandbox
+// environment rather than in the host process (cli.go, mcp.go). skill, custom and
+// speech are still deterministic mocks and each keeps its TODO(real) boundary.
+// Every connector falls back to its mock when no sandbox or endpoint is wired, so
+// an instance with nothing configured stays offline and assertable.
 package adapter
 
 import (

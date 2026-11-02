@@ -59,8 +59,9 @@ func (d Deps) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		Enabled:  req.Enabled,
 		OwnerID:  PrincipalFrom(r).UserID,
 	}
-	// TODO(real): a real scheduler would register s.CronExpr with APScheduler and
-	// run the goal as a hub task. The first release only stores the intent.
+	// Nothing is registered here: the store derives next_run from CronExpr at save
+	// time, and the router scans due schedules and opens a ticket — the same path
+	// POST /api/schedules/{id}/run takes for a manual firing.
 	created, err := d.Schedules.Create(r.Context(), s)
 	if err != nil {
 		httputil.WriteErr(w, err)

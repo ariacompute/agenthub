@@ -75,7 +75,10 @@ func (d Deps) handleRegisterSandboxNode(w http.ResponseWriter, r *http.Request) 
 	}
 	id := strings.TrimSpace(req.ID)
 	if !validNodeID(id) {
-		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeSandboxPolicyDenied)
+		// A malformed identity is the caller's mistake, not a policy refusal:
+		// sandbox_policy_denied means "the sandbox may not run this", which
+		// would send the desktop looking for a policy that does not exist.
+		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeBadRequest)
 		return
 	}
 	ownerID := PrincipalFrom(r).UserID

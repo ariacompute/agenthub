@@ -70,8 +70,8 @@ func httpEndpoint(raw string) string {
 	return strings.TrimRight(trimmed, "/")
 }
 
-// endpointOf is the address the kind's own TODO(real) will resolve against:
-// the entry's endpoint, when it is one the adapter could call.
+// endpointOf is the address a connector resolves against: the entry's endpoint,
+// when it is one the adapter could actually call.
 func endpointOf(e *registry.Entry) string {
 	if e == nil {
 		return ""
