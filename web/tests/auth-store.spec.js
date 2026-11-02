@@ -447,3 +447,63 @@ describe('session revocation', () => {
     expect(store.errorCode).toBe('user_not_found')
   })
 })
+
+// The two actions the console runs before it can show anything: what the
+// instance supports (which sign-in buttons to draw) and the sign-up form.
+describe('configuration and sign-up', () => {
+  it('reads which sign-in providers the instance configured', async () => {
+    const store = useAuthStore()
+    api.authConfig.mockResolvedValue({
+      configured: true,
+      // The login screen only needs the names; the store keeps nothing else.
+      providers: [{ name: 'github', label: 'GitHub' }, { name: 'oidc' }],
+    })
+
+    await store.loadConfig()
+
+    expect(store.providers).toEqual(['github', 'oidc'])
+    expect(store.configured).toBe(true)
+    expect(store.errorCode).toBe('')
+  })
+
+  it('leaves the sign-in screen bare when the config request fails', async () => {
+    const store = useAuthStore()
+    api.authConfig.mockRejectedValue({ code: 'service_unavailable' })
+
+    await store.loadConfig()
+
+    expect(store.providers).toEqual([])
+    expect(store.configured).toBe(false)
+    // The login form still renders; it just offers no OAuth buttons.
+    expect(store.errorCode).toBe('service_unavailable')
+  })
+
+  it('falls back to a generic code when the failure carries none', async () => {
+    const store = useAuthStore()
+    api.authConfig.mockRejectedValue(new Error('socket closed'))
+
+    await store.loadConfig()
+
+    expect(store.errorCode).toBe('internal_error')
+  })
+
+  it('reports a successful sign-up and clears the busy flag', async () => {
+    const store = useAuthStore()
+    api.register.mockResolvedValue({ id: 'user-1' })
+
+    expect(await store.register({ email: 'a@example.test', password: 'correct horse' })).toBe(true)
+    expect(api.register).toHaveBeenCalledWith({ email: 'a@example.test', password: 'correct horse' })
+    expect(store.loading).toBe(false)
+    expect(store.errorCode).toBe('')
+  })
+
+  it('keeps the code when the address is already taken', async () => {
+    const store = useAuthStore()
+    api.register.mockRejectedValue({ code: 'email_taken' })
+
+    expect(await store.register({ email: 'a@example.test', password: 'correct horse' })).toBe(false)
+    // The form stays open with the typed values, so the code has to survive.
+    expect(store.errorCode).toBe('email_taken')
+    expect(store.loading).toBe(false)
+  })
+})

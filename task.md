@@ -844,3 +844,41 @@ CRD 另补主服务有而 operator 缺的旋钮：`spec.rls{ mode, acknowledged 
       （先 `psql -f scripts/provision-db-roles.sql` 建角色并跑过一次迁移。）
 - 残余：`channel_messages` 与 `threads` 无 `owner_id` 列，未纳入 RLS；webhook 的验签与去重
   语义未改；operator 的 `buildRole`（受管应用自身 Role）保持最小，不动。
+
+## M13 — 再一轮覆盖率补强（2026-11-02，测试为主）
+
+只加用例，不改生产代码。新增用例顺带钉死两条此前无人断言的语义：**未知 id 读 404、删 204**。
+
+### 1. 服务端：`internal/handlers` 76.3% → **79.4%**
+
+- `store_failures_test.go`：给 threads / channels / computers / schedules / knowledge 五个 Store
+  端口各挂一个「每次调用都失败」的假实现，跑遍 **22 条 CRUD 路由**，断言一律 5xx 且带机器码。
+  这些分支以前只能靠读代码相信：一个吞掉错误的 handler 会回 200 + 空列表，界面显示「你还没有
+  任何线程」，而整个功能其实是断的。
+- 同文件另加两组：`TestAnUnknownIdIsANotFoundForEverySurface`（未知 id 读 404，含各面自己的码）
+  与 `TestDeletingAMissingRowIsStillASuccess`（schedules / channels 删未知 id 回 204——重试不该被
+  告知「你搞错了」）。
+- `admin_edges_test.go`：管理员真会撞上的 4xx——未知用户 404、`invalid_email`、`weak_password`、
+  不存在的 `status` → `bad_request`，并断言**拒绝后账户仍在原值**；另有「一次请求同时改状态与口令」
+  与「删除即禁用（行必须留下）」两条复合路径。
+- `resource_edges_test.go`：资源五条路由未知 id 一律 404；非法 `health` / `visibility` → 400
+  （`invalid_visibility` 用 registry 常量比对）；PUT 的 body 不能改 id；连接器未知 id 404。
+- `admin_store_failures_test.go`：authz 端口整体故障时，permissions / roles / groups / grants
+  十二条路由全部 5xx 带码——防的是「以为删了但没删」。
+
+### 2. web：21 文件 / **413 用例**，语句与行 **100%**、分支 **95.1%**、函数 **99.5%**
+
+- `tests/auth-store.spec.js` 补 5 条，把该文件从 95.05% 推到 100% 语句：`loadConfig` 的
+  `providers`/`configured` 映射与两种失败（带码 / 无码回落 `internal_error`），`register` 的成功
+  与 `email_taken` 失败（同时断言 `loading` 归零）。注册与实例配置此前**一条都没被执行过**。
+- 剩余分支集中在 `api.js`（可选链缺省）、`playground.js`（表单缺省值）与 `auth-store` 的
+  `?? []` 回退臂，均为不可达或等价分支，未写假用例。
+
+### 3. 刻意不补的部分
+
+- `internal/store`（2.9%）、`internal/backup`（60.4%）需要真实 PostgreSQL 与 `pg_dump`/`pg_restore`，
+  本机 skip，数字以 CI 为准（门控命令见 M12 §8）。
+- handlers 里仍空着的主要是三类**没有注入点**的错误分支：concrete 服务（router / sandbox / backups）
+  不是端口、auth 的用户仓储在测试 helper 内部构造无法替换、`httputil.Stream` 的「writer 不支持
+  Flush」分支需要非 `httptest` 的 ResponseWriter。补它们要么改生产代码加端口，要么写绕过入口的
+  假用例，两者都比留白更糟。
