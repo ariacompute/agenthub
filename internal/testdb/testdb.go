@@ -76,6 +76,53 @@ func RequireDDL(t *testing.T, ctx context.Context, dsn string) {
 	}
 }
 
+// RequireTablePrivilege skips the case when the connection's role lacks priv on
+// table, naming both instead of letting the statement fail as "permission
+// denied". It asks the handle the case will actually use, because a suite handed
+// a privileged role reconnects as a narrower one (tests/rls_test.go).
+//
+// The audit ledger is the case that needs it. scripts/provision-db-roles.sql
+// revokes UPDATE, DELETE and TRUNCATE on audit_log from the runtime role and
+// leaves expiry to the retention job, so a case that prunes rows cannot run as
+// agenthub_app — and skipping is the honest answer, not a red suite.
+func RequireTablePrivilege(t *testing.T, db *gorm.DB, table, priv string) {
+	t.Helper()
+	var ok bool
+	if err := db.Raw(`SELECT has_table_privilege(current_user, ?, ?)`, table, priv).Scan(&ok).Error; err != nil {
+		t.Fatalf("read the %s privilege on %s: %v", priv, table, err)
+	}
+	if ok {
+		return
+	}
+	var role string
+	_ = db.Raw(`SELECT current_user`).Scan(&role).Error
+	t.Skipf("role %q holds no %s on %s: this case expires rows through the retention path, so it needs the role that may write the ledger (the migrator, or the retention job)", role, priv, table)
+}
+
+// RequireBypassRLS skips a dump case when the role cannot read a guarded table.
+//
+// pg_dump copies every table with a bare COPY ... TO stdout, and PostgreSQL
+// refuses that on a table with row level security unless the role is a superuser
+// or holds BYPASSRLS. That is exactly the split provision-db-roles.sql draws:
+// the migrator takes checkpoints, the runtime role never may — so under
+// agenthub_app this case skips with the privilege named.
+func RequireBypassRLS(t *testing.T, ctx context.Context, dsn string) {
+	t.Helper()
+	conn := Connect(t, ctx, dsn)
+	var role string
+	var ok bool
+	err := conn.QueryRow(ctx, `SELECT current_user,
+		coalesce((SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user), false)`).
+		Scan(&role, &ok)
+	if err != nil {
+		t.Fatalf("read the session role: %v", err)
+	}
+	if ok {
+		return
+	}
+	t.Skipf("role %q is neither a superuser nor BYPASSRLS: pg_dump copies each table directly, and PostgreSQL refuses that on a row level security guarded table — run this case as the role that takes checkpoints", role)
+}
+
 // MigrateOrExisting runs the embedded migrations and tolerates a failure when the
 // schema is already there.
 //

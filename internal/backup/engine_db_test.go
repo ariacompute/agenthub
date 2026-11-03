@@ -165,6 +165,10 @@ func TestPgDumpEngineBuildsAPositiveTableList(t *testing.T) {
 			t.Skipf("%s is not installed, so this engine cannot run here", bin)
 		}
 	}
+	// pg_dump copies each table with a bare COPY ... TO stdout, which PostgreSQL
+	// refuses on a table guarded by row level security. Taking checkpoints is the
+	// migrator's job, so under the runtime role this case skips and says why.
+	testdb.RequireBypassRLS(t, context.Background(), dsn)
 	eng, err := newPgDumpEngine(dsn)
 	if err != nil {
 		t.Fatalf("newPgDumpEngine: %v", err)

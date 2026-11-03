@@ -13,6 +13,7 @@ import (
 // TestIntegrationAPIKeysSchema ensures the api_keys and api_key_scopes tables
 // exist after a migration run, so the feature survives a real upgrade.
 func TestIntegrationAPIKeysSchema(t *testing.T) {
+	requireMigrate(t)
 	db := openDBReal(t)
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)

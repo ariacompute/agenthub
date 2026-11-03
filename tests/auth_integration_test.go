@@ -18,6 +18,7 @@ import (
 // existing installation must survive the upgrade to 005/006 without a manual
 // step, and every table the identity layer needs must be there afterwards.
 func TestIntegrationAuthSchemaIsIdempotent(t *testing.T) {
+	requireMigrate(t)
 	db := openDBReal(t)
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("second migrate: %v", err)

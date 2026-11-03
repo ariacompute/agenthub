@@ -35,6 +35,7 @@ import (
 	"agenthub/internal/identity"
 	"agenthub/internal/schedules"
 	"agenthub/internal/store"
+	"agenthub/internal/testdb"
 	"agenthub/internal/threads"
 )
 
@@ -517,6 +518,11 @@ func TestRLSCoversKnowledgeChunks(t *testing.T) {
 // expire rows.
 func TestRLSAuditTrailIsReadOnlyAndAppendOnly(t *testing.T) {
 	db := openRLSDB(t)
+	// The last assertion is that the retention scope may expire a row, so the
+	// role has to hold DELETE on audit_log. The suite provisions it when it was
+	// handed a superuser; the production runtime role never does — there, the
+	// ledger belongs to the retention job and this case skips by name.
+	testdb.RequireTablePrivilege(t, db, "audit_log", "DELETE")
 	eventID := rlsTag(t)
 	system := rlsIdentity{System: true}
 	execIn(t, db, system,

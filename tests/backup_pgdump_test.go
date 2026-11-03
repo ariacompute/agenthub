@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"agenthub/internal/backup"
+	"agenthub/internal/testdb"
 )
 
 // pgDumpEngineFor selects the client engine, or skips with the reason.
@@ -55,8 +56,14 @@ func pgDumpEngineFor(t *testing.T) (backup.Engine, string) {
 // archive pg_dump produces, and the manifest filled in from the database
 // afterwards.
 func TestIntegrationPgDumpEngineWritesAnArchive(t *testing.T) {
-	engine, _ := pgDumpEngineFor(t)
+	engine, dsn := pgDumpEngineFor(t)
 	ctx := context.Background()
+	// pg_dump copies every table with a bare COPY ... TO stdout, which PostgreSQL
+	// refuses on a row level security guarded table unless the role is a superuser
+	// or holds BYPASSRLS. Taking a checkpoint is the migrator's job, so under the
+	// runtime role this case skips and names the privilege; the cases that only
+	// restore keep running there.
+	testdb.RequireBypassRLS(t, ctx, dsn)
 
 	var buf bytes.Buffer
 	res, err := engine.Dump(ctx, &buf)

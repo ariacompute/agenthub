@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"agenthub/internal/audit"
 	"agenthub/internal/identity"
+	"agenthub/internal/testdb"
 )
 
 // The audit ledger is append only by trigger: a row cannot be updated or
@@ -26,6 +29,19 @@ func auditWriterCtx() context.Context { return identity.System() }
 
 func auditReaderCtx() context.Context {
 	return identity.SystemWith(identity.Identity{AuditRead: true})
+}
+
+// requireAuditLedger opens the shared handle and then asks the one question
+// these cases depend on: may this role expire rows? The runtime role may append
+// and read audit_log and nothing else — provision-db-roles.sql revokes UPDATE,
+// DELETE and TRUNCATE from it — so on a DML-only deployment every case below
+// skips with the grant named, rather than reporting "permission denied" from a
+// cleanup that was never the subject of the test.
+func requireAuditLedger(t *testing.T) *gorm.DB {
+	t.Helper()
+	db := openGovernanceDB(t)
+	testdb.RequireTablePrivilege(t, db, "audit_log", "DELETE")
+	return db
 }
 
 func auditRetentionCtx() context.Context {
@@ -63,7 +79,7 @@ func auditCleanup(t *testing.T, s audit.Store) {
 }
 
 func TestAuditStoreRoundTripsOneEvent(t *testing.T) {
-	db := openGovernanceDB(t)
+	db := requireAuditLedger(t)
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 
@@ -115,7 +131,7 @@ func TestAuditStoreRoundTripsOneEvent(t *testing.T) {
 }
 
 func TestAuditStoreIsIdempotentOnEventID(t *testing.T) {
-	db := openGovernanceDB(t)
+	db := requireAuditLedger(t)
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 
@@ -148,7 +164,7 @@ func TestAuditStoreIsIdempotentOnEventID(t *testing.T) {
 // Metadata is decorative. An unserialisable value must cost the metadata, never
 // the event: a lost audit row is a hole in the trail.
 func TestAuditStoreKeepsTheEventWhenMetadataCannotBeEncoded(t *testing.T) {
-	db := openGovernanceDB(t)
+	db := requireAuditLedger(t)
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 
@@ -171,7 +187,7 @@ func TestAuditStoreKeepsTheEventWhenMetadataCannotBeEncoded(t *testing.T) {
 // List and Stats share their WHERE clauses, and the console shows both side by
 // side: a counter that described different rows than the table would be a lie.
 func TestAuditStoreListFiltersAndStatsAgree(t *testing.T) {
-	db := openGovernanceDB(t)
+	db := requireAuditLedger(t)
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 
@@ -243,7 +259,7 @@ func TestAuditStoreListFiltersAndStatsAgree(t *testing.T) {
 // The verifier walks the trail with Segment, so the paging has to be exact:
 // ascending by id, a from window, and a cursor that cannot repeat or skip a row.
 func TestAuditStoreSegmentPagesInOrder(t *testing.T) {
-	db := openGovernanceDB(t)
+	db := requireAuditLedger(t)
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 
@@ -303,7 +319,7 @@ func TestAuditStoreSegmentPagesInOrder(t *testing.T) {
 }
 
 func TestAuditStorePruneStopsAtTheCutoff(t *testing.T) {
-	db := openGovernanceDB(t)
+	db := requireAuditLedger(t)
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 

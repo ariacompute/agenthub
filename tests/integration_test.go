@@ -57,6 +57,15 @@ func openDBReal(t *testing.T) *gorm.DB {
 	return db
 }
 
+// requireMigrate skips a case whose subject is Migrate itself. openDBReal has
+// already tolerated a schema the role may not create (MigrateOrExisting), so a
+// second, successful run only means something where the role may DDL — as the
+// migrator in a production-shaped deployment, not as the runtime role.
+func requireMigrate(t *testing.T) {
+	t.Helper()
+	testdb.RequireDDL(t, context.Background(), testdb.DSN(t))
+}
+
 func testIntegrationConfig() *config.Config {
 	return &config.Config{
 		HTTPPort:        "3500",
@@ -73,6 +82,7 @@ func testIntegrationConfig() *config.Config {
 }
 
 func TestIntegrationMigrateIsIdempotent(t *testing.T) {
+	requireMigrate(t)
 	db := openDBReal(t)
 
 	// Running the full migration set again must be a no-op.
