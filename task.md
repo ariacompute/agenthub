@@ -345,8 +345,8 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 - `docker-compose.yml`：dev `web` 服务 `image: oven/bun:1-alpine` → `oven/bun:1.4.4-alpine`。
 - `web/package.json`：新增 `engines.bun >=1.4.4`，约束本地开发运行时。
 
-### 3. 桌面端（Rust / Tauri，reqwest + rustls）
-- `desktop/src-tauri/Cargo.toml`：显式固定 `webpki-roots = "1.0.10"`（Rust 信任库在 1.0.10 移除 emSign 根；桌面环回代理 SSE/HTTP 出向校验依赖它）。本仓此前无 `Cargo.lock`，首次构建须解析到 ≥1.0.10。
+### 3. 桌面端（Rust / Tauri，reqwest + rustls —— 属 **agentbuddy** 仓）
+- `desktop/src-tauri/Cargo.toml`：显式固定 `webpki-roots = "1.0.10"`（Rust 信任库在 1.0.10 移除 emSign 根；桌面环回代理 SSE/HTTP 出向校验依赖它）。该仓此前无 `Cargo.lock`，首次构建须解析到 ≥1.0.10。**本仓无 Rust 代码、无 `desktop/`，此处仅记录同批响应在另一仓的落点。**
 
 ### 4. 检测与验证
 - 新增 `scripts/check-emudhra.sh`：离线按 emSign 根（信任锚）指纹扫描 CA bundle，规避前向/拦截代理造成的在线探测假阳性。
@@ -1042,10 +1042,14 @@ web 侧剩余分支集中在 `auth-store.js` 的 `?? []` 回退臂与 `playgroun
 - `tests/docs-content.spec.js` 的计数与分组断言同步（133→141、collaboration 20→23、files 5）。
 - 本轮文档同步：`AGENTS.md`、`README.md`、`requirements.md`、`requirements-isolation.md`、
   `requirements-sandbox.md`。
+- 第六轮评估 §10.2 收口：`releasenotes_emoji.md` / `releasenotes_cn.md` / `releasenotes.md`、
+  `README.md` / `README_cn.md` 与 `AGENTS.md` 的屏数一律对齐为 **十屏** 并补上 `PlaygroundView`
+  （`/playground`）——此前 `views/` 实有 10 个屏，文档却停在「九屏 / 八屏」且清单里漏了试跑台。
 
 ### 7. 校验
 
 - `gofmt -w internal cmd`、`go build ./...`、`go vet ./...`、`go test ./...` 全绿（本机无
   `DATABASE_URL`，库门控用例按既有口径跳过）。
 - `cd web && bun run test`（22 个 spec）、`bun run build` 全绿。
-- 残余：本机 `cargo` 无法执行（工具链所在卷被判为不可信挂载），Rust 侧本轮改动只能由 CI 验证。
+- 残余：本机无 `DATABASE_URL`，带库的 `-race` 与生产角色 `agenthub_app`（`go-restricted`）两个面只能由
+  CI 把关；本仓无 Rust / `Cargo.toml`、无桌面端，因此不存在 Rust 侧的验证缺口。

@@ -10,8 +10,8 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 
 - 后端：**Go 1.27.3 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
   （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
-- 前端：Vue 3 + Vite（**bun 1.4.4+** 包管理/测试），八屏控制台（registry / registries / sources / trace /
-  topology / login / admin / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
+- 前端：Vue 3 + Vite（**bun 1.4.4+** 包管理/测试），十屏控制台（registry / registries / sources / trace /
+  topology / **playground** / login / admin / audit / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
 - 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通；真实对接以 `TODO(real)` 标注边界。
 - 设计参照 `mastra-ai/mastra` 的**协议与交互形态**（MCP Registry 条目模型、workflow 三原语、
   HITL→`input-required`、Studio 试跑、observability 分层），但**不引入其任何代码或 npm 依赖**。
@@ -185,8 +185,9 @@ persistence ← internal/store（GORM 实现）
 - `docker-compose.yml`：`postgres:16-alpine`（宿主 **5434**）+ `agenthub`（依赖 `service_healthy`）
   + `web`（`profiles: [dev]`）
 - `web/`：Vue 3 控制台（`src/lib/copy/*-copy.js` ×13 语、`languages.js`、`use-copy.js`、`api.js`、
-  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 八屏
-  （registry / **registries** / **sources** / trace / topology / **login** / **admin** / **docs**，admin
+  `auth-store.js`（身份/权限/管理动作）、`errors.js`、`style.css` 单色 token；`views/` 十屏
+  （registry / **registries** / **sources** / trace / topology / **playground** / **login** / **admin** /
+  **audit** / **docs**，admin
   第四屏 backups 拆为 `views/admin/{BackupsPanel,BackupScheduleCard,BackupList,RestoreDrawer}.vue`；
   registry 抽屉的 per-kind 配置区块抽为 `views/components/ResourceKindForm.vue` 与
   `components/EnvEditor.vue`）；`tests/` vitest）

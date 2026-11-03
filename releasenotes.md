@@ -364,7 +364,7 @@ while the container itself stays stateless.
 The Vue 3 + Vite (bun) bundle is hosted at `/` by the Go process — both an operations
 screen and a visual inspector for the A2A contract.
 
-### Nine Screens
+### Ten Screens
 
 - **Registry**: six-kind (including `custom`) filtering + search, namespace and status
   filters, health indicators and a stats bar, and a per-resource "trial run". The register
@@ -379,6 +379,14 @@ screen and a visual inspector for the A2A contract.
   artifact text.
 - **Topology**: five asset lanes with invocation edges, line style distinguishing active
   from failed.
+- **Playground** (`/playground`, needs `tasks:write`): two modes on one screen. A single
+  call runs synchronously or over SSE and may carry a `then` / `branch` / `parallel` flow
+  (validated for JSON shape and branch-condition prefixes before it is submitted); a
+  multi-participant chat takes turns, optionally carrying the last turns as context, and
+  stops either at a fixed round count or when the operator says so. The hub keeps no
+  memory across tasks, so the transcript lives on this screen and only travels to the
+  participants when the operator asks for it; a task parked in `input-required` can be
+  continued right here (`tasks/resume`).
 - **Login & registration**: the first account becomes the owner; every `/api/*` route
   is closed without a session.
 - **Administration**: users, groups, roles, permissions and resource grants, plus

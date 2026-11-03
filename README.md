@@ -30,8 +30,8 @@ travels back the same path.
 
 ![agenthub console — Registry screen](registry.png)
 
-The Registry screen: eight kinds of screen in one console (registry, task trace, topology,
-registries, sources, playground, administration and a built-in documentation page).
+The Registry screen: ten screens in one console (registry, registries, sources, task trace,
+topology, playground, sign-in, administration, audit and a built-in documentation page).
 
 ## Run
 

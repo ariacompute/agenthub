@@ -1,6 +1,6 @@
 # 🚀 AgentHub 发布说明
 
-> AgentHub 是面向 A2A（Agent2Agent）协议的互连平台：单二进制后端 + PostgreSQL，外加一个九屏控制台。
+> AgentHub 是面向 A2A（Agent2Agent）协议的互连平台：单二进制后端 + PostgreSQL，外加一个十屏控制台。
 
 ---
 
@@ -66,7 +66,7 @@
 
 ## 🖥️ 七、控制台
 
-- 🧭 **九屏**：registry / registries / sources / trace / topology / login / admin / audit / docs。
+- 🧭 **十屏**：registry / registries / sources / trace / topology / playground / login / admin / audit / docs。
 - 🌐 **13 种语言**：`en zh zh-TW es fr de it ru ja ko pt ar hi`，`ar` 下整站 RTL。
 - 📚 **文档内嵌**：`/docs` 屏用 13 语记录全部端点，并由 `docs-content.js` 生成双语 Markdown。
 - 🔍 **审计屏**（需 `audit:read`）：时间窗预设与筛选、四枚水位指标、明细表（毫秒时间 / 请求 ID / 主体 / 动作 / 资源 / 状态码 / 耗时条形），以及并排展示 `prev_hash` 与 `hash` 的取证抽屉与链校验。
