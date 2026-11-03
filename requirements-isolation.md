@@ -259,7 +259,10 @@ hash[i] = sha256( hash[i-1] || canonical(event[i]) )
 - 新路由已登记 `handlers/listen.go` 的 `Listeners()` 与 `listen_test.go` 的 `probes`。
 - 领域层不 import GORM；未注入仓库时保持原内存语义，两条路径行为一致
   （归属过滤在内存与 PostgreSQL 上都有用例）。
-- 越权访问统一按「不存在」返回，不泄露存在性。
+- 越权访问统一按「不存在」返回，不泄露存在性——**读、改、删一体**：删不到的 id 与删他人的 id
+  同为 404（`schedule_not_found` / `channel_not_found` / `computer_not_found` / `file_not_found` 等），
+  由单条 `DELETE` 的 `RowsAffected` 判定，不先读一次（先读会把答案押在一条随时会变的快照上）。
+  幂等重试的友好性改由客户端承担：控制台把删除时的 `*_not_found` 当作「已经没了」处理。
 - 审计写失败不阻断业务；队列满只丢帧并告警。
 - `tests/rls_test.go` 的连接必须同时满足两个前提才能断言策略：`RLSEnforce: true`（零值会
   `relaxRLS` 放行全部策略）、**会话角色受策略约束**（超级用户 / `BYPASSRLS` / 仅靠 `ENABLE`

@@ -651,8 +651,8 @@ func TestRLSOwnedSurfacesAreScopedByOwner(t *testing.T) {
 	t.Cleanup(func() {
 		// Cleanup runs as the process: a policy would refuse to delete another
 		// owner's row, which is the behaviour under test.
-		_ = chans.Delete(system, channel.ID, alice)
-		_ = scheds.Delete(system, sched.ID, alice)
+		_, _ = chans.Delete(system, channel.ID, alice)
+		_, _ = scheds.Delete(system, sched.ID, alice)
 		_ = comps.Delete(system, comp.ID, alice)
 	})
 
@@ -685,8 +685,13 @@ func TestRLSOwnedSurfacesAreScopedByOwner(t *testing.T) {
 	if _, err := scheds.Update(bobCtx, &schedules.Schedule{ID: sched.ID, Goal: "hijacked"}, bob); err != nil {
 		t.Fatalf("a refused update must not error, got %v", err)
 	}
-	if err := chans.Delete(bobCtx, channel.ID, bob); err != nil {
-		t.Fatalf("a refused delete must not error, got %v", err)
+	// A refused delete answers "matched nothing" rather than an error: the row
+	// exists, it is simply not bob's, and the two are one answer.
+	if removed, err := chans.Delete(bobCtx, channel.ID, bob); err != nil || removed {
+		t.Fatalf("a refused delete = %v (err=%v), want (false, nil)", removed, err)
+	}
+	if removed, err := scheds.Delete(bobCtx, sched.ID, bob); err != nil || removed {
+		t.Fatalf("a refused schedule delete = %v (err=%v), want (false, nil)", removed, err)
 	}
 	if kept, err := scheds.Get(aliceCtx, sched.ID, alice); err != nil || kept == nil || kept.Goal != "goal-"+id {
 		t.Fatalf("the schedule was rewritten by a stranger: %+v (err=%v)", kept, err)
@@ -743,7 +748,7 @@ func TestRLSReceiptsAndThreadMessagesInheritTheParentOwner(t *testing.T) {
 	t.Cleanup(func() {
 		_ = execErrIn(db, rlsIdentity{System: true}, `DELETE FROM channel_messages WHERE channel_id = ?`, channel.ID)
 		_ = execErrIn(db, rlsIdentity{System: true}, `DELETE FROM threads WHERE id = ?`, thread.ID)
-		_ = chans.Delete(system, channel.ID, alice)
+		_, _ = chans.Delete(system, channel.ID, alice)
 	})
 
 	ref := "in-" + id

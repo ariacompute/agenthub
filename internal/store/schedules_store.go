@@ -157,8 +157,15 @@ func (s *schedulesStore) Update(ctx context.Context, in *schedules.Schedule, own
 	})
 }
 
-func (s *schedulesStore) Delete(ctx context.Context, id, ownerID string) error {
-	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
-		return ownedWhere(db, id, ownerID).Delete(&model.Schedule{}).Error
+func (s *schedulesStore) Delete(ctx context.Context, id, ownerID string) (bool, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (bool, error) {
+		res := ownedWhere(db, id, ownerID).Delete(&model.Schedule{})
+		if res.Error != nil {
+			return false, res.Error
+		}
+		// One statement answers both questions: whether a row matched, and —
+		// because the predicate carries the owner — whether it was the
+		// caller's. A row that is somebody else's affects zero rows.
+		return res.RowsAffected > 0, nil
 	})
 }

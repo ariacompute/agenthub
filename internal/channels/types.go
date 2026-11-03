@@ -101,7 +101,12 @@ type Store interface {
 	GetUnscoped(ctx context.Context, id string) (*Channel, error)
 	Create(ctx context.Context, c *Channel) (*Channel, error)
 	Update(ctx context.Context, c *Channel, ownerID string) (*Channel, error)
-	Delete(ctx context.Context, id, ownerID string) error
+	// Delete removes the channel when ownerID holds it and reports false when
+	// no row matched — an id that is gone, or one that belongs to somebody
+	// else. The two are deliberately indistinguishable: the handler answers
+	// both with the same 404, so a delete cannot be used to ask "does this
+	// channel exist" any more than a read can.
+	Delete(ctx context.Context, id, ownerID string) (bool, error)
 	// RecordDelivery inserts a channel message. It returns (false, nil) when
 	// ExternalRef is a duplicate, letting the caller treat redelivery as a no-op.
 	// The owner is read from the parent channel inside the same transaction, so a

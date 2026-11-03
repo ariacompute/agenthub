@@ -149,6 +149,20 @@ describe('login and logout', () => {
     expect(await store.login('a@b.c', 'bad')).toBe(false)
     expect(store.errorCode).toBe('invalid_credentials')
     expect(store.signedIn).toBe(false)
+    expect(store.loading).toBe(false)
+  })
+
+  it('separates an accepted password from a failed identity read', async () => {
+    // The credentials were accepted, so login reports true; the /me read is what
+    // failed, and it leaves the store signed out with the code on screen. The
+    // router guard keys off signedIn, so nothing renders as if the read worked.
+    api.login.mockResolvedValue({})
+    api.me.mockRejectedValue({ code: 'service_unavailable' })
+    const store = useAuthStore()
+    expect(await store.login('a@b.c', 'pw')).toBe(true)
+    expect(store.signedIn).toBe(false)
+    expect(store.errorCode).toBe('service_unavailable')
+    expect(store.loading).toBe(false)
   })
 
   it('clears identity on logout', async () => {

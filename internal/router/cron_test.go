@@ -48,7 +48,9 @@ func (f *fakeSchedules) Update(ctx context.Context, s *schedules.Schedule, owner
 	return nil, nil
 }
 
-func (f *fakeSchedules) Delete(ctx context.Context, id, ownerID string) error { return nil }
+func (f *fakeSchedules) Delete(ctx context.Context, id, ownerID string) (bool, error) {
+	return false, nil
+}
 
 func TestCronSourceFiresADueScheduleOnce(t *testing.T) {
 	e, _, c := newTestEngine(t)

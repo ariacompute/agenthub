@@ -96,7 +96,7 @@ The stream ends on the terminal status frame; there is no sentinel frame after i
 
 ## HTTP API
 
-The control plane the console itself talks to. Each route needs a session cookie; the permission column names what the caller must hold.
+The control plane the console itself talks to. Each route needs a session cookie; the permission column names what the caller must hold. A delete answers the way a read does: an id the caller cannot see is 404, whether it is already gone or belongs to somebody else. The console treats that answer as already done.
 
 ### Protocol
 
@@ -245,7 +245,7 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | `POST` | `/api/channels` | `tasks:write` — Cancel and resume tasks | Create a new entry among the channels | `{ kind, name, enabled, config, signingKeyEnv, threadId }` | `Channel — 201` |
 | `GET` | `/api/channels/{id}` | `tasks:read` — Read tasks | Read one of the channels by id | — | `Channel` |
 | `PUT` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Update a channel's name, enabled flag, config, signing key, or bound thread. | `{ name?, enabled, config?, signingKeyEnv?, threadId? }` | `Channel` |
-| `DELETE` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the channels | — | `204, no body` |
+| `DELETE` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the channels | — | `204 \| 404 channel_not_found` |
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — Read tasks | List all deliveries | — | `ChannelMessage[]` |
 | `POST` | `/api/channels/{id}/webhook` | — | Inbound webhook: verify the signature, dedupe by external ref, then forward the message into the bound thread. | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
 | `POST` | `/api/channels/{id}/deliver` | `tasks:write` — Cancel and resume tasks | Outbound delivery: post the message to the channel target_url (config.target_url) via an SSRF-safe client and echo the provider raw response (status plus truncated body). | `{ "message": "string" }` | `DeliverResult { status, raw }` |
@@ -281,7 +281,7 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | `POST` | `/api/schedules` | `tasks:write` — Cancel and resume tasks | Create a new entry among the schedules | `{ goal(required), trigger?(manual\|cron\|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid` | `Schedule — 201` |
 | `GET` | `/api/schedules/{id}` | `tasks:read` — Read tasks | Read one of the schedules by id | — | `Schedule \| 404 schedule_not_found` |
 | `PUT` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Replace one of the schedules outright | `{ goal?, trigger?, cronExpr?, enabled? }` | `Schedule \| 404 schedule_not_found` |
-| `DELETE` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the schedules | — | `204, no body` |
+| `DELETE` | `/api/schedules/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the schedules | — | `204 \| 404 schedule_not_found` |
 | `GET` | `/api/knowledge` | `resources:read` — Read resources | List all knowledge | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
 
 ### Execution sandboxes

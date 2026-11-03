@@ -55,5 +55,9 @@ type Store interface {
 	Get(ctx context.Context, id, ownerID string) (*Schedule, error)
 	Create(ctx context.Context, s *Schedule) (*Schedule, error)
 	Update(ctx context.Context, s *Schedule, ownerID string) (*Schedule, error)
-	Delete(ctx context.Context, id, ownerID string) error
+	// Delete removes the schedule when ownerID holds it and reports false when
+	// no row matched — an id that is gone, or one that belongs to somebody
+	// else. The handler answers both with the same 404, so the status code
+	// never reveals which of the two it was.
+	Delete(ctx context.Context, id, ownerID string) (bool, error)
 }

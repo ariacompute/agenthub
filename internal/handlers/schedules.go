@@ -120,12 +120,21 @@ func (d Deps) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, updated)
 }
 
+// A delete answers 404 for an id the caller cannot see, exactly as a read does:
+// gone and somebody else's are one answer, so neither can be used to ask whether
+// the row exists. The store reports it from RowsAffected rather than from a prior
+// lookup, so the answer describes the statement that ran.
 func (d Deps) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	if !d.schedulesReady(w) {
 		return
 	}
-	if err := d.Schedules.Delete(r.Context(), r.PathValue("id"), callerID(r)); err != nil {
+	removed, err := d.Schedules.Delete(r.Context(), r.PathValue("id"), callerID(r))
+	if err != nil {
 		httputil.WriteErr(w, err)
+		return
+	}
+	if !removed {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeScheduleNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

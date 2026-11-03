@@ -1012,7 +1012,7 @@ export const httpEndpoints = [
     descKey: 'verbDelete',
     nounKey: 'nounChannels',
     request: '',
-    response: '204, no body',
+    response: '204 | 404 channel_not_found',
   },
   {
     group: 'collaboration',
@@ -1271,7 +1271,7 @@ export const httpEndpoints = [
     descKey: 'verbDelete',
     nounKey: 'nounSchedules',
     request: '',
-    response: '204, no body',
+    response: '204 | 404 schedule_not_found',
   },
   {
     group: 'capabilities',

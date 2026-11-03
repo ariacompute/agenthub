@@ -123,6 +123,34 @@ func TestScheduleDelete(t *testing.T) {
 	}
 }
 
+func TestScheduleDeleteHidesAnotherUsersSchedule(t *testing.T) {
+	store := &memSchedules{}
+	d := testDeps(t, openConfig(""))
+	d.Schedules = store
+
+	if _, err := store.Create(t.Context(), &schedules.Schedule{ID: "sched-owned", Goal: "theirs", OwnerID: "owner"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// The handler is called directly because the harness middleware always
+	// installs the dev principal: ownership can only be exercised here.
+	r := sandboxRequest(http.MethodDelete, "/api/schedules/sched-owned", "", &authz.Principal{UserID: "stranger"}, "sched-owned")
+	w := sandboxRecorder()
+	d.handleDeleteSchedule(w, r)
+
+	// A stranger is told the goal does not exist rather than that it is forbidden,
+	// and the row stays exactly where it was.
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if code := errorCode(t, w); code != "schedule_not_found" {
+		t.Fatalf("code = %q", code)
+	}
+	if list, _ := store.List(t.Context(), "owner"); len(list) != 1 {
+		t.Fatalf("the schedule must survive a refused delete, %d left", len(list))
+	}
+}
+
 func TestScheduleEndpointsReportTheFeatureAsMissing(t *testing.T) {
 	// No store wired in: every schedule route says why, instead of pretending the
 	// feature has no rows.

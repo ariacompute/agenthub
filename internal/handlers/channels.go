@@ -161,12 +161,19 @@ func (d Deps) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, updated)
 }
 
+// Same rule as the schedule delete, and for the same reason: a channel the
+// caller does not hold is "not found", not "forbidden", and not a success.
 func (d Deps) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 	if !d.channelsReady(w) {
 		return
 	}
-	if err := d.Channels.Delete(r.Context(), r.PathValue("id"), callerID(r)); err != nil {
+	removed, err := d.Channels.Delete(r.Context(), r.PathValue("id"), callerID(r))
+	if err != nil {
 		httputil.WriteErr(w, err)
+		return
+	}
+	if !removed {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeChannelNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

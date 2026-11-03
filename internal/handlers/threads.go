@@ -40,6 +40,7 @@ func (d Deps) handleListThreads(w http.ResponseWriter, r *http.Request) {
 func (d Deps) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 	var body threadCreateBody
 	if err := httputil.Decode(w, r, &body, 1<<16); err != nil {
+		httputil.WriteErr(w, err)
 		return
 	}
 	p := PrincipalFrom(r)
@@ -85,6 +86,7 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	var body threadMessageBody
 	if err := httputil.Decode(w, r, &body, 1<<20); err != nil {
+		httputil.WriteErr(w, err)
 		return
 	}
 	body.Body = strings.TrimSpace(body.Body)

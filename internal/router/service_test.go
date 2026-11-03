@@ -47,7 +47,9 @@ func (s *stubSchedules) Update(ctx context.Context, sc *schedules.Schedule, owne
 	return sc, nil
 }
 
-func (s *stubSchedules) Delete(ctx context.Context, id, ownerID string) error { return nil }
+func (s *stubSchedules) Delete(ctx context.Context, id, ownerID string) (bool, error) {
+	return false, nil
+}
 
 // newTestService builds the facade the HTTP layer sees, over the memory store and
 // the hub stub, with a hand-cranked clock so a beat is always deterministic.

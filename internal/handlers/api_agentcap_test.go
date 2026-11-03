@@ -131,16 +131,16 @@ func (m *memSchedules) Update(_ context.Context, s *schedules.Schedule, ownerID 
 	return s, nil
 }
 
-func (m *memSchedules) Delete(_ context.Context, id, ownerID string) error {
+func (m *memSchedules) Delete(_ context.Context, id, ownerID string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, x := range m.items {
 		if x.ID == id && x.OwnerID == ownerID {
 			m.items = append(m.items[:i], m.items[i+1:]...)
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 type memKnowledge struct {
@@ -305,12 +305,13 @@ func TestSchedulesEndpoints(t *testing.T) {
 		t.Fatalf("enabled = %v, want false", updated.Enabled)
 	}
 
-	// Delete is idempotent: a missing id still returns 204.
+	// Deleting is a 404 for an id the caller cannot see, as reading it is; the
+	// row it matched is gone afterwards, which is what 204 confirms.
 	if w := do(t, h, http.MethodDelete, "/api/schedules/"+sched.ID, "", nil); w.Code != http.StatusNoContent {
 		t.Fatalf("delete: status = %d, want 204", w.Code)
 	}
-	if w := do(t, h, http.MethodDelete, "/api/schedules/does-not-exist", "", nil); w.Code != http.StatusNoContent {
-		t.Fatalf("delete missing: status = %d, want 204", w.Code)
+	if w := do(t, h, http.MethodDelete, "/api/schedules/does-not-exist", "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("delete missing: status = %d, want 404", w.Code)
 	}
 }
 

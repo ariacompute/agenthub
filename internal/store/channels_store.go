@@ -185,9 +185,16 @@ func (s *channelsStore) Update(ctx context.Context, c *channels.Channel, ownerID
 	return toDomainChannel(&r), nil
 }
 
-func (s *channelsStore) Delete(ctx context.Context, id, ownerID string) error {
-	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
-		return ownedWhere(db, id, ownerID).Delete(&model.Channel{}).Error
+func (s *channelsStore) Delete(ctx context.Context, id, ownerID string) (bool, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (bool, error) {
+		res := ownedWhere(db, id, ownerID).Delete(&model.Channel{})
+		if res.Error != nil {
+			return false, res.Error
+		}
+		// RowsAffected is the only trustworthy answer to "did this row exist and
+		// belong to the caller": a prior SELECT would answer a question that can
+		// change before the DELETE runs.
+		return res.RowsAffected > 0, nil
 	})
 }
 

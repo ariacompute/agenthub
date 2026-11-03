@@ -847,7 +847,8 @@ CRD 另补主服务有而 operator 缺的旋钮：`spec.rls{ mode, acknowledged 
 
 ## M13 — 再一轮覆盖率补强（2026-11-02，测试为主）
 
-只加用例，不改生产代码。新增用例顺带钉死两条此前无人断言的语义：**未知 id 读 404、删 204**。
+只加用例，不改生产代码。新增用例顺带钉死两条此前无人断言的语义：**未知 id 读 404、删 204**
+（后半条已被 **M17** 反转：删除现在也回 404，那条用例随之改名改断言）。
 
 ### 1. 服务端：`internal/handlers` 76.3% → **79.4%**
 
@@ -857,7 +858,7 @@ CRD 另补主服务有而 operator 缺的旋钮：`spec.rls{ mode, acknowledged 
   任何线程」，而整个功能其实是断的。
 - 同文件另加两组：`TestAnUnknownIdIsANotFoundForEverySurface`（未知 id 读 404，含各面自己的码）
   与 `TestDeletingAMissingRowIsStillASuccess`（schedules / channels 删未知 id 回 204——重试不该被
-  告知「你搞错了」）。
+  告知「你搞错了」；**该用例在 M17 中改为 `TestDeletingAnInvisibleRowIsANotFound`**）。
 - `admin_edges_test.go`：管理员真会撞上的 4xx——未知用户 404、`invalid_email`、`weak_password`、
   不存在的 `status` → `bad_request`，并断言**拒绝后账户仍在原值**；另有「一次请求同时改状态与口令」
   与「删除即禁用（行必须留下）」两条复合路径。
@@ -1053,3 +1054,112 @@ web 侧剩余分支集中在 `auth-store.js` 的 `?? []` 回退臂与 `playgroun
 - `cd web && bun run test`（22 个 spec）、`bun run build` 全绿。
 - 残余：本机无 `DATABASE_URL`，带库的 `-race` 与生产角色 `agenthub_app`（`go-restricted`）两个面只能由
   CI 把关；本仓无 Rust / `Cargo.toml`、无桌面端，因此不存在 Rust 侧的验证缺口。
+
+## M17 — 删除语义统一：删不到的 id 与删他人的 id 同为 404（2026-11-03）
+
+对照《agenthub-agentbuddy 完整度评估（第六轮）》§11.3 第 4 条。`schedules` / `channels` 的 DELETE 此前
+对未知或他人的 id 一律 204，而 `computers` / `files` 与管理面早已 404，`requirements.md` 的
+`DELETE /api/schedules/{id} → 204 | 404` 更是一直这么写着（代码是那个掉队的一方）。本轮选择
+「在代码里统一」，而不是「在文档里声明 204 ≡ 404」。
+
+### 1. 判定改在语句里，不在快照里
+
+- `channels.Store.Delete` / `schedules.Store.Delete` 改回 `(bool, error)`，GORM 实现读
+  `RowsAffected > 0`（仍由 `scoped` 包住，身份与行级策略不变）。
+- 两个 handler 在 `!removed` 时回 404 + 既有码 `schedule_not_found` / `channel_not_found`
+  ——错误码与 13 语文案此前就在，零新增。
+- **不采用「handler 先 Get 再 Delete」**：那会把答案押在一次随时会变的读上（Get 命中、并发删掉、
+  DELETE 影响 0 行 → 仍回 204），而且多一次往返。
+
+### 2. 幂等性挪到客户端
+
+- `SchedulesView.remove` / `ChannelsView.remove` 把 `schedule_not_found` / `channel_not_found` 当作
+  「已经没了」：重拉列表、不报错。掉包重试与跨设备删除因此仍是幂等的。
+- 两条反向用例改写（原先断言"报错"）：`views.spec.js` 的 channel / schedule 删除各一条，
+  改为「重拉列表且不显示错误文案」。
+
+### 3. 文档
+
+- `docs-content.js` 两行：`/api/channels/{id}` → `204 | 404 channel_not_found`、
+  `/api/schedules/{id}` → `204 | 404 schedule_not_found`（`web/src/lib/docs-content.js`）。
+- `docs-copy.js` 的 `httpBody`（HTTP 接口章引言，13 语）补一句规则：删除与读同一套可见性——
+  读不到的 id 一律 404，`已经没了` 与 `是他人的` 是同一个答案，控制台把它当作「已删」。
+  该键同时供 `/docs` 屏的引言与生成的 markdown 使用，因此**一处改动两处同步**。
+- `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md` / `docs/docs_cn.md`（3 行 × 2 语言：
+  2 条 DELETE 响应列 + 1 段章节引言）；`TestEveryRouteIsDocumented` /
+  `TestNoDocumentedRouteIsDead` / `TestEveryErrorCodeIsDocumented` 三条守卫全绿。
+- `requirements-isolation.md` §7 的「越权访问统一按不存在返回」补上删除语义与判定方式，
+  不再是一条读得到、删起来带例外的规则。
+
+### 4. 校验
+
+- `go vet ./...`、`go test ./...` 全绿。新增 `TestDeletingAnInvisibleRowIsANotFound`（未知 id →
+  404 + 各自机器码）、`TestScheduleDeleteHidesAnotherUsersSchedule` 与
+  `TestDeleteChannelHidesAnotherUsersChannel`（他人 id → 404 且行仍在；直接调 handler 以绕开
+  测试中间件固定安装的 dev principal）。
+- `tests/rls_test.go` 的真库用例同步：他人的删除现在断言 `(false, nil)`，原先只断言不报错。
+- web：agenthub 24 文件 / 453 用例、agentbuddy 30 文件 / 713 用例全绿。
+- 残余：本机无库，`RowsAffected` 的实库断言与 `-race` 由 CI 把关。
+
+## M18 — 补齐离线用例：把三个 0% 的角落补上，并修掉一个空 200（2026-11-03）
+
+起因是第六轮评估 §10.3（`internal/testdb` 0.0%）与覆盖率看板上三个显眼的空洞：
+`cmd/agenthub-server` 与 `internal/testdb` 一条语句都没跑（它们只在库门控用例里被调用），
+`internal/handlers` 的守卫分支（依赖未接线、请求体畸形）也没有用例。本机无 `DATABASE_URL`，
+因此这一轮只补**不依赖数据库**的部分，并向这个方向倾斜。
+
+### 1. 新增用例
+
+- `cmd/agenthub-server/main_test.go`（新）：`runtimeOrDefault`、`sandboxDefaults`（空配置也要
+  是封闭的：无网络、只留五个环境变量、无参策略、15s 上限）、`builtinSandboxProviders`
+  （8 个内置 + 每个平台预设一个）、`pickModelEntry`（nil 注册中心 / 错 kind / 未知 id /
+  默认取第一个非 unhealthy）、`routerGenerator`（rule 模式、mock provider、缺资源三条都返回 nil，
+  条件齐备才切到语义层）、`threadHistory`（尾片截断、宽限制、0 限制、读失败透传）、
+  `setupLogger`、`newFilesService`（无库即无服务）、`newBackupService`（目录未配即关闭）、
+  `sweepSessions` / `syncSources` / `pruneAudit` 在 ctx 取消后只跑一拍就收手。
+- `internal/testdb/testdb_test.go`（新）：`DSN` 的两个答案——配了就原样返回，没配就 skip
+  而不是 fail（否则离线 `go test ./...` 会红，或者更糟：带着空 DSN 去连）。
+- `internal/handlers/unwired_test.go`（新）：依赖未接线时的整张表。行政接口与 API key 回
+  `404 not_found`，权限词表/角色/组/授权列表回空集合 200（词表是内置的，只有保存需要存储），
+  router / sandbox 回 `503 feature_unavailable`。全部直接调 handler，因为中间件总会装上
+  dev principal 与存储包。
+- `internal/handlers/visibility_test.go`（新）：`normalizeVisibility` 的四种输入（空值保持为空、
+  public、restricted、拼错），以及 `PUT /api/resources/{id}` 对未知可见性回
+  `400 invalid_visibility`、省略该字段不会把记录发布出去；另加一个没有 audit tracer 时
+  `noteRefusal` 不 panic。
+- `internal/handlers/a2a_envelope_test.go`（新）：JSON-RPC 信封四种拒绝（`-32700` / `-32600` /
+  `-32601` / `-32602`）与 `requireCaller` 对匿名调用者回 `-32009`。
+- `internal/handlers/malformed_test.go`（新）：写接口收到 `{` 时的契约——已接线的面回
+  `400 bad_request`，功能关闭的面在读取请求体之前就回 `503 channel_disabled` /
+  `feature_unavailable`，没有存储的面回 `404 not_found`；**永远不能是空 200**。
+- web：`store.spec.js` 补"失败不带 code 时回落 `internal_error`"，`auth-store.spec.js` 补
+  "密码被接受但 `/me` 读失败"（`login` 仍返回 true，`signedIn` 为 false 且带错误码）。
+
+### 2. 顺带修掉的缺陷
+
+`handleCreateThread` 与 `handlePostThreadMessage` 在 `httputil.Decode` 失败时直接 `return`，
+**不写响应**：一个畸形请求体只会换来空的 200，而不是 400 + `bad_request`。两处补上
+`httputil.WriteErr`（原来只有它们这么写，其余 handler 都对）。这个洞是 `malformed_test.go`
+写出来时抓到的，不是读出来的。
+
+### 3. 覆盖率（离线口径，库门控用例跳过）
+
+| 目标 | 之前 | 之后 |
+| --- | --- | --- |
+| 全仓语句 | 72.0%（10239/14220） | **73.1%**（10388/14220） |
+| `cmd/agenthub-server` | 0.0%（0/304） | **27.0%**（82/304） |
+| `internal/testdb` | 0.0%（0/53） | **9.4%**（5/53） |
+| `internal/handlers` | 81.1% | **83.2%**（+62 语句） |
+| web | 453 用例 / 分支 99.6% | 455 用例 / 分支 99.6% |
+
+**没打算补的三处，理由写在前面**：`internal/store` 与 `internal/backup` 的 COPY / pg_dump 路径
+必须连库（4.7% 与 57.9% 是口径问题，不是缺用例）；`channels.Deliver` 的成功分支要一个公网
+HTTPS 目标——SSRF 防护会拒掉一切私网地址，本地 `httptest` 桩进不去，只覆盖得到错误路径；
+`auth-store.js` 剩下的 2 个分支是 v8 对 `try/finally` 的记账（`finally` 的正常/异常两个出口），
+两条路径在用例里都已走过。
+
+### 4. 校验
+
+- `go vet ./...`、`go test ./...` 全绿；`web` `bun run test` 455 用例全绿。
+- 本机无库：`internal/store` / `tests/` 的库门控用例仍按既有口径跳过，`RowsAffected`、
+  RLS 与 `-race` 由 CI 把关。

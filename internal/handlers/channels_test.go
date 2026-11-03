@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"agenthub/internal/adapter"
+	"agenthub/internal/authz"
 	"agenthub/internal/channels"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
@@ -89,13 +90,14 @@ func (f *fakeChannels) Update(_ context.Context, c *channels.Channel, ownerID st
 	return c, nil
 }
 
-func (f *fakeChannels) Delete(_ context.Context, id, ownerID string) error {
+func (f *fakeChannels) Delete(_ context.Context, id, ownerID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if c := f.byID[id]; c != nil && c.OwnerID == ownerID {
 		delete(f.byID, id)
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func (f *fakeChannels) RecordDelivery(_ context.Context, m *channels.ChannelMessage) (bool, error) {
@@ -312,6 +314,37 @@ func TestChannelCRUD(t *testing.T) {
 	code, _ = doReq(t, srv, "GET", "/api/channels/"+created.ID, "")
 	if code != http.StatusNotFound {
 		t.Fatalf("after delete = %d", code)
+	}
+}
+
+func TestDeleteChannelHidesAnotherUsersChannel(t *testing.T) {
+	store := newFakeChannels()
+	d := testDeps(t, openConfig(""))
+	d.Cfg.ChannelsEnabled = true
+	d.Channels = store
+
+	if _, err := store.Create(t.Context(), &channels.Channel{
+		ID: "chan-owned", Kind: channels.KindSlack, Name: "theirs",
+		Enabled: true, SigningKeyEnv: "TEST_OWNED_SECRET", OwnerID: "owner",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Called directly: the harness middleware always installs the dev principal,
+	// so ownership can only be exercised without it.
+	r := sandboxRequest(http.MethodDelete, "/api/channels/chan-owned", "", &authz.Principal{UserID: "stranger"}, "chan-owned")
+	w := sandboxRecorder()
+	d.handleDeleteChannel(w, r)
+
+	// "Not found", not "forbidden": a 403 would confirm the channel exists.
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if code := errorCode(t, w); code != "channel_not_found" {
+		t.Fatalf("code = %q", code)
+	}
+	if list, _ := store.List(t.Context(), "owner"); len(list) != 1 {
+		t.Fatalf("the channel must survive a refused delete, %d left", len(list))
 	}
 }
 

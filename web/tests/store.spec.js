@@ -64,6 +64,16 @@ describe('refreshResources', () => {
     expect(store.errorCode).toBe('resource_not_found')
     expect(store.resources).toEqual([])
   })
+
+  it('falls back to a generic code when the failure carries none', async () => {
+    // A dropped connection has no envelope: without the fallback the console
+    // would clear the error and look healthy over a list it never read.
+    api.listResources.mockRejectedValue(new Error('socket closed'))
+    const store = useHubStore()
+    await store.refreshResources()
+    expect(store.errorCode).toBe('internal_error')
+    expect(store.loading).toBe(false)
+  })
 })
 
 describe('refreshTasks', () => {

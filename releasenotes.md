@@ -1021,3 +1021,26 @@ queue is derived from those tasks, so there is **no approval table**.
 - **Tests**: `handlers/connectors_approval_test.go` covers the derived queue, approve-runs-once,
   the duplicate-approval conflict, reject-then-approve conflict, unknown and unrelated tasks, and
   the `503` when the hub is not wired; `hub/orchestrator_park_test.go` pins the parked metadata.
+
+---
+
+## 17. Delete Semantics (M5)
+
+A delete used to answer `204` whether or not a row was there. It now answers the way a
+read does, which is what the isolation chapter always claimed:
+
+- **404 for anything you cannot see.** `DELETE /api/schedules/{id}` and
+  `DELETE /api/channels/{id}` report `schedule_not_found` / `channel_not_found` for an id
+  that is gone *or* belongs to somebody else — one answer for both, so a delete cannot be
+  used to ask whether the row exists. `computers`, `files` and every management surface
+  already behaved this way; these two were the stragglers.
+- **Decided by the statement, not by a pre-read.** `channels.Store.Delete` and
+  `schedules.Store.Delete` report `(bool, error)` from `RowsAffected`, so the status
+  describes the `DELETE` that actually ran. Reading the row first and then deleting would
+  answer from a snapshot that can change in between — and cost a second round trip.
+- **Idempotent retries moved to the client.** The workbench treats a `*_not_found` on a
+  delete as "already gone": it reloads the list instead of reporting a refusal that never
+  happened, so a retried or cross-device delete still reads as success.
+- **Nothing new to register.** Both machine codes and their 13 locales already existed; the
+  in-console documentation gained `204 | 404 …` on those two rows, and the HTTP chapter's
+  introduction now states the rule itself, in all 13 languages.

@@ -74,7 +74,9 @@ func (failingChannels) Create(context.Context, *channels.Channel) (*channels.Cha
 func (failingChannels) Update(context.Context, *channels.Channel, string) (*channels.Channel, error) {
 	return nil, errStoreDown
 }
-func (failingChannels) Delete(context.Context, string, string) error { return errStoreDown }
+func (failingChannels) Delete(context.Context, string, string) (bool, error) {
+	return false, errStoreDown
+}
 func (failingChannels) RecordDelivery(context.Context, *channels.ChannelMessage) (bool, error) {
 	return false, errStoreDown
 }
@@ -115,7 +117,9 @@ func (failingSchedules) Create(context.Context, *schedules.Schedule) (*schedules
 func (failingSchedules) Update(context.Context, *schedules.Schedule, string) (*schedules.Schedule, error) {
 	return nil, errStoreDown
 }
-func (failingSchedules) Delete(context.Context, string, string) error { return errStoreDown }
+func (failingSchedules) Delete(context.Context, string, string) (bool, error) {
+	return false, errStoreDown
+}
 
 type failingKnowledge struct{ *memKnowledge }
 
@@ -199,18 +203,21 @@ func TestAStoreFailureIsReportedNotSwallowed(t *testing.T) {
 	}
 }
 
-// Deleting a row that is already gone is a success, not a 404: a console that
-// retries after a dropped response must not be told it made a mistake. Schedules
-// and channels both answer 204 — reading a missing id is a 404, deleting it is
-// not, and the difference is deliberate.
-func TestDeletingAMissingRowIsStillASuccess(t *testing.T) {
+// Deleting an id the caller cannot see is a 404, exactly like reading it: gone
+// and somebody else's are one answer, so a delete cannot be used to ask whether
+// the row exists. The store reports it from RowsAffected rather than from a prior
+// lookup, which is why the two cases cannot drift apart — and why the retry
+// friendliness that used to live in the status code now lives in the console,
+// which treats a not-found on a delete as already done.
+func TestDeletingAnInvisibleRowIsANotFound(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
+		code string
 		wire func(d *Deps)
 	}{
-		{"schedule", "/api/schedules/nope", func(d *Deps) { d.Schedules = &memSchedules{} }},
-		{"channel", "/api/channels/nope", func(d *Deps) {
+		{"schedule", "/api/schedules/nope", "schedule_not_found", func(d *Deps) { d.Schedules = &memSchedules{} }},
+		{"channel", "/api/channels/nope", "channel_not_found", func(d *Deps) {
 			d.Cfg.ChannelsEnabled = true
 			d.Channels = newFakeChannels()
 		}},
@@ -223,8 +230,11 @@ func TestDeletingAMissingRowIsStillASuccess(t *testing.T) {
 			h := Register(d)
 
 			w := do(t, h, http.MethodDelete, tc.path, "", nil)
-			if w.Code != http.StatusNoContent {
-				t.Fatalf("status = %d, want 204 (body %s)", w.Code, w.Body.String())
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 (body %s)", w.Code, w.Body.String())
+			}
+			if code := errCode(t, w); code != tc.code {
+				t.Fatalf("code = %q, want %q", code, tc.code)
 			}
 		})
 	}

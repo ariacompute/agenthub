@@ -96,7 +96,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 
 ## HTTP 接口
 
-控制台自身使用的控制面。每条路由都需要会话 cookie；权限列标明调用方必须持有哪一项。
+控制台自身使用的控制面。每条路由都需要会话 cookie；权限列标明调用方必须持有哪一项。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。
 
 ### 协议
 
@@ -245,7 +245,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `POST` | `/api/channels` | `tasks:write` — 取消与恢复任务 | 在通道中新建一条 | `{ kind, name, enabled, config, signingKeyEnv, threadId }` | `Channel — 201` |
 | `GET` | `/api/channels/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条通道 | — | `Channel` |
 | `PUT` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 更新通道的名称、启用状态、配置、签名密钥或绑定线程。 | `{ name?, enabled, config?, signingKeyEnv?, threadId? }` | `Channel` |
-| `DELETE` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条通道 | — | `204, no body` |
+| `DELETE` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条通道 | — | `204 \| 404 channel_not_found` |
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — 查看任务 | 列出全部投递 | — | `ChannelMessage[]` |
 | `POST` | `/api/channels/{id}/webhook` | — | 入站 webhook：校验签名，按外部引用去重，再将消息转发到绑定线程。 | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
 | `POST` | `/api/channels/{id}/deliver` | `tasks:write` — 取消与恢复任务 | 出站投递：经 SSRF 安全客户端把消息发往通道的 config.target_url，并回显 Provider 原始响应（状态码 + 截断后的响应体）。 | `{ "message": "string" }` | `DeliverResult { status, raw }` |
@@ -281,7 +281,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `POST` | `/api/schedules` | `tasks:write` — 取消与恢复任务 | 在调度中新建一条 | `{ goal(required), trigger?(manual\|cron\|event), cronExpr?, enabled? } — empty goal is 400 schedule_invalid` | `Schedule — 201` |
 | `GET` | `/api/schedules/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条调度 | — | `Schedule \| 404 schedule_not_found` |
 | `PUT` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 整体替换其中一条调度 | `{ goal?, trigger?, cronExpr?, enabled? }` | `Schedule \| 404 schedule_not_found` |
-| `DELETE` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条调度 | — | `204, no body` |
+| `DELETE` | `/api/schedules/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条调度 | — | `204 \| 404 schedule_not_found` |
 | `GET` | `/api/knowledge` | `resources:read` — 查看资源 | 列出全部知识库 | `?agentId=` | `Knowledge[] { id, agentId, chunkText, sourceRef, createdAt }` |
 
 ### 执行沙盒
