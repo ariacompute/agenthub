@@ -113,8 +113,29 @@ func (s *channelsStore) GetUnscoped(ctx context.Context, id string) (*channels.C
 	})
 }
 
+// channelConfig encodes the per-channel settings. A nil map becomes an empty
+// object rather than SQL NULL: the column is `JSONB NOT NULL DEFAULT '{}'`, and
+// an explicit NULL overrides that default, so a caller that creates a channel
+// without settings would be refused by the database instead of stored.
+func channelConfig(cfg map[string]any) (model.JSONField, error) {
+	if cfg == nil {
+		return model.NewJSONField(map[string]any{})
+	}
+	return model.NewJSONField(cfg)
+}
+
+// deliveryPayload is channelConfig for the receipt table, which carries the same
+// NOT NULL DEFAULT '{}' contract: a webhook body that was never parsed is an
+// empty object, not a missing one.
+func deliveryPayload(payload map[string]any) (model.JSONField, error) {
+	if payload == nil {
+		return model.NewJSONField(map[string]any{})
+	}
+	return model.NewJSONField(payload)
+}
+
 func (s *channelsStore) Create(ctx context.Context, c *channels.Channel) (*channels.Channel, error) {
-	cfg, err := model.NewJSONField(c.Config)
+	cfg, err := channelConfig(c.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +160,7 @@ func (s *channelsStore) Create(ctx context.Context, c *channels.Channel) (*chann
 }
 
 func (s *channelsStore) Update(ctx context.Context, c *channels.Channel, ownerID string) (*channels.Channel, error) {
-	cfg, err := model.NewJSONField(c.Config)
+	cfg, err := channelConfig(c.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +207,7 @@ func channelOwner(db *gorm.DB, channelID string) (string, error) {
 }
 
 func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelMessage) (bool, error) {
-	payload, err := model.NewJSONField(m.Payload)
+	payload, err := deliveryPayload(m.Payload)
 	if err != nil {
 		return false, err
 	}
@@ -238,7 +259,7 @@ func (s *channelsStore) GetDelivery(ctx context.Context, channelID, id, ownerID 
 }
 
 func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelMessage, ownerID string) (bool, error) {
-	payload, err := model.NewJSONField(m.Payload)
+	payload, err := deliveryPayload(m.Payload)
 	if err != nil {
 		return false, err
 	}

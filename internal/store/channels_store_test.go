@@ -66,3 +66,58 @@ func TestToDomainMessageMapsFields(t *testing.T) {
 		t.Fatalf("owner not carried: %+v", m)
 	}
 }
+
+// channelConfig / deliveryPayload guard the two jsonb columns declared
+// `NOT NULL DEFAULT '{}'`. A typed nil map survives `v == nil` in
+// NewJSONField (the interface is non-nil) and marshals to "null", which would
+// be written as an explicit SQL NULL and rejected by the column. Both the
+// normal and the nil path are pinned here so the guard cannot regress.
+func TestChannelConfigNormalizesNilMap(t *testing.T) {
+	got, err := channelConfig(nil)
+	if err != nil {
+		t.Fatalf("nil config should not fail: %v", err)
+	}
+	if string(got) != "{}" {
+		t.Fatalf("nil config should encode as an empty object, got %q", string(got))
+	}
+	if v, err := got.Value(); err != nil || v == nil {
+		t.Fatalf("nil config must not reach the column as NULL: %v %v", v, err)
+	}
+
+	got, err = channelConfig(map[string]any{"webhook": "secret"})
+	if err != nil {
+		t.Fatalf("config encode failed: %v", err)
+	}
+	if string(got) != `{"webhook":"secret"}` {
+		t.Fatalf("config not preserved: %q", string(got))
+	}
+}
+
+func TestDeliveryPayloadNormalizesNilMap(t *testing.T) {
+	got, err := deliveryPayload(nil)
+	if err != nil {
+		t.Fatalf("nil payload should not fail: %v", err)
+	}
+	if string(got) != "{}" {
+		t.Fatalf("nil payload should encode as an empty object, got %q", string(got))
+	}
+	if v, err := got.Value(); err != nil || v == nil {
+		t.Fatalf("nil payload must not reach the column as NULL: %v %v", v, err)
+	}
+
+	got, err = deliveryPayload(map[string]any{"text": "hi"})
+	if err != nil {
+		t.Fatalf("payload encode failed: %v", err)
+	}
+	if string(got) != `{"text":"hi"}` {
+		t.Fatalf("payload not preserved: %q", string(got))
+	}
+}
+
+// The guard only covers nil maps: a payload that cannot be marshalled must
+// still surface as an error rather than being silently coerced to "{}".
+func TestDeliveryPayloadPropagatesEncodeError(t *testing.T) {
+	if _, err := deliveryPayload(map[string]any{"chan": make(chan int)}); err == nil {
+		t.Fatal("unencodable payload should return an error")
+	}
+}
