@@ -49,7 +49,8 @@ func (d *DockerProvider) Describe(context.Context) (Descriptor, error) {
 		Isolation: isolation,
 		// NetworkAllowlist is not advertised: see bwrap.go — the mode parses but
 		// needs an egress sidecar to mean anything, and a descriptor must not
-		// claim a filter that does not exist.
+		// claim a filter that does not exist. All three named modes are real here:
+		// createArgs maps them onto --network none / bridge / the daemon default.
 		Network:  []string{NetworkNone, NetworkBridge, NetworkPlatform},
 		Requires: []string{d.bin},
 		Source:   SourceBuiltin,
@@ -199,12 +200,16 @@ func (d *DockerProvider) createArgs(spec Spec) []string {
 	if d.runtime != "" {
 		args = append(args, "--runtime", d.runtime)
 	}
-	// GrantsNetwork is shared with the bubblewrap provider so the two cannot
-	// drift: egress_allowlist is "none" in both, and "platform" means the
-	// daemon's default network here.
-	if GrantsNetwork(p) {
+	// "platform" means the daemon's default network, so the honest translation is
+	// to pass no --network at all. This used to emit a literal "bridge", which
+	// made the descriptor's "platform" a lie whenever the daemon default was
+	// something else. "bridge" and "none" are named explicitly.
+	switch NormalizeNetwork(p.Network) {
+	case NetworkPlatform:
+		// Daemon default.
+	case NetworkBridge:
 		args = append(args, "--network", "bridge")
-	} else {
+	default:
 		args = append(args, "--network", "none")
 	}
 	if p.Readonly() {

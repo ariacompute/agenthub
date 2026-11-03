@@ -19,12 +19,18 @@ import (
 // vocabulary is closed, and an unknown placeholder fails at load time so a typo
 // cannot silently become a literal "{command}" passed to a binary.
 type DeclarativeSpec struct {
-	Name        string     `json:"name"`
-	Layer       string     `json:"layer"`
-	Isolation   string     `json:"isolation"`
-	Binary      string     `json:"binary"`
-	License     string     `json:"license,omitempty"`
-	DocsURL     string     `json:"docsUrl,omitempty"`
+	Name      string `json:"name"`
+	Layer     string `json:"layer"`
+	Isolation string `json:"isolation"`
+	Binary    string `json:"binary"`
+	License   string `json:"license,omitempty"`
+	DocsURL   string `json:"docsUrl,omitempty"`
+	// Network is what the operator's argv can actually enforce, in the same
+	// vocabulary a profile asks with. Empty means "not declared", which is
+	// reported as delegated rather than guessed: the catalogue used to show a
+	// blank network for every declarative provider, so nobody could tell nsjail
+	// (a fresh netns) from systemd-run (the host's).
+	Network     []string   `json:"network,omitempty"`
 	ProbeArgs   [][]string `json:"probeArgs,omitempty"`
 	CreateArgs  [][]string `json:"createArgs,omitempty"`
 	ExecArgs    [][]string `json:"execArgs"`
@@ -112,15 +118,43 @@ func (d *DeclarativeProvider) Describe(context.Context) (Descriptor, error) {
 	if licence == "" {
 		licence = "unknown"
 	}
+	network := normalizeNetworks(d.spec.Network)
+	if len(network) == 0 {
+		// The operator did not say. Claiming "none" would be a guess about an
+		// arbitrary program; "delegated" is the truth, and the gate then lets the
+		// profile through only because the argv is the operator's own policy.
+		network = []string{NetworkDelegated}
+	}
 	return Descriptor{
 		Name:      d.spec.Name,
 		Layer:     layer,
 		Isolation: isolation,
+		Network:   network,
 		Requires:  []string{d.spec.Binary},
 		Source:    SourceDeclarative,
 		License:   licence,
 		DocsURL:   d.spec.DocsURL,
 	}, nil
+}
+
+// normalizeNetworks drops values the vocabulary does not know, so a typo in an
+// operator's declaration cannot widen what the provider is trusted for.
+func normalizeNetworks(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, raw := range in {
+		// Compared against the constants directly: NormalizeNetwork turns a typo
+		// into "none", and a typo must not become "this provider enforces no
+		// network". egress_allowlist is also refused — nothing implements a filter.
+		switch mode := strings.ToLower(strings.TrimSpace(raw)); mode {
+		case NetworkNone, NetworkBridge, NetworkPlatform:
+			if !seen[mode] {
+				seen[mode] = true
+				out = append(out, mode)
+			}
+		}
+	}
+	return out
 }
 
 // Probe runs the declared probe argv, if any. No probe means the operator

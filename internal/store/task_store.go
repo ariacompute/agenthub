@@ -66,9 +66,26 @@ func (s *taskRepository) get(db *gorm.DB, ctx context.Context, id string) (*a2a.
 }
 
 func (s *taskRepository) List(ctx context.Context) ([]*a2a.Task, error) {
+	return s.list(ctx, "")
+}
+
+// ListState is the narrow read the connector approval queue needs: the parked
+// tasks, without dragging every task the account ever ran through the database.
+// internal/hub treats it as an optional capability, so a repository without it
+// still works (hub.TaskStore falls back to List and filters in memory).
+func (s *taskRepository) ListState(ctx context.Context, state a2a.TaskState) ([]*a2a.Task, error) {
+	return s.list(ctx, state)
+}
+
+func (s *taskRepository) list(ctx context.Context, state a2a.TaskState) ([]*a2a.Task, error) {
 	return scoped(ctx, s.db, func(db *gorm.DB) ([]*a2a.Task, error) {
 		var rows []model.Task
-		q := owned(db, ctx, "owner_id").Order("created_at DESC, id DESC")
+		q := owned(db, ctx, "owner_id")
+		if state != "" {
+			// idx_tasks_state has existed since 002; the queue is a cheap read.
+			q = q.Where("state = ?", string(state))
+		}
+		q = q.Order("created_at DESC, id DESC")
 		if err := q.Find(&rows).Error; err != nil {
 			return nil, err
 		}

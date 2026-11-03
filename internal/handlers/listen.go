@@ -41,6 +41,9 @@ func Listeners() []Listener {
 		{"POST /api/channels/{id}/deliveries/{did}/retry", "channels: re-send one outbound receipt that never left"},
 		{"GET /api/connectors", "connectors: external applications invoking an mcp resource"},
 		{"POST /api/connectors/{id}/actions", "invoke a connector action (policy gated)"},
+		{"GET /api/connectors/approvals", "connectors: actions parked by the ask-first policy, waiting for a human"},
+		{"POST /api/connectors/approvals/{id}/approve", "connectors: approve a parked action and run it once"},
+		{"POST /api/connectors/approvals/{id}/reject", "connectors: reject a parked action, executing nothing"},
 		{"POST /api/threads/{id}/audio", "voice message upload, transcribed server side"},
 		{"GET /api/computers", "agent computers: browser / shell / screen sandboxes (F11)"},
 		{"POST /api/computers", "agent computers: create a sandbox"},
@@ -81,6 +84,11 @@ func Listeners() []Listener {
 		{"GET /api/sandbox-nodes/{id}/jobs", "execution nodes: long poll for one job (204 when idle)"},
 		{"POST /api/sandbox-nodes/{id}/jobs/{job}", "execution nodes: report a finished job"},
 		{"GET /api/knowledge", "knowledge: mock RAG retrieval (F14)"},
+		{"GET /api/files", "shared files: the caller's uploads, the size cap and the backend"},
+		{"POST /api/files", "shared files: upload one file (multipart)"},
+		{"GET /api/files/{id}", "shared files: one file's metadata"},
+		{"GET /api/files/{id}/content", "shared files: stream the bytes (Range supported)"},
+		{"DELETE /api/files/{id}", "shared files: delete a file and its bytes"},
 		{"GET /healthz", "health probe, also the container healthcheck"},
 	}
 }

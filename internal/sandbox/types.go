@@ -27,11 +27,15 @@ const (
 	CodeUnsupported     = httputil.CodeSandboxUnsupported
 	CodeUnknownProvider = httputil.CodeSandboxUnknownProvider
 	CodePolicyDenied    = httputil.CodeSandboxPolicyDenied
-	CodeTimeout         = httputil.CodeSandboxTimeout
-	CodeLeaseLost       = httputil.CodeSandboxLeaseLost
-	CodeLimitReached    = httputil.CodeSandboxLimitReached
-	CodeNodeOffline     = httputil.CodeSandboxNodeOffline
-	CodeNotFound        = httputil.CodeSandboxNotFound
+	// CodeCapabilityUnavailable refuses a profile that asks for isolation the
+	// chosen provider never promised. Silently degrading was the bug: bubblewrap
+	// answered "bridge" with the host network namespace.
+	CodeCapabilityUnavailable = httputil.CodeSandboxCapabilityUnavailable
+	CodeTimeout               = httputil.CodeSandboxTimeout
+	CodeLeaseLost             = httputil.CodeSandboxLeaseLost
+	CodeLimitReached          = httputil.CodeSandboxLimitReached
+	CodeNodeOffline           = httputil.CodeSandboxNodeOffline
+	CodeNotFound              = httputil.CodeSandboxNotFound
 )
 
 // Layer is the isolation tier a provider belongs to. The values line up with
@@ -72,6 +76,11 @@ const (
 	SourceBuiltin     = "builtin"
 	SourceDeclarative = "declarative"
 	SourceNode        = "node"
+	// SourcePlatform is a built-in HTTP client for a hosted sandbox platform
+	// (e2b, microsandbox, daytona, …). It used to be reported as "declarative",
+	// which said the wrong thing: nothing about it is read from operator
+	// configuration.
+	SourcePlatform = "platform"
 )
 
 // State is the lifecycle of one lease.
@@ -95,6 +104,13 @@ const (
 	NetworkAllowlist = "egress_allowlist"
 	NetworkBridge    = "bridge"
 	NetworkPlatform  = "platform"
+	// NetworkDelegated is a declaration, never a request: it says the provider
+	// forwards the profile to a layer that enforces it (an execution node, a
+	// hosted platform's own runtime) and cannot answer the question itself. It is
+	// the honest label for "this process does not constrain the network", which
+	// is exactly what the remote and platform providers used to deny while
+	// advertising none/bridge/platform as if they enforced them.
+	NetworkDelegated = "delegated"
 )
 
 // Argument policies for the CLI surface. "none" means: no arguments may come
@@ -114,11 +130,16 @@ type Descriptor struct {
 	Isolation string   `json:"isolation"`
 	Network   []string `json:"network,omitempty"`
 	// Requires names the binaries a probe looks for, so an unavailable entry can
-	// say "bwrap is not installed" instead of "unavailable".
+	// say "bwrap is not installed" instead of "unavailable". Only binaries belong
+	// here: the platform providers used to put an environment variable name in
+	// this list, which made the catalogue claim a binary called E2B_SHIM_URL.
 	Requires []string `json:"requires,omitempty"`
-	Source   string   `json:"source"`
-	License  string   `json:"license,omitempty"`
-	DocsURL  string   `json:"docsUrl,omitempty"`
+	// EnvKeys names the environment variables a provider reads, so the catalogue
+	// can say "set E2B_SHIM_URL" without pretending a variable is a binary.
+	EnvKeys []string `json:"envKeys,omitempty"`
+	Source  string   `json:"source"`
+	License string   `json:"license,omitempty"`
+	DocsURL string   `json:"docsUrl,omitempty"`
 	// Default marks the provider AGENTHUB_SANDBOX_PROVIDER falls back to.
 	Default bool `json:"default,omitempty"`
 }

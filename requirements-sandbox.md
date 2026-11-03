@@ -63,8 +63,8 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 | --- | --- | --- | --- |
 | `none`（默认） | `--unshare-all`（无 `--share-net`） | `--network none` | 断网 |
 | `egress_allowlist` | 同上（断网） | `--network none` | **名单暂不生效**：host 过滤需要 egress sidecar（`TODO(real)`）；在它出现前该取值按 `none` 执行（fail-closed），词表保留以让存量记录仍可解析 |
-| `bridge` | `--share-net` | `--network bridge` | 给网 |
-| `platform` | `--share-net` | `--network bridge` | 交给平台默认 |
+| `bridge` | **不支持**（`sandbox_capability_unavailable`） | `--network bridge` | 只有容器能造出 NAT 接口；bwrap 的 `--share-net` 是宿主命名空间，所以它只报 `none|platform` |
+| `platform` | `--share-net` | 不传 `--network`（守护进程默认） | 交给平台默认 |
 
 两个 provider 共用 `sandbox.GrantsNetwork` 判定，因此不会再出现「同一个取值在一种后端断网、在另一种后端放全量网络」的分叉；provider 的 `Describe().Network` 也不再宣称支持 `egress_allowlist`。
 
@@ -73,6 +73,21 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 这一点写在 `local.go` 的注释里——把"给不出网"写成 capability 才是真正的谎报。
 `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` 同理：值会进 profile 以便回读，但没有任何 provider 做 host 过滤，
 启动时打一条 `WARN` 说明它不构成访问控制。
+
+### 2.2 能力声明与准入门禁
+
+`Descriptor` 的三组字段各有明确含义，不许混用：
+
+| 字段 | 语义 | 谁来填 |
+| --- | --- | --- |
+| `Network` | 本进程**真正能施加**的网络模式；`delegated` 表示「不施加，交给下游」 | 每个 provider |
+| `Requires` | 探针要找到的**二进制** | 内置 / 声明式 |
+| `EnvKeys` | 需要哪些**环境变量名**（如 `E2B_SHIM_URL`），不是二进制 | 平台垫片 |
+| `Source` | `builtin` / `declarative` / `node` / `platform`——编译进来的 HTTP 垫片不是声明式模板 | 每个 provider |
+
+`Manager.Acquire` 解析出 provider 后先 `Describe()`，再用 `sandbox.SupportsNetwork(desc, profile)` 比对：
+不在声明内即返回 **`sandbox_capability_unavailable`**（fail-closed），**不再静默降级**成宿主网络或
+容器默认网络。`delegated` 覆盖任意具体模式（因为约束发生在下游并被该节点审计），其余后端必须逐字匹配。
 
 ## 3. API
 
@@ -169,6 +184,7 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 | `sandbox_unsupported` | 409 | 类型已注册但探测不可用（未安装 / socket 不可达） |
 | `sandbox_unknown_provider` | 400 | 名字未注册 |
 | `sandbox_policy_denied` | 403（空命令等参数校验复用该码时 400） | 命令 / 参数 / 出网目标被策略拒绝 |
+| `sandbox_capability_unavailable` | 409 | 申请的网络隔离该后端从未声明（如 bubblewrap + `bridge`），**不做降级** |
 | `sandbox_timeout` | 504 | 执行超时 |
 | `sandbox_lease_lost` | 409 | 租约已回收或不存在，调用方应重试（会透明重建） |
 | `sandbox_limit_reached` | 429 | 触达每人/全局租约上限，**可重试** |
@@ -189,8 +205,12 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 5. 租约被 `DELETE` 后，下一次执行透明重建而不是失败。
 6. `Sweep` 单飞：并发触发只跑一次；过期租约被回收并写入 `expired` 状态。
 7. 声明式模板：未知占位符启动即失败；`exec_args` 展开后参数仍是独立 argv 元素（单测断言）。
-8. 空队列时 `GET /api/sandbox-nodes/{id}/jobs` 在 `wait` 到期后返回 `204`；重复回传同一作业不报错
+8. 能力声明是**可执行的**：表驱动用例逐个后端断言 `Describe().Network` / `EnvKeys` / `Source`
+   （`local` 只有 `platform`、`bwrap` 无 `bridge`、`docker` 三项与 `createArgs` 对齐、
+   `remote`/垫片/未声明模板只有 `delegated`、平台垫片带 `EnvKeys` 且 `Requires` 为空），
+   并断言「申请后端没声明的模式 → `sandbox_capability_unavailable`，且后端一次都没被调用」。
+9. 空队列时 `GET /api/sandbox-nodes/{id}/jobs` 在 `wait` 到期后返回 `204`；重复回传同一作业不报错
    （后写覆盖），回传他节点的作业返回 404。
-9. `GET /api/sandboxes/events?since=N` 先回放 `N` 之后的帧再订阅直播，回放与直播同 `seq`、
+10. `GET /api/sandboxes/events?since=N` 先回放 `N` 之后的帧再订阅直播，回放与直播同 `seq`、
    不重不漏（服务层 `EventsSince` 的 `maxSeq` 即游标）。
-10. `go build` / `go vet` / `go test -race ./...` 全绿；`bun run build` / `bun run test` 全绿。
+11. `go build` / `go vet` / `go test -race ./...` 全绿；`bun run build` / `bun run test` 全绿。

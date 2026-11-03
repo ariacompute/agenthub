@@ -64,6 +64,18 @@ func (m *memThreads) GetThread(_ context.Context, id, ownerID string) (*threads.
 	return t, nil
 }
 
+// GetThreadUnscoped mirrors the GORM implementation's process-identity read: the
+// webhook reaches a bound thread before any session exists.
+func (m *memThreads) GetThreadUnscoped(_ context.Context, id string) (*threads.Thread, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.threads[id]
+	if !ok {
+		return nil, threads.ErrNotFound
+	}
+	return t, nil
+}
+
 func (m *memThreads) ListThreads(_ context.Context, ownerID string) ([]*threads.Thread, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

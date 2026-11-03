@@ -750,3 +750,42 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
 - 关闭开关时：`/api/router/*` 与 `/api/schedules/{id}/run` 返回 503 `feature_unavailable`，
   线程消息仍走直发 `Hub.Send`，既有用例零改动。
 - `DATABASE_URL` 门控集成：内存实现与 GORM 实现在同一批语义断言下一致。
+
+## 11. 共享文件与连接器审批队列（本轮）
+
+### 11.1 共享文件 `/api/files`
+
+| 方法与路径 | 权限 | 说明 |
+| --- | --- | --- |
+| `GET /api/files` | `tasks:read` | `{ files: File[], maxBytes, backend }`，只返回调用者的行 |
+| `POST /api/files` | `tasks:write` | `multipart/form-data`，取**第一个文件分片**；表单字段一律跳过 |
+| `GET /api/files/{id}` | `tasks:read` | 元数据；不存在或不属于调用者 → `404 file_not_found` |
+| `GET /api/files/{id}/content` | `tasks:read` | `http.ServeContent`：`Content-Disposition: attachment`、支持 `Range`、`X-Content-Type-Options: nosniff` |
+| `DELETE /api/files/{id}` | `tasks:write` | `204`；先删行再删字节，删两遍不报错 |
+
+- `File` 字段：`id` / `name` / `mime` / `size` / `sha256` / `backend` / `createdAt`。
+- 上限 `AGENTHUB_FILES_MAX_BYTES`（默认 32 MiB）在**写临时文件时**判定，超限 `413 file_too_large`；
+  空文件 `415 file_unsupported`；后端读写失败 `502 file_store_error`；功能未配置 `503 files_disabled`。
+- 文件名只保留基名（`../../etc/passwd` → `passwd`），空名回落 `upload.bin`；MIME 以嗅探为准，
+  嗅探拿不准时才用客户端声明的类型。
+- 行带 `owner_id` 并受行级隔离；仓储走 `scoped(ctx)`，列表按 owner 精确匹配。
+
+### 11.2 连接器审批队列
+
+- `GET /api/connectors/approvals`（`tasks:read`）→ `{ taskId, resourceId, connectorId, connectorName,
+  action, args, requestedBy, asked, createdAt }[]`，来源是 `input-required` 且带
+  `metadata.connectorApproval` 的任务：**不新增审批表**。
+- `POST /api/connectors/approvals/{id}/approve`（`tasks:write`）：`hub.Resume` 真跑一次，
+  动作与参数随 resume 回填，返回完成后的任务。
+- `POST /api/connectors/approvals/{id}/reject`（`tasks:write`）：`hub.Cancel`，不执行任何动作。
+- 不存在、非待审批、已决定、别人的任务统一 `404 connector_approval_not_found`；
+  已决定的再次处理返回 `409 connector_approval_closed`。
+
+### 11.3 验收
+
+- 队列读得到动作与参数；批准后任务 `completed` 且动作只执行一次，队列变空，重复批准 409。
+- 拒绝后任务 `canceled`，队列变空，再批准 409。
+- 跨用户：别人的待审批任务按 404 返回，列表里不出现。
+- 文件：上传→列表→元数据→下载（含 `Range` 206）→删除全链路通；超限 413、缺文件 404、
+  功能关闭 503、后端故障 502 都有用例；`content` 下载带 `nosniff` 与 attachment。
+- 能力准入：申请后端未声明的网络模式 → `409 sandbox_capability_unavailable`，后端零调用。

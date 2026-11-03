@@ -254,7 +254,20 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `PUT` | `/api/connectors/{id}/policy` | `resources:write` — 变更资源 | 设置约束外部调用的策略：off、ask_first 或 allowed。 | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
 | `GET` | `/api/connectors/{id}/actions` | `resources:read` — 查看资源 | 列出全部动作 | — | `{ id, policy, actions: [{ name, description }] }` |
 | `POST` | `/api/connectors/{id}/actions` | `resources:write` — 变更资源 | 运行连接器动作；off 拒绝，allowed 立即执行，ask_first 挂起一个待人工批准的 input-required 任务。 | `{ action, args? }` | `Task \| 202 (ask_first parks an input-required task)` |
+| `GET` | `/api/connectors/approvals` | `tasks:read` — 查看任务 | 列出被 ask_first 策略挂起的连接器动作，等待人工批准或拒绝。 | — | `ConnectorApprovalView[] { taskId, resourceId, connector, action, args, requestedBy, createdAt }` |
+| `POST` | `/api/connectors/approvals/{id}/approve` | `tasks:write` — 取消与恢复任务 | 批准挂起的动作：任务恢复，连接器按挂起时的参数执行一次。 | `{ args? }` | `Task \| 404 connector_approval_not_found \| 409 connector_approval_closed` |
+| `POST` | `/api/connectors/approvals/{id}/reject` | `tasks:write` — 取消与恢复任务 | 拒绝挂起的动作：任务取消，不执行任何动作。 | — | `Task \| 404 connector_approval_not_found \| 409 connector_approval_closed` |
 | `POST` | `/api/threads/{id}/audio` | `tasks:write` — 取消与恢复任务 | 上传语音片段；转写为文字后作为语音消息委派，并将 agent 回复附为 TTS 音频。 | `multipart/form-data; first file part is the audio clip` | `{ transcript, taskId? }` |
+
+### 共享文件
+
+| 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/files` | `tasks:read` — 查看任务 | 列出全部文件 | — | `{ files: File[], maxBytes, backend }` |
+| `POST` | `/api/files` | `tasks:write` — 取消与恢复任务 | 以调用者身份上传单个文件（multipart，取第一个文件分片）；写入前先校验大小上限与 sha256 摘要。 | `multipart/form-data; first file part is the body` | `File \| 413 file_too_large \| 415 file_unsupported \| 503 files_disabled` |
+| `GET` | `/api/files/{id}` | `tasks:read` — 查看任务 | 按 id 读取其中一条文件 | — | `File { id, name, mime, size, sha256, backend, createdAt } \| 404 file_not_found` |
+| `GET` | `/api/files/{id}/content` | `tasks:read` — 查看任务 | 以附件形式下载已存的字节；支持 Range 请求，大文件可断点续传。 | — | `bytes (Content-Disposition: attachment, Range supported) \| 404 file_not_found \| 502 file_store_error` |
+| `DELETE` | `/api/files/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条文件 | — | `204 \| 404 file_not_found` |
 
 ### 能力
 
@@ -410,19 +423,19 @@ network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发
 
 | 状态码 | 含义 | 错误码 |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid, channel_payload_invalid, connector_action_denied, audio_unsupported, sandbox_unknown_provider` |
-| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials, channel_signature_missing, channel_signature_invalid, channel_timestamp_expired` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid, channel_payload_invalid, connector_action_denied, audio_unsupported, sandbox_unknown_provider, api_key_name_required, api_key_invalid_scope` |
+| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials, channel_signature_missing, channel_signature_invalid, channel_timestamp_expired, api_key_expired, api_key_revoked` |
 | `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled, channel_disabled, connector_policy_off, sandbox_disabled, sandbox_policy_denied` |
-| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found, file_not_found, connector_approval_not_found, api_key_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, backup_table_guarded, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost` |
-| `413` | Payload Too Large | `payload_too_large, audio_too_large` |
-| `415` | Unsupported Media Type | `audio_unsupported` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, backup_table_guarded, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost, sandbox_capability_unavailable, connector_approval_closed` |
+| `413` | Payload Too Large | `payload_too_large, audio_too_large, file_too_large` |
+| `415` | Unsupported Media Type | `audio_unsupported, file_unsupported` |
 | `422` | Unprocessable Entity | `audio_transcribe_failed` |
 | `429` | Too Many Requests | `account_locked, sandbox_limit_reached` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
-| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email, delivery_failed` |
-| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable, speech_disabled, sandbox_node_offline` |
+| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email, delivery_failed, file_store_error` |
+| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable, speech_disabled, sandbox_node_offline, files_disabled` |
 | `504` | Gateway Timeout | `sandbox_timeout` |
 
 响应体恒为 {"code": "..."}。请记录错误码，而不是附带的说明文字。

@@ -6,6 +6,14 @@
 #              DATABASE_URL is unset, so a Postgres service is provided to let
 #              them exercise the real GORM path. `go vet ./...` runs alongside
 #              as a fast static gate.
+#   • go-restricted → the same suite as the role a deployment actually uses.
+#              `go` runs everything as the Postgres superuser, which bypasses
+#              every policy and can create anything, so a case that needs DDL and
+#              a case that leaks across owners both pass there. This job migrates
+#              as scripts/provision-db-roles.sql's migrator, applies that file's
+#              grants, and then runs the suite as `agenthub_app`: DML only, no
+#              BYPASSRLS. Cases that genuinely need to build a table skip with a
+#              reason instead of failing with "permission denied".
 #   • web     → `bunx vitest run` under web/ (the console's Vitest suite:
 #              monochrome guard, 13-language copy completeness, smoke).
 #
@@ -77,6 +85,80 @@ jobs:
 
       - name: Test (race)
         run: go test -race ./...
+
+  # ------------------------------------------- go (production runtime shape)
+  go-restricted:
+    name: go — restricted runtime role
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agenthub
+          POSTGRES_PASSWORD: agenthub
+          POSTGRES_DB: agenthub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U agenthub"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      SUPER_URL: postgres://agenthub:agenthub@localhost:5432/agenthub?sslmode=disable
+      # The migrator owns the schema; the migrator password is fixed here because
+      # the roles are created before scripts/provision-db-roles.sql runs (that
+      # file's CREATE ROLE statements are skipped once the roles exist).
+      MIGRATOR_URL: postgres://agenthub_migrator:ci_migrator@localhost:5432/agenthub?sslmode=disable
+      # The whole point of this job: the suite runs as the role production uses.
+      DATABASE_URL: postgres://agenthub_app:ci_app@localhost:5432/agenthub?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: Install psql
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      # Roles first, with known passwords: provision-db-roles.sql only creates a
+      # role that is missing, so running it afterwards keeps these credentials and
+      # still applies every GRANT and its "RLS is enforced on all of these" check.
+      - name: Create the roles
+        run: |
+          psql "$SUPER_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agenthub_migrator') THEN
+              CREATE ROLE agenthub_migrator LOGIN PASSWORD 'ci_migrator';
+            END IF;
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agenthub_app') THEN
+              CREATE ROLE agenthub_app LOGIN PASSWORD 'ci_app';
+            END IF;
+          END $$;
+          GRANT CONNECT ON DATABASE agenthub TO agenthub_migrator, agenthub_app;
+          GRANT USAGE, CREATE ON SCHEMA public TO agenthub_migrator;
+          SQL
+
+      # internal/store owns the migrations and its DB cases call Migrate, so this
+      # provisions the schema as the role that is allowed to.
+      - name: Migrate as the migrator
+        env:
+          DATABASE_URL: ${{ env.MIGRATOR_URL }}
+        run: go test -count=1 -p 1 ./internal/store/
+
+      - name: Provision (grants + the RLS assertion)
+        run: psql "$SUPER_URL" -v ON_ERROR_STOP=1 -f scripts/provision-db-roles.sql
+
+      # Everything below runs as agenthub_app: DML only, no CREATE, not
+      # BYPASSRLS. Cases that need to build a probe table skip with a reason.
+      - name: Test as the runtime role
+        run: go test -race -count=1 ./...
 
   # -------------------------------------------------------------- web (vitest)
   web:

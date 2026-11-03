@@ -982,3 +982,70 @@ web 侧剩余分支集中在 `auth-store.js` 的 `?? []` 回退臂与 `playgroun
 验证：`gofmt -l` 干净、`go build ./...`、`go vet ./...`、无库 `go test ./...` 全绿；
 有库 `go test -race ./tests/ ./internal/store/ ./internal/backup/` 三包 ok；
 `bun run test`（417）×2 通过，`bun run test:coverage` 见上表。
+
+## M16 — 第五轮完整度收口：归属补齐 / 受限角色可测 / 沙盒诚实化 / 共享文件 / 审批队列（2026-11-03）
+
+对照《agenthub-agentbuddy 完整度评估》第 7 节「补齐建议」1/2/3/5 与 4 的服务端前提。
+
+### 1. 归属与行级隔离（029 / 030 / 031）
+
+- `029_channel_messages_owner.sql`：投递明细加 `owner_id` + 同一事务内按父通道回填 + 索引 +
+  `ENABLE`/`FORCE` + `channel_messages_owner_access`。
+- `030_threads_rls.sql`：`threads` 早已有 `owner_id`（`012_threads.sql`），本轮只补策略；
+  `thread_messages` 加 `owner_id` + 按父线程回填 + 索引 + 策略。**回填与 FORCE 同一事务**。
+- `031_shared_files.sql`：新建 `shared_files` 并直接带策略。
+- 仓储：`channels` 的四条 message 方法带 owner 走精确匹配；`threads_store.go` 改用
+  `scoped(ctx)` / `withIdentity`，写入取父行属主；`RecordDelivery` 的 webhook 路径继承父通道属主。
+- 隔离表从 11 张增至 **15 张**；`store_test.go` 的 `want`、`provision-db-roles.sql` 的断言、
+  `tests/rls_test.go` 的表清单三处同步。
+
+### 2. 受限角色下可测（`internal/testdb` + CI job）
+
+- `internal/testdb`：`Open` / `CanDDL` / `TempSchema`（`it_<随机>` schema + `search_path` 注入）/
+  `RequireDDL`（无 DDL 权限时 `t.Skip` 并给出可执行的提示）。
+- 备份引擎与 `TRUNCATE` 触发器探针改在临时 schema 建表；`openGovernanceDB` 容忍「schema 已存在」。
+- `.github/workflows/ci.yml` 新增 `go-restricted`：超级用户建库 → 建 `agenthub_migrator` /
+  `agenthub_app` → migrator 迁移 → 跑 `provision-db-roles.sql` → 以 `agenthub_app` 跑 `go test ./...`。
+
+### 3. 沙盒能力声明与准入
+
+- 逐后端校正 `Describe()`：`local` 只有 `platform`；`bwrap` 去掉 `bridge`（`--share-net` 是宿主
+  命名空间）；`docker` 三项与 `createArgs` 对齐（`platform` 不再发字面 `--network bridge`）；
+  `remote` / 平台垫片 / 未声明网络的自定义模板只报 `delegated`；`declarative` 输出 `spec.Network`。
+- `Descriptor` 增 `EnvKeys`，新增 `SourcePlatform`；平台垫片把环境变量名从 `Requires` 移出。
+- `Manager.Acquire` 用 `SupportsNetwork` 做准入门禁，不匹配即 `sandbox_capability_unavailable`。
+
+### 4. 共享文件（`internal/files` + 5 条路由）
+
+- `types.go` / `service.go` / `local.go` / `s3.go`，元数据仓储 `store/files_store.go`（端口在消费方）。
+- 本地后端临时文件 + 原子 rename + 0600 + sha256 分片目录；S3 后端标准库 SigV4、path-style、
+  单次 PUT 带 `x-amz-content-sha256`，密钥只从环境变量名读。
+- `handlers/files.go` 五条路由；`config` 增 `AGENTHUB_FILES_*` 并在选 `s3` 时校验 endpoint/bucket。
+- 用例：`files/service_test.go`（上限 / 哈希 / 命名 / 后端故障 / key 越界 / 取消）、
+  `files/s3_test.go`（签名头 / path-style / 3xx 不跟随 / 传输失败 / 体积不符）、
+  `handlers/files_test.go`（上传-列表-下载含 Range-删除、415、413、404、502、503）。
+
+### 5. 连接器审批队列（3 条路由）
+
+- `ParkConnector` 把 `action` / `args` / `requestedBy` / `resourceId` 写进
+  `metadata.connectorApproval`；队列从 `input-required` 任务派生，**不新增审批表**。
+- `hub.TaskStateLister` 是**可选端口**（`TaskRepository` 接口零变更），GORM 实现按 `state` 过滤并
+  受行级隔离；内存实现同语义。
+- 批准 = `hub.Resume`（动作与参数回填，真跑一次）；拒绝 = `hub.Cancel`；非待审批 404、已决定 409。
+- 用例：`handlers/connectors_approval_test.go`（队列内容 / 批准执行一次 / 重复批准 409 / 拒绝后
+  批准 409 / 未知与无关任务 404 / Hub 缺失 503）、`hub/orchestrator_park_test.go`（元数据与状态列表）。
+
+### 6. 文档与端点表
+
+- 路由数 133 → **141**；`docs-content.js` 新增 8 行（3 条审批 + 5 条文件）与 `groupFiles`，
+  `docs-copy.js` 13 语同步新增键，`bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md`。
+- `tests/docs-content.spec.js` 的计数与分组断言同步（133→141、collaboration 20→23、files 5）。
+- 本轮文档同步：`AGENTS.md`、`README.md`、`requirements.md`、`requirements-isolation.md`、
+  `requirements-sandbox.md`。
+
+### 7. 校验
+
+- `gofmt -w internal cmd`、`go build ./...`、`go vet ./...`、`go test ./...` 全绿（本机无
+  `DATABASE_URL`，库门控用例按既有口径跳过）。
+- `cd web && bun run test`（22 个 spec）、`bun run build` 全绿。
+- 残余：本机 `cargo` 无法执行（工具链所在卷被判为不可信挂载），Rust 侧本轮改动只能由 CI 验证。

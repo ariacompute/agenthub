@@ -5,7 +5,16 @@
 // internal/store — the same dependency-inversion pattern as registry.ResourceStore.
 package channels
 
-import "context"
+import (
+	"context"
+
+	"agenthub/internal/httputil"
+)
+
+// ErrChannelNotFound reports that the parent channel could not be read in the
+// caller's scope. A receipt cannot be written without it: the owner it has to
+// carry comes from that row.
+var ErrChannelNotFound = &httputil.Error{Code: httputil.CodeChannelNotFound}
 
 // Kind enumerates the supported external surfaces.
 type Kind string
@@ -59,7 +68,11 @@ type ChannelMessage struct {
 	Payload     map[string]any `json:"payload"`
 	Status      string         `json:"status"`
 	Error       string         `json:"error"`
-	CreatedAt   string         `json:"createdAt"`
+	// OwnerID is the owner of the channel this receipt travelled through. The
+	// store fills it from the parent row on insert; callers never set it by
+	// hand, and every read scopes on it.
+	OwnerID   string `json:"ownerId"`
+	CreatedAt string `json:"createdAt"`
 }
 
 // Status values for a channel message.
@@ -91,13 +104,20 @@ type Store interface {
 	Delete(ctx context.Context, id, ownerID string) error
 	// RecordDelivery inserts a channel message. It returns (false, nil) when
 	// ExternalRef is a duplicate, letting the caller treat redelivery as a no-op.
+	// The owner is read from the parent channel inside the same transaction, so a
+	// receipt cannot be written under an owner the channel does not carry.
 	RecordDelivery(ctx context.Context, m *ChannelMessage) (bool, error)
-	ListDeliveries(ctx context.Context, channelID string) ([]*ChannelMessage, error)
+	// ListDeliveries reads one channel's receipts, scoped to the owner that
+	// channel carries. Ownership is part of the key here for the same reason it
+	// is on Get: a lookup that does not carry the owner cannot answer "does this
+	// receipt exist" either.
+	ListDeliveries(ctx context.Context, channelID, ownerID string) ([]*ChannelMessage, error)
 	// GetDelivery returns the receipt identified by ID (its ExternalRef) on a
-	// channel, or nil when there is none.
-	GetDelivery(ctx context.Context, channelID, id string) (*ChannelMessage, error)
+	// channel the given owner holds, or nil when there is none.
+	GetDelivery(ctx context.Context, channelID, id, ownerID string) (*ChannelMessage, error)
 	// UpdateDelivery rewrites the outcome of an existing receipt in place, so a
 	// retry keeps one line per message instead of appending a second one. It
-	// reports false when the row is gone.
-	UpdateDelivery(ctx context.Context, m *ChannelMessage) (bool, error)
+	// reports false when the row is gone — including when it belongs to somebody
+	// else.
+	UpdateDelivery(ctx context.Context, m *ChannelMessage, ownerID string) (bool, error)
 }

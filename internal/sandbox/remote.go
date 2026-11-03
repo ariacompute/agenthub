@@ -207,10 +207,16 @@ func (r *RemoteProvider) Describe(context.Context) (Descriptor, error) {
 		Name:      "remote",
 		Layer:     LayerRemote,
 		Isolation: IsolationRemote,
-		Network:   []string{NetworkNone, NetworkBridge, NetworkPlatform},
-		Source:    SourceBuiltin,
-		License:   "n/a",
-		DocsURL:   "/docs",
+		// The node decides, and this process cannot check. It used to advertise
+		// none/bridge/platform as if it enforced them, which turned "the sandbox
+		// has no network" into an unverified claim about somebody else's machine.
+		// "delegated" says what actually happens: the profile travels in the Job
+		// and the node's own policy is the enforcement point, recorded in the
+		// audit trail on that node.
+		Network: []string{NetworkDelegated},
+		Source:  SourceBuiltin,
+		License: "n/a",
+		DocsURL: "/docs",
 	}, nil
 }
 

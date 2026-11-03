@@ -315,7 +315,12 @@ type ChannelMessage struct {
 	Payload     JSONField `gorm:"type:jsonb"`
 	Status      string    `gorm:"size:32;not null;default:received"`
 	Error       string    `gorm:"type:text;not null"`
-	CreatedAt   time.Time `gorm:"index"`
+	// OwnerID is the owner of the parent channel, copied at insert time. It is
+	// never taken from the request: a receipt belongs to the channel it was
+	// routed through, and that is the row the policy in
+	// migrations/029_channel_messages_owner.sql compares against.
+	OwnerID   string    `gorm:"size:64;index;not null;default:''"`
+	CreatedAt time.Time `gorm:"index"`
 }
 
 // TableName returns the channel_messages table name.

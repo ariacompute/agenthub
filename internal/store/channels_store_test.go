@@ -51,6 +51,7 @@ func TestToDomainMessageMapsFields(t *testing.T) {
 		Direction:   "inbound",
 		Payload:     payload,
 		Status:      "received",
+		OwnerID:     "u1",
 	}
 	m := toDomainMessage(r)
 	if m.ChannelID != "c1" || m.ExternalRef != "ext-1" || m.Direction != "inbound" {
@@ -58,5 +59,10 @@ func TestToDomainMessageMapsFields(t *testing.T) {
 	}
 	if m.Status != "received" || m.Payload["text"] != "hi" {
 		t.Fatalf("scalar mapping wrong: %+v", m)
+	}
+	// The receipt's owner is part of the wire shape now: the console shows it and
+	// the store scopes every read on it.
+	if m.OwnerID != "u1" {
+		t.Fatalf("owner not carried: %+v", m)
 	}
 }

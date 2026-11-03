@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"agenthub/internal/testdb"
 )
 
 // The engines read and write a real database, so their own tests live behind
@@ -102,6 +104,10 @@ func sumCounts(counts map[string]int64) int64 {
 func TestCopyEngineRefusesToDumpAGuardedTable(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
+	// This case builds a probe table, so it needs the migrator role. Under the
+	// production runtime role it skips with the reason instead of failing with
+	// "permission denied for schema public".
+	testdb.RequireDDL(t, ctx, dsn)
 	conn, err := connect(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)

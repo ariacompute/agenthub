@@ -254,7 +254,20 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | `PUT` | `/api/connectors/{id}/policy` | `resources:write` — Change resources | Set the policy that gates external invocation: off, ask_first, or allowed. | `{ policy: "off" \| "ask_first" \| "allowed" }` | `ConnectorView` |
 | `GET` | `/api/connectors/{id}/actions` | `resources:read` — Read resources | List all actions | — | `{ id, policy, actions: [{ name, description }] }` |
 | `POST` | `/api/connectors/{id}/actions` | `resources:write` — Change resources | Run a connector action; off refuses, allowed runs at once, ask_first parks an input-required task for approval. | `{ action, args? }` | `Task \| 202 (ask_first parks an input-required task)` |
+| `GET` | `/api/connectors/approvals` | `tasks:read` — Read tasks | List the connector actions the ask_first policy parked, waiting for a person to approve or reject them. | — | `ConnectorApprovalView[] { taskId, resourceId, connector, action, args, requestedBy, createdAt }` |
+| `POST` | `/api/connectors/approvals/{id}/approve` | `tasks:write` — Cancel and resume tasks | Approve a parked action: the task resumes and the connector runs once with the arguments it was parked with. | `{ args? }` | `Task \| 404 connector_approval_not_found \| 409 connector_approval_closed` |
+| `POST` | `/api/connectors/approvals/{id}/reject` | `tasks:write` — Cancel and resume tasks | Reject a parked action: the task is canceled and nothing runs. | — | `Task \| 404 connector_approval_not_found \| 409 connector_approval_closed` |
 | `POST` | `/api/threads/{id}/audio` | `tasks:write` — Cancel and resume tasks | Upload a voice clip; transcribe it, delegate as a voice message, and attach the agent reply as TTS audio. | `multipart/form-data; first file part is the audio clip` | `{ transcript, taskId? }` |
+
+### Shared files
+
+| Method | Path | Permission | What it does | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/files` | `tasks:read` — Read tasks | List all files | — | `{ files: File[], maxBytes, backend }` |
+| `POST` | `/api/files` | `tasks:write` — Cancel and resume tasks | Upload one file as the caller (multipart, first file part); the size cap and the sha256 digest are applied before anything is stored. | `multipart/form-data; first file part is the body` | `File \| 413 file_too_large \| 415 file_unsupported \| 503 files_disabled` |
+| `GET` | `/api/files/{id}` | `tasks:read` — Read tasks | Read one of the files by id | — | `File { id, name, mime, size, sha256, backend, createdAt } \| 404 file_not_found` |
+| `GET` | `/api/files/{id}/content` | `tasks:read` — Read tasks | Download the stored bytes as an attachment; Range requests are supported so a large upload can be resumed. | — | `bytes (Content-Disposition: attachment, Range supported) \| 404 file_not_found \| 502 file_store_error` |
+| `DELETE` | `/api/files/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the files | — | `204 \| 404 file_not_found` |
 
 ### Capabilities
 
@@ -410,19 +423,19 @@ Failures answer with a machine-readable code. Grouped here by the HTTP status th
 
 | Status | Meaning | Codes |
 | --- | --- | --- |
-| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid, channel_payload_invalid, connector_action_denied, audio_unsupported, sandbox_unknown_provider` |
-| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials, channel_signature_missing, channel_signature_invalid, channel_timestamp_expired` |
+| `400` | Bad Request | `bad_request, weak_password, invalid_email, invalid_grant, unknown_permission, password_required, backup_schedule_invalid, restore_confirm_required, schedule_invalid, router_policy_invalid, channel_payload_invalid, connector_action_denied, audio_unsupported, sandbox_unknown_provider, api_key_name_required, api_key_invalid_scope` |
+| `401` | Unauthorized | `unauthorized, unauthenticated, session_expired, invalid_credentials, channel_signature_missing, channel_signature_invalid, channel_timestamp_expired, api_key_expired, api_key_revoked` |
 | `403` | Forbidden | `forbidden, user_disabled, builtin_role, skill_distill_disabled, channel_disabled, connector_policy_off, sandbox_disabled, sandbox_policy_denied` |
-| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found` |
+| `404` | Not Found | `not_found, backup_not_found, computer_not_found, schedule_not_found, router_ticket_not_found, router_trigger_not_found, router_thread_not_found, channel_not_found, delivery_not_found, connector_not_found, sandbox_not_found, file_not_found, connector_approval_not_found, api_key_not_found` |
 | `405` | Method Not Allowed | `method_not_allowed` |
-| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, backup_table_guarded, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost` |
-| `413` | Payload Too Large | `payload_too_large, audio_too_large` |
-| `415` | Unsupported Media Type | `audio_unsupported` |
+| `409` | Conflict | `email_taken, role_already_exists, group_already_exists, backups_disabled, backup_in_progress, backup_checksum_mismatch, backup_schema_mismatch, backup_invalid_archive, backup_table_guarded, router_ticket_closed, router_handback_exhausted, router_resource_unset, delivery_not_retryable, sandbox_unsupported, sandbox_lease_lost, sandbox_capability_unavailable, connector_approval_closed` |
+| `413` | Payload Too Large | `payload_too_large, audio_too_large, file_too_large` |
+| `415` | Unsupported Media Type | `audio_unsupported, file_unsupported` |
 | `422` | Unprocessable Entity | `audio_transcribe_failed` |
 | `429` | Too Many Requests | `account_locked, sandbox_limit_reached` |
 | `500` | Internal Server Error | `internal_error, backup_engine_failed, backup_failed, backup_interrupted, restore_failed` |
-| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email, delivery_failed` |
-| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable, speech_disabled, sandbox_node_offline` |
+| `502` | Bad Gateway | `oauth_not_configured, oauth_state_mismatch, oauth_failed, oauth_no_email, delivery_failed, file_store_error` |
+| `503` | Service Unavailable | `backup_engine_unavailable, restore_busy, restore_in_progress, feature_unavailable, speech_disabled, sandbox_node_offline, files_disabled` |
 | `504` | Gateway Timeout | `sandbox_timeout` |
 
 The body is always {"code": "..."}. Log the code rather than any prose that came with it.

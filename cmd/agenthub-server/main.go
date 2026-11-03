@@ -21,6 +21,7 @@ import (
 	"agenthub/internal/authz"
 	"agenthub/internal/backup"
 	"agenthub/internal/config"
+	"agenthub/internal/files"
 	"agenthub/internal/handlers"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
@@ -269,7 +270,12 @@ func main() {
 			"hint", "set AGENTHUB_ROUTER_ENABLED=true, schedules then fire on their cron expression")
 	}
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc, Sandboxes: sandboxSvc}
+	// Shared files. Off unless a backend is configured, and the service is built
+	// either way so "off" is a state the endpoints can report instead of a nil
+	// pointer every handler has to guard.
+	filesSvc := newFilesService(cfg, db)
+
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Files: filesSvc, Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc, Sandboxes: sandboxSvc}
 
 	// The audit trail. Off only when an operator says so: a trail nobody turned
 	// on is a trail nobody has when the incident happens.
@@ -738,4 +744,59 @@ func threadHistory(ts threads.Store) router.HistoryProvider {
 		}
 		return out, nil
 	}
+}
+
+// newFilesService builds the shared-file service from the configuration.
+//
+// Off is the default and stays a working deployment: the service is still
+// constructed, with no backend, so /api/files answers files_disabled instead of
+// failing with a nil pointer. A backend that cannot be built is fatal — an
+// instance that would reject every upload should say so at boot, not on the
+// first attempt.
+func newFilesService(cfg *config.Config, db *gorm.DB) *files.Service {
+	if db == nil {
+		return nil
+	}
+	var backend files.Backend
+	switch cfg.FilesStore {
+	case config.FilesStoreLocal:
+		local, err := files.NewLocalBackend(cfg.FilesDir)
+		if err != nil {
+			slog.Error("files: AGENTHUB_FILES_DIR is unusable", "error", err)
+			os.Exit(1)
+		}
+		backend = local
+		slog.Info("files: shared files enabled", "backend", local.Name(), "dir", local.Dir(),
+			"maxBytes", cfg.FilesMaxBytes)
+	case config.FilesStoreS3:
+		s3, err := files.NewS3Backend(files.S3Options{
+			Endpoint:  cfg.FilesS3Endpoint,
+			Bucket:    cfg.FilesS3Bucket,
+			Region:    cfg.FilesS3Region,
+			PathStyle: cfg.FilesS3PathStyle,
+			// The names are configuration; the values are the environment's. A key
+			// is never read from the config file and never logged.
+			AccessKey: os.Getenv(cfg.FilesS3AccessKeyEnv),
+			SecretKey: os.Getenv(cfg.FilesS3SecretKeyEnv),
+		})
+		if err != nil {
+			slog.Error("files: the S3 backend is misconfigured", "error", err)
+			os.Exit(1)
+		}
+		backend = s3
+		slog.Info("files: shared files enabled", "backend", s3.Name(), "bucket", s3.Bucket(),
+			"pathStyle", cfg.FilesS3PathStyle, "maxBytes", cfg.FilesMaxBytes)
+	default:
+		slog.Info("files: shared files disabled (set AGENTHUB_FILES_STORE=local or s3)")
+	}
+	svc, err := files.NewService(files.Options{
+		Store:    store.NewFilesStore(db),
+		Backend:  backend,
+		MaxBytes: cfg.FilesMaxBytes,
+	})
+	if err != nil {
+		slog.Error("files: cannot build the service", "error", err)
+		os.Exit(1)
+	}
+	return svc
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agenthub/internal/registry"
+	"agenthub/internal/testdb"
 	"gorm.io/gorm"
 )
 
@@ -27,13 +28,16 @@ func openGovernanceDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set: skipping DB-backed store test (make db-up)")
 	}
-	db, err := Open(dsn, false)
+	// Opened with RLS relaxed, for the same reason tests/integration_test.go does
+	// it: these cases exercise repository behaviour with no request identity, and
+	// a forced policy would correctly filter every row away. The policies
+	// themselves are asserted by tests/rls_test.go, which opens the same database
+	// with RLSEnforce: true and a role the policies bind.
+	db, err := OpenWithOptions(dsn, OpenOptions{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	testdb.MigrateOrExisting(t, db, Migrate)
 	t.Cleanup(func() {
 		if err := Close(db); err != nil {
 			t.Errorf("close db: %v", err)

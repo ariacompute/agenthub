@@ -107,6 +107,8 @@ func TestEmbeddedMigrationsAreOrderedAndIdempotent(t *testing.T) {
 		"024_resource_visibility.sql", "025_audit_log.sql",
 		"026_rls_policies.sql", "027_audit_permission.sql",
 		"028_rls_policies_owned_surfaces.sql",
+		"029_channel_messages_owner.sql", "030_threads_rls.sql",
+		"031_shared_files.sql",
 	}
 	if len(names) != len(want) {
 		t.Fatalf("embedded migrations = %v, want %v", names, want)

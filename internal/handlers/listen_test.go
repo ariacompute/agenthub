@@ -74,7 +74,12 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /api/connectors":                            {http.MethodGet, "/api/connectors", ""},
 		// Allowed connector: the probe runs the full send path.
 		"POST /api/connectors/{id}/actions": {http.MethodPost, "/api/connectors/" + mcp.ID + "/actions", `{"action":"invoke","args":{}}`},
-		"POST /api/threads/{id}/audio":      {http.MethodPost, "/api/threads/" + finished + "/audio", ""},
+		// The approval queue answers 404 for an unknown task, which is not 404 for
+		// a missing route: the probe is checking that the route exists.
+		"GET /api/connectors/approvals":               {http.MethodGet, "/api/connectors/approvals", ""},
+		"POST /api/connectors/approvals/{id}/approve": {http.MethodPost, "/api/connectors/approvals/task-1/approve", ""},
+		"POST /api/connectors/approvals/{id}/reject":  {http.MethodPost, "/api/connectors/approvals/task-1/reject", ""},
+		"POST /api/threads/{id}/audio":                {http.MethodPost, "/api/threads/" + finished + "/audio", ""},
 		// Computers / schedules / knowledge answer 503 without a store wired in, not 404.
 		"GET /api/computers":         {http.MethodGet, "/api/computers", ""},
 		"POST /api/computers":        {http.MethodPost, "/api/computers", `{"kind":"browser"}`},
@@ -119,7 +124,15 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"GET /api/sandbox-nodes/{id}/jobs":        {http.MethodGet, "/api/sandbox-nodes/node-1/jobs?wait=0", ""},
 		"POST /api/sandbox-nodes/{id}/jobs/{job}": {http.MethodPost, "/api/sandbox-nodes/node-1/jobs/job-1", `{"exitCode":0}`},
 		"GET /api/knowledge":                      {http.MethodGet, "/api/knowledge", ""},
-		"GET /healthz":                            {http.MethodGet, "/healthz", ""},
+		// Shared files answer files_disabled without a backend, which is the state
+		// an instance that never configured one is in. The probe only asserts the
+		// route exists, and 503 is not 404.
+		"GET /api/files":              {http.MethodGet, "/api/files", ""},
+		"POST /api/files":             {http.MethodPost, "/api/files", ""},
+		"GET /api/files/{id}":         {http.MethodGet, "/api/files/file-1", ""},
+		"GET /api/files/{id}/content": {http.MethodGet, "/api/files/file-1/content", ""},
+		"DELETE /api/files/{id}":      {http.MethodDelete, "/api/files/file-1", ""},
+		"GET /healthz":                {http.MethodGet, "/healthz", ""},
 	}
 
 	listeners := Listeners()

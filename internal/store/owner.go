@@ -16,3 +16,10 @@ import "gorm.io/gorm"
 func ownedWhere(q *gorm.DB, id, ownerID string) *gorm.DB {
 	return q.Where("id = ? AND owner_id = ?", id, ownerID)
 }
+
+// ownedChildWhere is ownedWhere for a table whose rows have no id of their own:
+// a receipt or a thread message is keyed by its parent, and it carries a copy of
+// that parent's owner. The comparison is exact for the same reason as above.
+func ownedChildWhere(q *gorm.DB, parentColumn, parentID, ownerID string) *gorm.DB {
+	return q.Where(parentColumn+" = ? AND owner_id = ?", parentID, ownerID)
+}

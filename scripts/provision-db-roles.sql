@@ -79,13 +79,15 @@ BEGIN
     INTO missing
     FROM (VALUES ('tasks'), ('task_artifacts'), ('task_spans'), ('task_pending'),
                  ('task_push'), ('events'), ('knowledge'), ('audit_log'),
-                 ('schedules'), ('channels'), ('computers')) AS v(t)
+                 ('schedules'), ('channels'), ('computers'),
+                 ('channel_messages'), ('threads'), ('thread_messages'),
+                 ('shared_files')) AS v(t)
    WHERE NOT EXISTS (
      SELECT 1 FROM pg_class c
       WHERE c.relname = v.t AND c.relrowsecurity AND c.relforcerowsecurity
-   );
+  );
   IF missing IS NOT NULL THEN
     RAISE EXCEPTION 'row level security is not enforced on: %', missing
-      USING HINT = 'Start agenthub once with AGENTHUB_MIGRATE_DATABASE_URL so 026_rls_policies.sql and 028_rls_policies_owned_surfaces.sql run.';
+      USING HINT = 'Start agenthub once with AGENTHUB_MIGRATE_DATABASE_URL so 026_rls_policies.sql, 028_rls_policies_owned_surfaces.sql and 029/030 run.';
   END IF;
 END $$;

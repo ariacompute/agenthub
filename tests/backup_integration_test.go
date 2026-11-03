@@ -14,6 +14,7 @@ import (
 
 	"agenthub/internal/backup"
 	"agenthub/internal/store"
+	"agenthub/internal/testdb"
 )
 
 // TestIntegrationBackupDumpDescribesTheDatabase covers the read only half: a
@@ -426,6 +427,10 @@ func TestIntegrationBackupRefusesAGuardedTable(t *testing.T) {
 	db := openDBReal(t)
 	dsn := os.Getenv("DATABASE_URL")
 	ctx := context.Background()
+	// This case builds a probe table, so it needs the migrator role. Under the
+	// production runtime role it skips with the reason instead of failing with
+	// "permission denied for schema public".
+	testdb.RequireDDL(t, ctx, dsn)
 
 	if err := db.Exec(`CREATE TABLE IF NOT EXISTS it_guarded_probe (id INT PRIMARY KEY)`).Error; err != nil {
 		t.Fatalf("create probe table: %v", err)

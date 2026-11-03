@@ -31,7 +31,13 @@ func (b *BwrapProvider) Describe(context.Context) (Descriptor, error) {
 		Isolation: IsolationNamespace,
 		// NetworkAllowlist is not advertised: the mode parses, but nothing here
 		// implements host filtering, and the descriptor sells only what runs.
-		Network:  []string{NetworkNone, NetworkBridge, NetworkPlatform},
+		//
+		// "bridge" is not advertised either, and used to be. bubblewrap has no NAT
+		// interface: --share-net hands over the host's network namespace, which is
+		// "platform". Listing "bridge" made a request for a NAT'd interface come
+		// back as the host network, and nobody noticed because nothing compared
+		// the request with this list.
+		Network:  []string{NetworkNone, NetworkPlatform},
 		Requires: []string{b.bin},
 		Source:   SourceBuiltin,
 		License:  "LGPL-2.0-or-later",
@@ -103,7 +109,10 @@ func (b *BwrapProvider) Status(context.Context, Handle) (string, error) { return
 // filter process would hand the sandbox the host's whole network.
 func bwrapArgs(p Profile, req ExecRequest) []string {
 	args := []string{"--unshare-all", "--die-with-parent", "--new-session"}
-	if GrantsNetwork(p) {
+	// Only "platform" can be honoured: --share-net is the host's network
+	// namespace, nothing narrower. Manager refuses every other mode against the
+	// descriptor first, so this branch is the last line, not the only one.
+	if NormalizeNetwork(p.Network) == NetworkPlatform {
 		args = append(args, "--share-net")
 	}
 	args = append(args,

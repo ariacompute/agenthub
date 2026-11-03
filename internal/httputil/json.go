@@ -97,6 +97,11 @@ const (
 	CodeConnectorNotFound  Code = "connector_not_found"
 	CodeConnectorDenied    Code = "connector_action_denied"
 	CodeConnectorPolicyOff Code = "connector_policy_off"
+	// The approval queue. A parked action that is gone is not found; one that was
+	// already approved, rejected or expired is closed — the difference matters
+	// because only the second one means "somebody got there first".
+	CodeConnectorApprovalNotFound Code = "connector_approval_not_found"
+	CodeConnectorApprovalClosed   Code = "connector_approval_closed"
 
 	// Speech: voice messages transcribed and synthesised server side.
 	CodeAudioTooLarge         Code = "audio_too_large"
@@ -139,6 +144,19 @@ const (
 	CodeSandboxLimitReached    Code = "sandbox_limit_reached"
 	CodeSandboxNodeOffline     Code = "sandbox_node_offline"
 	CodeSandboxNotFound        Code = "sandbox_not_found"
+	// The provider exists and is available, but it never promised the isolation
+	// the profile asked for.
+	CodeSandboxCapabilityUnavailable Code = "sandbox_capability_unavailable"
+
+	// Shared files: bytes a user uploaded, held either on the instance's disk or
+	// in an S3-compatible store. FilesDisabled means no backend is configured
+	// (AGENTHUB_FILES_STORE=off), which is the default; the rest describe what
+	// went wrong once one is.
+	CodeFilesDisabled   Code = "files_disabled"
+	CodeFileNotFound    Code = "file_not_found"
+	CodeFileTooLarge    Code = "file_too_large"
+	CodeFileUnsupported Code = "file_unsupported"
+	CodeFileStoreError  Code = "file_store_error"
 )
 
 // Error is a sentinel error carrying a machine readable code.
@@ -191,7 +209,7 @@ func WriteErr(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusTooManyRequests, e.Code)
 	case CodeForbidden, CodeUserDisabled, CodeBuiltinRole:
 		WriteError(w, http.StatusForbidden, e.Code)
-	case CodeNotFound, CodeDeliveryNotFound:
+	case CodeNotFound, CodeDeliveryNotFound, CodeChannelNotFound:
 		WriteError(w, http.StatusNotFound, e.Code)
 	// A receipt that landed (or was never outbound) is a state refusal: the
 	// request was well formed, re-posting it would duplicate the message.
@@ -245,7 +263,7 @@ func WriteErr(w http.ResponseWriter, err error) {
 	// installs the runtime or points the provider elsewhere.
 	case CodeSandboxDisabled, CodeSandboxPolicyDenied:
 		WriteError(w, http.StatusForbidden, e.Code)
-	case CodeSandboxUnsupported, CodeSandboxLeaseLost:
+	case CodeSandboxUnsupported, CodeSandboxLeaseLost, CodeSandboxCapabilityUnavailable:
 		WriteError(w, http.StatusConflict, e.Code)
 	case CodeSandboxUnknownProvider:
 		WriteError(w, http.StatusBadRequest, e.Code)
@@ -255,6 +273,25 @@ func WriteErr(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusTooManyRequests, e.Code)
 	case CodeSandboxNodeOffline:
 		WriteError(w, http.StatusServiceUnavailable, e.Code)
+	// No storage backend is configured: a supported configuration, not a fault.
+	case CodeFilesDisabled:
+		WriteError(w, http.StatusServiceUnavailable, e.Code)
+	case CodeFileNotFound:
+		WriteError(w, http.StatusNotFound, e.Code)
+	case CodeFileTooLarge:
+		WriteError(w, http.StatusRequestEntityTooLarge, e.Code)
+	case CodeFileUnsupported:
+		WriteError(w, http.StatusUnsupportedMediaType, e.Code)
+	// The row exists but the bytes could not be read or written: the store is
+	// broken, and the operator needs to see that as a 5xx.
+	case CodeFileStoreError:
+		WriteError(w, http.StatusBadGateway, e.Code)
+	// The connector approval queue. "not found" and "closed" are different
+	// answers: only the second one means somebody else got there first.
+	case CodeConnectorApprovalNotFound:
+		WriteError(w, http.StatusNotFound, e.Code)
+	case CodeConnectorApprovalClosed:
+		WriteError(w, http.StatusConflict, e.Code)
 	case CodeSandboxTimeout:
 		WriteError(w, http.StatusGatewayTimeout, e.Code)
 	case CodeFeatureUnavailable:

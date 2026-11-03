@@ -48,7 +48,7 @@ curl localhost:3500/.well-known/agent.json
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
-文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 66 条 HTTP 路由。同一份内容
+文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 141 条 HTTP 路由。同一份内容
 由 `make docs-md` 渲染到 [`docs/docs_cn.md`](docs/docs_cn.md)；该文件是**生成的**——来源是文档屏
 所读的两个模块（`web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`），要改就改这两处
 再重跑，不要直接编辑 markdown。
@@ -232,8 +232,12 @@ kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 一律返回相同错误，无法被枚举（`migrations/011_login_protection.sql`）。按 IP 限流：认证端点 **10 次/分钟/IP**，
 `/api` 与 `/a2a` 其余 **200 次/分钟/IP**（`429` + `Retry-After`）。**环回客户端**（agentbuddy 桌面外壳与本地
 开发，均识别为 `127.0.0.1`/`::1`）豁免，因为其流量会塌缩进同一个共享桶，且该防御对仅本机可达的地址并不适用。CSRF：变更型请求要求 `Origin` 同源
-（环回与非浏览器客户端如桌面代理、脚本豁免），否则 `403`；控制台同源 fetch + cookie，不受影响。审计仅记
-IP 与 user_id，绝不记密码/令牌/PII。
+（环回与非浏览器客户端如桌面代理、脚本豁免），否则 `403`；控制台同源 fetch + cookie，不受影响。
+CLI 资源执行的是**记录里声明的**命令，绝不取自提示词，白名单匹配为精确命令名（不匹配前缀、不接受路径）；
+调用方传参只有在记录的 `args_policy` 允许时才放行。`internal/adapter/cli_test.go` 把这两条规则钉成回归用例——
+白名单里的二进制不许再变回 shell。
+审计行只带调用者、IP、HTTP 方法、脱敏后的路径、结果与哈希——**绝不含**密码、令牌、Cookie 或请求/响应体
+（见上文「全 API 审计」）。
 
 **A2A 回调与上游同步（SSRF）**：push 通知现真实 POST 到调用方提供的 `URL`（`HTTPNotifier` 替换旧记录型
 mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`internal/netutil`），并在配置 `AGENTHUB_PUSH_SECRET`
@@ -246,14 +250,15 @@ mock）。目标仅 https 且绝不解析到私网/环回/链路本地地址（`
 
 **数据库**：运行期须用最小权限角色，且**该角色不得是表属主、不得有 `BYPASSRLS`**——任一条件成立都会
 静默跳过隔离策略。`scripts/provision-db-roles.sql` 生成三个角色（`migrator` 拥有 schema 并执行 DDL、
-`app` 只有 DML、`readonly` 只有 SELECT），且末尾断言：十一张受保护表缺
+`app` 只有 DML、`readonly` 只有 SELECT），且末尾断言：十五张受保护表缺
 `ENABLE`+`FORCE ROW LEVEL SECURITY` 就 `RAISE EXCEPTION`。DDL 用 `AGENTHUB_MIGRATE_DATABASE_URL`
 指向 migrator；未设置时回退到 `DATABASE_URL` 并在启动日志告警，因为单角色部署的边界更弱。
 连接池可经 `AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME` 调优。
 
-**数据隔离（行级安全）**：任务及其 artifact/span/pending/push 行与事件、知识块，以及调度目标、
-通道、agent 计算机都带 `owner_id`。PostgreSQL 策略（任务管道在 `migrations/026`，三张按 owner
-的表在 `028`，合计**十一张**）按三个事务内设置判定可见性——`app.owner_id`（登录用户）、
+**数据隔离（行级安全）**：任务及其 artifact/span/pending/push 行与事件、知识块，调度目标、通道、
+agent 计算机，以及线程与其消息、通道投递明细、共享文件都带 `owner_id`。PostgreSQL 策略（任务管道在
+`migrations/026`，`028` 覆盖三张 owned 面，`029` 覆盖投递明细，`030` 覆盖线程与线程消息，`031` 覆盖
+共享文件，合计**十五张**）按三个事务内设置判定可见性——`app.owner_id`（登录用户）、
 `app.bypass`（管理员）、`app.system`（进程内路径：任务状态机、事件扇出、cron 扫描、seed、迁移、
 备份、审计写入）。未设置的设置读作 NULL，比较一律为假，因此**忘记注入身份的请求什么也看不到**，
 而不是看到全部。每次仓储调用开一个短事务（`internal/store.scoped`）并用 `set_config(..., true)`
@@ -443,6 +448,10 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | 控制台 | 可交互的沙盒屏在 **agentbuddy**（`ComputersView`）；本仓只提供 API 与 `/docs` 里的那张表 |
 | 网络 | `none` / `egress_allowlist` 在**两种后端上都**断网，`bridge` / `platform` 放行；白名单本身仍需出网 sidecar，因此按 `none`（fail-closed）读 |
 
+某个后端**真正能兑现**什么，由它自己声明，并在发放租约**之前**校验：bubblewrap 没有 NAT 接口，
+因此向它要 `bridge` 会得到 `sandbox_capability_unavailable`，而不是悄悄拿到宿主的网络命名空间；
+远端节点与平台垫片声明的是 `delegated`——本进程约束不了它们，约束发生在节点侧并由该节点的审计留痕。
+
 一类后端是**目录条目**，不是代码分支。不改控制面即可新增：
 
 1. **编译期**——实现 `sandbox.Provider` 并注册（`docker`、`podman`、`runsc`、`bwrap`、`mock`、`remote`）。
@@ -565,6 +574,27 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
 - **静态加密**：配置 `AGENTHUB_ENCRYPTION_KEY` 时归档以 `<file>.tar.gz.enc`（AES-256-GCM，明文绝不落盘）
   写出并附带 `<file>.enc.sha256` 清单，完整性校验覆盖密文。用 `scripts/backup-restore-drill.sh` 定期演练
   （解密进空库并报告关键表行数）。
+
+## 共享文件
+
+工作台可以上传一份文档、一张截图或一段录音，并在会话里把它交给 agent。字节存在数据库之外，
+库里只有元数据。
+
+- **开关**：`AGENTHUB_FILES_STORE=off|local|s3`（默认 `off`）。关着时所有 `/api/files*` 一律回
+  `503 files_disabled`，界面直接说明「该服务端已关闭共享文件」，而不是显示一个空列表。
+- **端点**：`GET /api/files`（列表 + `maxBytes` + 当前后端）、`POST /api/files`（multipart，取第一个
+  文件分片）、`GET /api/files/{id}`、`GET /api/files/{id}/content`（附件下载，支持 `Range`，
+  因此大文件可续传）、`DELETE /api/files/{id}`。权限沿用 `tasks:read` / `tasks:write`，**不新增权限码**。
+- **上限**：`AGENTHUB_FILES_MAX_BYTES`（默认 32 MiB）在字节流入临时文件的过程中判定，超限的上传
+  根本到不了存储。每行都带 sha256 与嗅探出的 MIME；只有嗅探给不出结论时才采信客户端声明的类型。
+- **本地后端**：`AGENTHUB_FILES_DIR`。先写临时文件，落盘后以 rename 原子就位到分片目录
+  （`<sha256 前两位>/<摘要>`），权限 `0600`。
+- **S3 兼容后端**（RustFS、MinIO、AWS）：`AGENTHUB_FILES_S3_ENDPOINT`、`..._BUCKET`、`..._REGION`、
+  `..._PATH_STYLE`（RustFS/MinIO 必须保持 `true`），以及存放密钥的环境变量**名字**
+  （`..._ACCESS_KEY_ENV`、`..._SECRET_KEY_ENV`）。客户端用标准库手写 SigV4，因此不引入任何新依赖；
+  选了 `s3` 却没给 endpoint 或 bucket，`config.Validate()` 会在启动时失败。
+- **归属**：行带 `owner_id`，表在 `FORCE` 行级安全之下，因此第二个账号即使猜到 id 也无法列出、
+  读取或删除别人的文件。
 
 ## AWS Agent Registry 特性对比
 

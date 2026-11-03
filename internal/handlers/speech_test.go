@@ -38,9 +38,9 @@ func speechDeps(t *testing.T, maxBytes int) (Deps, *memThreads, *registry.Entry)
 	d.Speech = adapter.DefaultSpeech
 
 	store := newMemThreads()
-	// The audio handler looks the thread up with an empty owner: it is the caller
-	// that proves ownership, the path only names the thread.
-	store.threads["thr-1"] = &threads.Thread{ID: "thr-1", Title: "Voice", Participants: []string{agent.ID}}
+	// The audio handler looks the thread up with the caller's owner id, so the
+	// fixture has to be owned by the dev principal the test harness signs in as.
+	store.threads["thr-1"] = &threads.Thread{ID: "thr-1", Title: "Voice", OwnerID: "dev", Participants: []string{agent.ID}}
 	store.messages["thr-1"] = nil
 	d.Threads = store
 	return d, store, agent

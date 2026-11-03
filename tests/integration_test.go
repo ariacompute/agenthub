@@ -22,6 +22,7 @@ import (
 	"agenthub/internal/model"
 	"agenthub/internal/registry"
 	"agenthub/internal/store"
+	"agenthub/internal/testdb"
 
 	"gorm.io/gorm"
 )
@@ -44,9 +45,10 @@ func openDBReal(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := store.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	// The runtime role has DML only: in a production-shaped deployment the
+	// migrator created the schema, and asking it to create it again would fail for
+	// a reason that has nothing to do with the case under test.
+	testdb.MigrateOrExisting(t, db, store.Migrate)
 	t.Cleanup(func() {
 		if err := store.Close(db); err != nil {
 			t.Errorf("close db: %v", err)

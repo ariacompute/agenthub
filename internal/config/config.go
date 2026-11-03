@@ -17,6 +17,7 @@ import (
 	"agenthub/internal/adapter"
 	"agenthub/internal/auth"
 	"agenthub/internal/backup"
+	"agenthub/internal/files"
 	"agenthub/internal/registry"
 	"agenthub/internal/sandbox"
 )
@@ -201,6 +202,21 @@ type Config struct {
 	// AudioMaxBytes caps the per-request audio upload for POST /api/threads/{id}/audio.
 	AudioMaxBytes int
 
+	// Shared files. FilesStore is "off" by default and that is deliberate: an
+	// instance must not begin accepting uploads merely because it was upgraded.
+	// "local" writes to FilesDir; "s3" talks to an S3-compatible store (RustFS,
+	// MinIO, AWS) whose credentials are named by environment variable, never
+	// inlined — the same rule the model providers follow with api_key_env.
+	FilesStore          string
+	FilesDir            string
+	FilesMaxBytes       int64
+	FilesS3Endpoint     string
+	FilesS3Bucket       string
+	FilesS3Region       string
+	FilesS3PathStyle    bool
+	FilesS3AccessKeyEnv string
+	FilesS3SecretKeyEnv string
+
 	// The scheduler (router). It is off by default: an instance that has not
 	// decided which worker a trigger should run on must not start opening tasks
 	// by itself. Turning it on is one switch, and every other value below has a
@@ -288,6 +304,23 @@ type Config struct {
 // else about backups is gated on this one answer, so an instance without a
 // directory behaves exactly as it did before the feature existed.
 func (c *Config) BackupEnabled() bool { return strings.TrimSpace(c.BackupDir) != "" }
+
+// Shared-file store modes. "off" is the default and a supported deployment:
+// every /api/files route then answers files_disabled.
+const (
+	FilesStoreOff   = "off"
+	FilesStoreLocal = "local"
+	FilesStoreS3    = "s3"
+)
+
+// FilesEnabled reports whether an upload backend is configured.
+func (c *Config) FilesEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(c.FilesStore)) {
+	case FilesStoreLocal, FilesStoreS3:
+		return true
+	}
+	return false
+}
 
 // RLSEnforced reports whether the database policies stay binding.
 func (c *Config) RLSEnforced() bool {
@@ -377,6 +410,16 @@ func Load() (*Config, error) {
 		ChannelsEnabled:     envBool("AGENTHUB_CHANNELS_ENABLED", false),
 		SpeechMode:          envStr("AGENTHUB_SPEECH_MODE", registry.ProviderModeMock),
 		AudioMaxBytes:       envInt("AGENTHUB_AUDIO_MAX_BYTES", 16<<20),
+		// Shared files: off until an operator names a backend.
+		FilesStore:          strings.ToLower(envStr("AGENTHUB_FILES_STORE", FilesStoreOff)),
+		FilesDir:            envStr("AGENTHUB_FILES_DIR", ""),
+		FilesMaxBytes:       int64(envInt("AGENTHUB_FILES_MAX_BYTES", 32<<20)),
+		FilesS3Endpoint:     envStr("AGENTHUB_FILES_S3_ENDPOINT", ""),
+		FilesS3Bucket:       envStr("AGENTHUB_FILES_S3_BUCKET", ""),
+		FilesS3Region:       envStr("AGENTHUB_FILES_S3_REGION", "us-east-1"),
+		FilesS3PathStyle:    envBool("AGENTHUB_FILES_S3_PATH_STYLE", true),
+		FilesS3AccessKeyEnv: envStr("AGENTHUB_FILES_S3_ACCESS_KEY_ENV", "AGENTHUB_FILES_S3_ACCESS_KEY"),
+		FilesS3SecretKeyEnv: envStr("AGENTHUB_FILES_S3_SECRET_KEY_ENV", "AGENTHUB_FILES_S3_SECRET_KEY"),
 		// The scheduler ships switched off. The rest of its values are defaults
 		// an operator only touches to tune, not to make it work.
 		RouterEnabled:        envBool("AGENTHUB_ROUTER_ENABLED", false),
@@ -613,6 +656,43 @@ func (c *Config) Validate() error {
 	}
 	if c.AudioMaxBytes < 1<<20 {
 		return fmt.Errorf("AGENTHUB_AUDIO_MAX_BYTES must be at least 1 MiB")
+	}
+	// Shared files. An unknown value is refused rather than treated as "off":
+	// an operator who typed "S3 " or "rustfs" needs to hear about it, not to
+	// discover months later that nothing was ever stored.
+	if c.FilesMaxBytes == 0 {
+		c.FilesMaxBytes = files.DefaultMaxBytes
+	}
+	if c.FilesMaxBytes < 1<<20 {
+		return fmt.Errorf("AGENTHUB_FILES_MAX_BYTES must be at least 1 MiB")
+	}
+	switch c.FilesStore {
+	case "", FilesStoreOff:
+		c.FilesStore = FilesStoreOff
+	case FilesStoreLocal:
+		if strings.TrimSpace(c.FilesDir) == "" {
+			return fmt.Errorf("AGENTHUB_FILES_DIR is required when AGENTHUB_FILES_STORE=local")
+		}
+	case FilesStoreS3:
+		if strings.TrimSpace(c.FilesS3Endpoint) == "" {
+			return fmt.Errorf("AGENTHUB_FILES_S3_ENDPOINT is required when AGENTHUB_FILES_STORE=s3")
+		}
+		if strings.TrimSpace(c.FilesS3Bucket) == "" {
+			return fmt.Errorf("AGENTHUB_FILES_S3_BUCKET is required when AGENTHUB_FILES_STORE=s3")
+		}
+		// The names are checked, and so is the presence of what they name: a
+		// variable that resolves to nothing is the failure an operator hits, and
+		// "the store rejected the upload" is a much worse way to learn about it.
+		for _, name := range []string{c.FilesS3AccessKeyEnv, c.FilesS3SecretKeyEnv} {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("AGENTHUB_FILES_S3_ACCESS_KEY_ENV and AGENTHUB_FILES_S3_SECRET_KEY_ENV name the credential variables and must not be empty")
+			}
+			if os.Getenv(name) == "" {
+				return fmt.Errorf("%s is named by AGENTHUB_FILES_S3_*_KEY_ENV but is not set", name)
+			}
+		}
+	default:
+		return fmt.Errorf("AGENTHUB_FILES_STORE must be off, local or s3 (got %q)", c.FilesStore)
 	}
 	// The scheduler's tuning is only checked when it is switched on: an instance
 	// that never enables it stays valid exactly as it was.

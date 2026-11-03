@@ -49,8 +49,23 @@ func TestAPlatformThatIsNotWiredUpStaysInTheCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	if desc.Layer != LayerPlatform || desc.Isolation != IsolationPlatform || len(desc.Requires) != 1 {
+	if desc.Layer != LayerPlatform || desc.Isolation != IsolationPlatform {
 		t.Fatalf("descriptor = %+v", desc)
+	}
+	// The base URL and the token are environment keys, not binaries: Requires is
+	// what a probe looks for, and no probe looks for E2B_SHIM_URL.
+	if len(desc.Requires) != 0 {
+		t.Fatalf("a platform shim needs no binary, got %v", desc.Requires)
+	}
+	if len(desc.EnvKeys) != 2 || desc.EnvKeys[0] != "E2B_SHIM_URL" {
+		t.Fatalf("the console must be told which variables exist, got %v", desc.EnvKeys)
+	}
+	// The sandbox runs on the platform; this process cannot constrain its network.
+	if desc.Source != SourcePlatform {
+		t.Fatalf("source = %q, want %q", desc.Source, SourcePlatform)
+	}
+	if len(desc.Network) != 1 || desc.Network[0] != NetworkDelegated {
+		t.Fatalf("network = %v, want [%s]", desc.Network, NetworkDelegated)
 	}
 
 	avail, err := provider.Probe(ctx)

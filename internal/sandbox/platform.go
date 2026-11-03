@@ -78,14 +78,20 @@ func NewHTTPProvider(preset PlatformPreset, lookup func(string) string) *HTTPPro
 func (h *HTTPProvider) Name() string { return h.preset.Name }
 
 // Describe reports the declared layer.
+//
+// Three corrections over the first version: the source is "platform", not
+// "declarative" (nothing here is read from operator configuration), the network
+// is delegated (the sandbox runs on somebody else's runtime), and the base URL /
+// token are environment keys rather than binaries — Requires means "a probe looks
+// for this executable", and no probe ever looks for E2B_SHIM_URL.
 func (h *HTTPProvider) Describe(context.Context) (Descriptor, error) {
 	return Descriptor{
 		Name:      h.preset.Name,
 		Layer:     h.preset.Layer,
 		Isolation: h.preset.Isolation,
-		Network:   []string{NetworkPlatform},
-		Requires:  []string{h.preset.EnvBaseURL},
-		Source:    SourceDeclarative,
+		Network:   []string{NetworkDelegated},
+		EnvKeys:   []string{h.preset.EnvBaseURL, h.preset.EnvToken},
+		Source:    SourcePlatform,
 		License:   h.preset.License,
 		DocsURL:   h.preset.DocsURL,
 	}, nil

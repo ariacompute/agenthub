@@ -57,7 +57,7 @@ Console: `make web-dev` (development) or `make web-build && make run` (the bundl
 by the Go process).
 
 Documentation: the console documents itself on a **`/docs`** screen — concepts, the seven A2A
-methods and all 66 HTTP routes. The same content is rendered to
+methods and all 141 HTTP routes. The same content is rendered to
 [`docs/docs.md`](docs/docs.md) by `make docs-md`; that file is **generated** from the two modules
 the screen reads (`web/src/lib/docs-content.js` and `web/src/lib/copy/docs-copy.js`), so edit those
 and re-run rather than editing the markdown.
@@ -300,10 +300,12 @@ startup log warns, because a single-role deployment weakens the boundary. The co
 tunable (`AGENTHUB_DB_MAX_OPEN_CONNS` / `_MAX_IDLE_CONNS` / `_CONN_MAX_LIFETIME`).
 
 **Data isolation (row level security).** Tasks, their artifacts/spans/pending/push rows and their
-events, plus knowledge chunks, schedules, channels and computers all carry `owner_id`. PostgreSQL
-policies (`migrations/026` for the task pipeline, `028` for the three per-owner surfaces — **eleven
-tables** in total) decide visibility from three per-transaction settings — `app.owner_id` (the
-signed-in user), `app.bypass` (administrator) and `app.system` (in-process paths: the task state
+events, plus knowledge chunks, schedules, channels, computers, threads and their messages, channel
+deliveries and shared files all carry `owner_id`. PostgreSQL policies (`migrations/026` for the task
+pipeline, `028` for the three per-owner surfaces, `029` for deliveries, `030` for threads and their
+messages, `031` for shared files — **fifteen tables** in total) decide visibility from three
+per-transaction settings — `app.owner_id` (the signed-in user), `app.bypass` (administrator) and
+`app.system` (in-process paths: the task state
 machine, the event broker, the cron scan, seed, migrations, backups, the audit writer). An unset
 setting reads as NULL and every comparison is false, so **a request that forgets to scope itself sees
 nothing** rather than everything. Each repository call opens a short transaction
@@ -521,6 +523,11 @@ The shape is the scheduler's, deliberately: consumer-defined ports (`store.go`),
 | Console | the interactive sandbox screen lives in **agentbuddy** (`ComputersView`); this repository ships the API and the `/docs` table only |
 | Network | `none` / `egress_allowlist` cut the network on **both** backends, `bridge` / `platform` grant it; the allowlist itself still needs an egress sidecar, so it is read as `none` (fail-closed) |
 
+What a backend actually honours is declared per backend and checked **before** a lease is handed out:
+bubblewrap has no NAT interface, so asking it for `bridge` answers `sandbox_capability_unavailable`
+instead of quietly receiving the host's network namespace, and remote nodes and hosted shims declare
+`delegated` because this process cannot constrain them — the node does, and its own audit records it.
+
 A backend is a catalogue entry, not a code path. Three ways to add one without touching the control
 plane:
 
@@ -687,6 +694,30 @@ schema into one `tar.gz` on disk and can rewind the database to any of them.
   `<file>.tar.gz.enc` (AES-256-GCM, plaintext never on disk) with a `<file>.enc.sha256` manifest. The
   integrity check then covers the ciphertext. Validate recoverability with
   `scripts/backup-restore-drill.sh` (decrypts into a throwaway database and reports key-table row counts).
+
+## Shared files
+
+The workbench can upload a document, a screenshot or a recording and hand it to an agent from a
+thread. The bytes live outside the database; only their metadata does.
+
+- **Switch**: `AGENTHUB_FILES_STORE=off|local|s3` (default `off`). With it off, every `/api/files*`
+  route answers `503 files_disabled` and the screen says so instead of showing an empty list.
+- **Endpoints**: `GET /api/files` (list + `maxBytes` + backend), `POST /api/files` (multipart, first
+  file part), `GET /api/files/{id}`, `GET /api/files/{id}/content` (attachment download, `Range`
+  supported, so a large upload can be resumed), `DELETE /api/files/{id}`.
+  Permissions reuse `tasks:read` / `tasks:write`; no new permission code.
+- **Limits**: `AGENTHUB_FILES_MAX_BYTES` (default 32 MiB) is enforced while the bytes stream to a
+  temporary file, so an oversized upload never reaches the store. Every row carries the sha256 and
+  the sniffed MIME type; the claimed type is kept only when sniffing cannot do better.
+- **Local backend**: `AGENTHUB_FILES_DIR`. Written to a temporary file, fsynced by rename into a
+  shard directory (`<first two hex>/<digest>`), mode `0600`.
+- **S3-compatible backend** (RustFS, MinIO, AWS): `AGENTHUB_FILES_S3_ENDPOINT`, `..._BUCKET`,
+  `..._REGION`, `..._PATH_STYLE` (must stay `true` for RustFS/MinIO), and the *names* of the
+  environment variables holding the credentials (`..._ACCESS_KEY_ENV`, `..._SECRET_KEY_ENV`).
+  The client is written against the standard library (SigV4), so the module adds no dependency.
+  Selecting `s3` without an endpoint or a bucket fails `config.Validate()` at startup.
+- **Ownership**: rows carry `owner_id` and the table is under `FORCE` row level security, so a
+  second account cannot list, read or delete somebody else's file even by guessing the id.
 
 ## AWS Agent Registry comparison
 

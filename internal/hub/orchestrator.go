@@ -12,6 +12,7 @@ import (
 	"agenthub/internal/adapter"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
+	"agenthub/internal/identity"
 	"agenthub/internal/registry"
 )
 
@@ -349,7 +350,20 @@ func (h *Hub) Resume(ctx context.Context, params a2a.TaskResumeParams) (*a2a.Tas
 // prompt of "approved"; the console surfaces it as an HITL card and resuming with an
 // approval runs the action once. The connector adapter returns a result rather than
 // asking again, so resuming never re-parks — there is no secondary-park loop.
-func (h *Hub) ParkConnector(ctx context.Context, resourceID, action string) (*a2a.Task, error) {
+// ListTasksInState is the narrow read behind the connector approval queue: which
+// tasks are parked, without reading the whole table. Ownership is applied by the
+// task store, so a caller only ever sees their own queue.
+func (h *Hub) ListTasksInState(ctx context.Context, state a2a.TaskState) []*a2a.Task {
+	return h.store.ListState(ctx, state)
+}
+
+// ParkConnector parks a connector action for approval.
+//
+// The action and its arguments are recorded on the parked message: without them
+// the queue could say "somebody wants to run something" and nothing else, and an
+// approver would be agreeing to a request they cannot read. The text keeps the
+// "connector:<action>" shape the adapter already understands.
+func (h *Hub) ParkConnector(ctx context.Context, resourceID, action string, args map[string]any) (*a2a.Task, error) {
 	if !h.enterTask() {
 		return nil, ErrRestoring
 	}
@@ -359,6 +373,20 @@ func (h *Hub) ParkConnector(ctx context.Context, resourceID, action string) (*a2
 		return nil, a2a.NewError(a2a.CodeTaskNotFound, a2a.MsgTaskNotFound)
 	}
 	msg := a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("connector:"+action))
+	msg.Metadata = map[string]any{
+		// The marker is what the approval queue keys on. It is set here, by the
+		// hub, and never by a caller: a client that could set it could put an
+		// unrelated task into somebody's approval queue.
+		"connectorApproval": true,
+		"resourceId":        resourceID,
+		"connectorAction":   action,
+	}
+	if owner := identity.Owner(ctx); owner != "" {
+		msg.Metadata["requestedBy"] = owner
+	}
+	if len(args) > 0 {
+		msg.Metadata["args"] = args
+	}
 	task := h.store.Create(ctx, entry.ID, msg)
 	// A freshly created task is `submitted`; the lifecycle only allows
 	// submitted -> working -> input-required, so advance through working first.

@@ -47,9 +47,20 @@ type Message struct {
 }
 
 // Store persists threads and their messages.
+//
+// Ownership is part of the key: the by-id lookup takes the caller's owner id and
+// reports somebody else's thread as absent. Every write derives the message
+// owner from the parent thread rather than from the caller, so a message can
+// never claim an owner its thread does not carry — the same rule
+// channel_messages follows since migrations/029.
 type Store interface {
 	CreateThread(ctx context.Context, t *Thread) (*Thread, error)
 	GetThread(ctx context.Context, id, ownerID string) (*Thread, error)
+	// GetThreadUnscoped reads a thread with no ownership predicate. It exists for
+	// the inbound webhook, which has to reach the bound thread under the process
+	// identity before any session can exist, and must never be reached from a
+	// path that answers a signed in user.
+	GetThreadUnscoped(ctx context.Context, id string) (*Thread, error)
 	ListThreads(ctx context.Context, ownerID string) ([]*Thread, error)
 	SetParticipants(ctx context.Context, threadID string, resourceIDs []string) error
 	AddMessage(ctx context.Context, m *Message) (*Message, error)

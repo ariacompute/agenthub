@@ -176,13 +176,39 @@ func NormalizeNetwork(s string) string {
 // (TODO(real)). Until one exists the value is read as "none", which is the
 // fail-closed answer.
 //
-// This function is the single place that decides the question, because the bug
-// it replaces was two providers answering it differently: bubblewrap granted the
-// whole host netns for the same policy under which docker cut the container off.
+// This answers "does the profile ask for a network", not "can the provider give
+// it one". The second question belongs to the provider's Descriptor and is
+// answered by SupportsNetwork, which Manager.Acquire consults before creating
+// anything.
 func GrantsNetwork(p Profile) bool {
 	switch NormalizeNetwork(p.Network) {
 	case NetworkBridge, NetworkPlatform:
 		return true
+	}
+	return false
+}
+
+// SupportsNetwork reports whether a provider's declaration covers the mode a
+// profile asks for.
+//
+// This is the function that makes Descriptor.Network load-bearing. Until it
+// existed the declaration was decoration: the catalogue rendered it, one test
+// read it, and every provider accepted every mode. That is how bubblewrap could
+// answer a "bridge" request with the host network namespace while docker cut the
+// container off for the same policy — two providers, two answers, one label.
+//
+// A provider that declares NetworkDelegated forwards the profile to a layer that
+// does enforce it (an execution node, a hosted runtime) and therefore covers any
+// concrete mode. Everything else must name the mode exactly.
+func SupportsNetwork(desc Descriptor, p Profile) bool {
+	want := NormalizeNetwork(p.Network)
+	for _, have := range desc.Network {
+		switch strings.ToLower(strings.TrimSpace(have)) {
+		case NetworkDelegated:
+			return true
+		case want:
+			return true
+		}
 	}
 	return false
 }

@@ -152,6 +152,9 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeRouterTriggerNotFound, http.StatusNotFound},
 		{CodeRouterThreadNotFound, http.StatusNotFound},
 		{CodeDeliveryNotFound, http.StatusNotFound},
+		// A receipt or a thread message names a parent that is not in the caller's
+		// scope: the domain reports it as absent, not as a broken server.
+		{CodeChannelNotFound, http.StatusNotFound},
 		// 409: well formed, refused by state.
 		{CodeEmailTaken, http.StatusConflict},
 		{CodeRoleExists, http.StatusConflict},
@@ -195,6 +198,9 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeSandboxDisabled, http.StatusForbidden},
 		{CodeSandboxPolicyDenied, http.StatusForbidden},
 		{CodeSandboxUnsupported, http.StatusConflict},
+		// The provider is available but never promised this isolation: a conflict
+		// with the request, not a broken server.
+		{CodeSandboxCapabilityUnavailable, http.StatusConflict},
 		{CodeSandboxLeaseLost, http.StatusConflict},
 		{CodeSandboxUnknownProvider, http.StatusBadRequest},
 		{CodeSandboxNotFound, http.StatusNotFound},
@@ -202,14 +208,27 @@ func TestWriteErrMapsCodesToStatus(t *testing.T) {
 		{CodeSandboxNodeOffline, http.StatusServiceUnavailable},
 		{CodeSandboxTimeout, http.StatusGatewayTimeout},
 
-		// These eleven are written straight to the wire by their handlers
+		// Shared files: no backend is a supported configuration (the same shape
+		// as the audit trail and the backups), a missing row is a 404, an
+		// oversized body is the caller's problem, an unsupported body is a wrong
+		// content type, and a backend that could not serve stored bytes is a
+		// dependency failure — a 5xx, but not a 500: the process is fine.
+		{CodeFilesDisabled, http.StatusServiceUnavailable},
+		{CodeFileNotFound, http.StatusNotFound},
+		{CodeFileTooLarge, http.StatusRequestEntityTooLarge},
+		{CodeFileUnsupported, http.StatusUnsupportedMediaType},
+		{CodeFileStoreError, http.StatusBadGateway},
+		// The approval queue: gone is 404, already decided is 409.
+		{CodeConnectorApprovalNotFound, http.StatusNotFound},
+		{CodeConnectorApprovalClosed, http.StatusConflict},
+
+		// These ten are written straight to the wire by their handlers
 		// (httputil.WriteError with an explicit status), so WriteErr never
 		// produces them in practice. Pinning 500 documents the fallback: if one
 		// ever escapes a service layer as an *Error, that is a programming error
 		// and a 500 is the honest answer. Give any of them a case in WriteErr and
 		// move the row up into the matching group.
 		{CodeChannelDisabled, http.StatusInternalServerError},
-		{CodeChannelNotFound, http.StatusInternalServerError},
 		{CodeChannelPayloadInvalid, http.StatusInternalServerError},
 		{CodeDeliveryFailed, http.StatusInternalServerError},
 		{CodeConnectorNotFound, http.StatusInternalServerError},

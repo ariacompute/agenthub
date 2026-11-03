@@ -81,7 +81,18 @@ OR (owner_id <> '' AND owner_id = current_setting('app.owner_id', true))
 三张已有 `owner_id TEXT NOT NULL DEFAULT ''` 的表同样 `ENABLE` + `FORCE`，策略名
 `schedules_owner_access` / `channels_owner_access` / `computers_owner_access`，
 `USING` 与 `WITH CHECK` 都走 `agenthub_row_visible(owner_id)`——于是跨 owner 的
-`INSERT`/`UPDATE` 也会被数据库拒绝，而不只是查不到。共 **11 张表**。
+`INSERT`/`UPDATE` 也会被数据库拒绝，而不只是查不到。
+
+**第三批（029 / 030 / 031）**：补齐三处上一轮留下的残余，共 **15 张表**。
+
+- `029_channel_messages_owner.sql`：`channel_messages` 增 `owner_id TEXT NOT NULL DEFAULT ''`，
+  **同一事务内** `UPDATE … FROM channels` 回填 → 索引 → `ENABLE` + `FORCE` →
+  `channel_messages_owner_access`。webhook 投递以系统身份写入，属主取父通道。
+- `030_threads_rls.sql`：`threads` 早就带 `owner_id`（`012_threads.sql`），本轮只补
+  `ENABLE` + `FORCE` + `threads_owner_access`；`thread_messages` 增 `owner_id`、按父线程回填、
+  建索引与 `thread_messages_owner_access`。**回填与 `FORCE` 必须同一个迁移事务**，否则策略一
+  生效，`internal/store/threads_store.go` 就会读到 0 行、webhook 写入会被 `WITH CHECK` 拒绝。
+- `031_shared_files.sql`：`shared_files` 建表即带 `owner_id` 与 `shared_files_owner_access`。
 
 两条配套要求（缺一即静默回归）：
 
@@ -92,8 +103,10 @@ OR (owner_id <> '' AND owner_id = current_setting('app.owner_id', true))
   任何用户」；其余所有路径一律 `Get(ctx, id, ownerID)`。`GetUnscoped` 是显式命名的范式，
   不允许用「空 owner 即通配」代替。
 
-未覆盖：`channel_messages`（投递明细没有 `owner_id`）与 `threads`（webhook 循环依赖），
-这两处仍只有应用层 owner 校验，属已知残余。
+第三批之后没有已知残余：`channel_messages`、`threads`、`thread_messages`、`shared_files`
+全部在数据库层收口。仓储侧同样要跟上——`channels`/`threads` 的 message 方法都在参数里带
+owner 并走精确匹配（空 owner 仍精确匹配，**不等于**「任意 owner」），`threads_store.go` 用
+`scoped(ctx)` / `withIdentity(...)` 而不是裸 `s.db.WithContext(ctx)`。
 
 `audit_log` 单独三条策略：`SELECT` 需 `app.system` / `app.bypass` / `app.audit_read`；
 `INSERT` 只允许 `app.system` / `app.bypass`；`DELETE` 只允许 `app.retention`。
@@ -108,7 +121,8 @@ OR (owner_id <> '' AND owner_id = current_setting('app.owner_id', true))
 
 `scripts/provision-db-roles.sql` 幂等，末尾有一条断言：受保护表的 `relrowsecurity` 与
 `relforcerowsecurity` 必须都为真，否则 `RAISE EXCEPTION` —— 不允许「配了一半」的实例上线。
-该断言与 `tests/rls_test.go` 的表清单同步为 **11 张**（加 `schedules` / `channels` / `computers`）。
+该断言与 `tests/rls_test.go` 的表清单同步为 **15 张**（在 `schedules` / `channels` / `computers`
+之外再加 `channel_messages` / `threads` / `thread_messages` / `shared_files`）。
 
 ### 2.5 降级开关
 
@@ -241,7 +255,7 @@ hash[i] = sha256( hash[i-1] || canonical(event[i]) )
 
 ## 7. 验收标准
 
-- 迁移幂等、只增不改；`022`–`027` 已登记进 `store_test.go` 的 `want` 清单。
+- 迁移幂等、只增不改；`022`–`031` 已登记进 `store_test.go` 的 `want` 清单。
 - 新路由已登记 `handlers/listen.go` 的 `Listeners()` 与 `listen_test.go` 的 `probes`。
 - 领域层不 import GORM；未注入仓库时保持原内存语义，两条路径行为一致
   （归属过滤在内存与 PostgreSQL 上都有用例）。
@@ -253,6 +267,11 @@ hash[i] = sha256( hash[i-1] || canonical(event[i]) )
   （compose 与 CI 服务容器的默认）时用例临时建 `agenthub_rls_test`（`NOSUPERUSER`、
   `NOBYPASSRLS`、无 DDL）并改用它重连；无建角色权限则整组 skip 并提示
   `scripts/provision-db-roles.sql`。
+- **受限角色下也跑得通**：需要建表的用例（备份引擎、`TRUNCATE` 触发器探针）走
+  `internal/testdb`——`TempSchema(t)` 在 `it_<随机>` schema 里建对象并通过
+  `options=-c search_path=<schema>,public` 注入 DSN；`RequireDDL(t)` 在会话没有 `CREATE` 权限时
+  以 `production role: no DDL, use a migrator DSN` **跳过并说明原因**，而不是报「权限不足」。
+  CI 的 `go-restricted` job 因此能以 `agenthub_app`（DML-only、`NOBYPASSRLS`）跑完整 `go test ./...`。
 - `go build` / `go vet` / `go test -race ./...` 全绿；前端 `bun run build` + `bun run test` 全绿。
 
 ## 8. 升级操作指引（从无 RLS 版本升上来）

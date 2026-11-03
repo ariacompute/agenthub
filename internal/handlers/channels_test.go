@@ -105,33 +105,42 @@ func (f *fakeChannels) RecordDelivery(_ context.Context, m *channels.ChannelMess
 	if _, ok := f.deliveries[key]; ok {
 		return false, nil
 	}
+	// The real store copies the owner off the parent channel; mirroring that here
+	// is what lets the handler tests assert ownership instead of assuming it.
+	if c := f.byID[m.ChannelID]; c != nil {
+		m.OwnerID = c.OwnerID
+	}
 	f.deliveries[key] = m
 	return true, nil
 }
 
-func (f *fakeChannels) ListDeliveries(_ context.Context, channelID string) ([]*channels.ChannelMessage, error) {
+func (f *fakeChannels) ListDeliveries(_ context.Context, channelID, ownerID string) ([]*channels.ChannelMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []*channels.ChannelMessage{}
 	for _, m := range f.deliveries {
-		if m.ChannelID == channelID {
+		if m.ChannelID == channelID && m.OwnerID == ownerID {
 			out = append(out, m)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeChannels) GetDelivery(_ context.Context, channelID, id string) (*channels.ChannelMessage, error) {
+func (f *fakeChannels) GetDelivery(_ context.Context, channelID, id, ownerID string) (*channels.ChannelMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.deliveries[channelID+"/"+id], nil
+	m := f.deliveries[channelID+"/"+id]
+	if m == nil || m.OwnerID != ownerID {
+		return nil, nil
+	}
+	return m, nil
 }
 
-func (f *fakeChannels) UpdateDelivery(_ context.Context, m *channels.ChannelMessage) (bool, error) {
+func (f *fakeChannels) UpdateDelivery(_ context.Context, m *channels.ChannelMessage, ownerID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	old, ok := f.deliveries[m.ChannelID+"/"+m.ID]
-	if !ok {
+	if !ok || old.OwnerID != ownerID {
 		return false, nil
 	}
 	old.Status = m.Status
@@ -383,13 +392,13 @@ func TestChannelWebhook(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("valid webhook = %d", code)
 	}
-	if msgs, _ := fake.ListDeliveries(context.Background(), id); len(msgs) != 1 {
+	if msgs, _ := fake.ListDeliveries(context.Background(), id, ""); len(msgs) != 1 {
 		t.Fatalf("deliveries = %d, want 1", len(msgs))
 	}
 
 	// A replay of the same external_ref is deduped (still only one delivery).
 	postSlackWebhook(t, srv, id, payload, slackSig("shh", ts, []byte(payload)), ts)
-	if msgs, _ := fake.ListDeliveries(context.Background(), id); len(msgs) != 1 {
+	if msgs, _ := fake.ListDeliveries(context.Background(), id, ""); len(msgs) != 1 {
 		t.Fatalf("after replay deliveries = %d, want 1", len(msgs))
 	}
 
@@ -446,7 +455,7 @@ func TestChannelDeliverRecordsFailureReceipt(t *testing.T) {
 		t.Fatalf("code = %q", got)
 	}
 
-	msgs, err := fake.ListDeliveries(context.Background(), "c1")
+	msgs, err := fake.ListDeliveries(context.Background(), "c1", "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,14 +526,14 @@ func TestChannelRetryDelivery(t *testing.T) {
 	if result.Status != 200 {
 		t.Fatalf("result = %+v", result)
 	}
-	got, _ := fake.GetDelivery(context.Background(), "c1", "out-failed")
+	got, _ := fake.GetDelivery(context.Background(), "c1", "out-failed", "dev")
 	if got == nil || got.Status != channels.StatusDelivered || got.Error != "" {
 		t.Fatalf("receipt after retry = %+v", got)
 	}
 	if got.Payload["raw"] != `{"ok":true}` {
 		t.Fatalf("payload after retry = %+v", got.Payload)
 	}
-	if msgs, _ := fake.ListDeliveries(context.Background(), "c1"); len(msgs) != 4 {
+	if msgs, _ := fake.ListDeliveries(context.Background(), "c1", "dev"); len(msgs) != 4 {
 		t.Fatalf("retry appended a receipt: %d rows", len(msgs))
 	}
 
@@ -566,7 +575,7 @@ func TestChannelRetryDelivery(t *testing.T) {
 	if got := httputil.AsError(decodeErr(raw)).Code; got != httputil.CodeDeliveryFailed {
 		t.Fatalf("code = %q", got)
 	}
-	got, _ = fake.GetDelivery(context.Background(), "c1", "out-boom")
+	got, _ = fake.GetDelivery(context.Background(), "c1", "out-boom", "dev")
 	if got == nil || got.Status != channels.StatusFailed || got.Error != string(httputil.CodeDeliveryFailed) {
 		t.Fatalf("receipt after failed retry = %+v", got)
 	}

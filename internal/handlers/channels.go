@@ -188,7 +188,7 @@ func (d Deps) handleListDeliveries(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeChannelNotFound)
 		return
 	}
-	list, err := d.Channels.ListDeliveries(r.Context(), c.ID)
+	list, err := d.Channels.ListDeliveries(r.Context(), c.ID, c.OwnerID)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -243,7 +243,10 @@ func (d Deps) handleChannelWebhook(w http.ResponseWriter, r *http.Request) {
 		Payload:     inbound,
 		Status:      channels.StatusReceived,
 	}
-	inserted, err := d.Channels.RecordDelivery(r.Context(), msg)
+	// The write runs under the process identity as well: the receipt carries the
+	// channel's owner, and the policy in 029 accepts it only because the session
+	// announces itself as the process, not as an absent user.
+	inserted, err := d.Channels.RecordDelivery(systemScope(r), msg)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -256,7 +259,7 @@ func (d Deps) handleChannelWebhook(w http.ResponseWriter, r *http.Request) {
 	// Forward into the bound thread when one is configured.
 	if c.ThreadID != "" && d.Threads != nil {
 		if text, ok := inbound["text"].(string); ok && text != "" {
-			if _, err := d.Threads.AddMessage(r.Context(), &threads.Message{ThreadID: c.ThreadID, Body: text, Origin: string(c.Kind)}); err == nil {
+			if _, err := d.Threads.AddMessage(systemScope(r), &threads.Message{ThreadID: c.ThreadID, Body: text, Origin: string(c.Kind)}); err == nil {
 				d.delegateThread(r, c.ThreadID, text)
 			}
 		}
@@ -348,7 +351,7 @@ func (d Deps) handleRetryDelivery(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusForbidden, httputil.CodeChannelDisabled)
 		return
 	}
-	receipt, err := d.Channels.GetDelivery(r.Context(), channelID, r.PathValue("did"))
+	receipt, err := d.Channels.GetDelivery(r.Context(), channelID, r.PathValue("did"), c.OwnerID)
 	if err != nil {
 		httputil.WriteErr(w, err)
 		return
@@ -368,7 +371,7 @@ func (d Deps) handleRetryDelivery(w http.ResponseWriter, r *http.Request) {
 		receipt.Status = channels.StatusFailed
 		receipt.Error = string(httputil.CodeDeliveryFailed)
 		receipt.Payload = map[string]any{"text": text}
-		if _, uerr := d.Channels.UpdateDelivery(r.Context(), receipt); uerr != nil {
+		if _, uerr := d.Channels.UpdateDelivery(r.Context(), receipt, c.OwnerID); uerr != nil {
 			slog.Warn("channels: record failed retry", "channel", channelID, "delivery", receipt.ID, "error", uerr)
 		}
 		httputil.WriteError(w, http.StatusBadGateway, httputil.CodeDeliveryFailed)
@@ -377,7 +380,7 @@ func (d Deps) handleRetryDelivery(w http.ResponseWriter, r *http.Request) {
 	receipt.Status = channels.StatusDelivered
 	receipt.Error = ""
 	receipt.Payload = map[string]any{"text": text, "status": result.Status, "raw": result.Raw}
-	if _, uerr := d.Channels.UpdateDelivery(r.Context(), receipt); uerr != nil {
+	if _, uerr := d.Channels.UpdateDelivery(r.Context(), receipt, c.OwnerID); uerr != nil {
 		// The message did leave; a stale receipt is worse than none, but the
 		// caller must not be told the send failed.
 		slog.Warn("channels: record retried delivery", "channel", channelID, "delivery", receipt.ID, "error", uerr)
@@ -462,7 +465,10 @@ func itoa(n int) string {
 // delegateThread forwards a channel message to every participant of a thread, mirroring
 // handlePostThreadMessage's mention delegation.
 func (d Deps) delegateThread(r *http.Request, threadID, text string) {
-	th, err := d.Threads.GetThread(r.Context(), threadID, "")
+	// The caller is a public webhook with no session, so the thread is read
+	// under the process identity. That is the only unscoped thread read in the
+	// tree, and it never answers a signed in user.
+	th, err := d.Threads.GetThreadUnscoped(systemScope(r), threadID)
 	if err != nil || th == nil {
 		return
 	}

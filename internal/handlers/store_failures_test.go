@@ -78,13 +78,13 @@ func (failingChannels) Delete(context.Context, string, string) error { return er
 func (failingChannels) RecordDelivery(context.Context, *channels.ChannelMessage) (bool, error) {
 	return false, errStoreDown
 }
-func (failingChannels) ListDeliveries(context.Context, string) ([]*channels.ChannelMessage, error) {
+func (failingChannels) ListDeliveries(context.Context, string, string) ([]*channels.ChannelMessage, error) {
 	return nil, errStoreDown
 }
-func (failingChannels) GetDelivery(context.Context, string, string) (*channels.ChannelMessage, error) {
+func (failingChannels) GetDelivery(context.Context, string, string, string) (*channels.ChannelMessage, error) {
 	return nil, errStoreDown
 }
-func (failingChannels) UpdateDelivery(context.Context, *channels.ChannelMessage) (bool, error) {
+func (failingChannels) UpdateDelivery(context.Context, *channels.ChannelMessage, string) (bool, error) {
 	return false, errStoreDown
 }
 

@@ -42,8 +42,16 @@ func newStubProvider() *stubProvider {
 
 func (p *stubProvider) Name() string { return "stub" }
 
+// Describe declares the network vocabulary this stub accepts.
+//
+// It is not a boundary — it executes nothing — so it declares what the profile
+// defaults ask for. Without a declaration Manager.Acquire refuses every lease on
+// capability grounds and these cases would prove nothing about the adapter.
 func (p *stubProvider) Describe(context.Context) (sandbox.Descriptor, error) {
-	return sandbox.Descriptor{Name: "stub", Layer: sandbox.LayerProcess, Isolation: "process"}, nil
+	return sandbox.Descriptor{
+		Name: "stub", Layer: sandbox.LayerProcess, Isolation: "process",
+		Network: []string{sandbox.NetworkNone, sandbox.NetworkBridge, sandbox.NetworkPlatform},
+	}, nil
 }
 
 func (p *stubProvider) Probe(context.Context) (sandbox.Availability, error) {

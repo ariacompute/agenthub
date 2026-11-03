@@ -149,6 +149,13 @@ func (m *Manager) create(ctx context.Context, ownerID, resourceID, scope string,
 	if err != nil {
 		return nil, err
 	}
+	// What the provider promised, it must be able to keep. A profile asking for
+	// isolation the descriptor never lists is refused here rather than silently
+	// degraded: bubblewrap used to answer "bridge" with the host netns, and
+	// nothing in the tree noticed because nothing read the declaration.
+	if !SupportsNetwork(info.Descriptor, profile) {
+		return nil, Error(CodeCapabilityUnavailable)
+	}
 	now := m.opts.Clock()
 	lease := &Lease{
 		ID:         newLeaseID(),
@@ -215,9 +222,15 @@ func (m *Manager) Exec(ctx context.Context, leaseID string, req ExecRequest) (Ex
 	if !ok {
 		return ExecResult{}, Error(CodeLeaseLost)
 	}
-	provider, _, err := m.opts.Registry.RequireAvailable(ctx, lease.Provider)
+	provider, info, err := m.opts.Registry.RequireAvailable(ctx, lease.Provider)
 	if err != nil {
 		return ExecResult{}, err
+	}
+	// The same gate as Acquire, on the profile the lease was actually created
+	// with: a lease made before this check existed (or by a version that accepted
+	// the mode) must not run through a provider that never promised it.
+	if !SupportsNetwork(info.Descriptor, lease.Profile) {
+		return ExecResult{}, Error(CodeCapabilityUnavailable)
 	}
 	if req.TimeoutMS <= 0 {
 		req.TimeoutMS = lease.Profile.TimeoutMS

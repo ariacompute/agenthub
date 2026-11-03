@@ -290,11 +290,16 @@ func TestBwrapUnsharesTheNetworkUnlessItIsGranted(t *testing.T) {
 		t.Fatalf("an unnamed workdir must be an in-sandbox tmpfs: %v", closed)
 	}
 
-	for _, network := range []string{NetworkBridge, NetworkPlatform} {
-		open := bwrapArgs(Profile{Network: network}, ExecRequest{Command: "true"})
-		if !hasElement(open, "--share-net") {
-			t.Fatalf("network %q must share the host netns: %v", network, open)
-		}
+	// Only "platform" maps onto --share-net, because --share-net *is* the host
+	// network namespace. "bridge" used to land here too, which made a request for
+	// a NAT'd interface come back as the host's network.
+	open := bwrapArgs(Profile{Network: NetworkPlatform}, ExecRequest{Command: "true"})
+	if !hasElement(open, "--share-net") {
+		t.Fatalf("platform must share the host netns: %v", open)
+	}
+	bridge := bwrapArgs(Profile{Network: NetworkBridge}, ExecRequest{Command: "true"})
+	if hasElement(bridge, "--share-net") {
+		t.Fatalf("bwrap has no NAT interface: a bridge request must stay unshared, got %v", bridge)
 	}
 }
 
@@ -303,37 +308,47 @@ func TestBwrapUnsharesTheNetworkUnlessItIsGranted(t *testing.T) {
 // which docker cut the container off, so "只允许名单内主机" meant "the whole host
 // network" on one backend and "no network" on the other. Neither is a filtered
 // network; both must now be the closed one.
+//
+// The two backends do not agree on "bridge", and that is correct: docker can
+// create a NAT'd interface, bubblewrap cannot. The descriptor says so, and
+// Manager.Acquire refuses bridge for bubblewrap instead of quietly substituting
+// the host network.
 func TestBothProvidersReadEgressAllowlistTheSameWay(t *testing.T) {
 	docker := NewDockerProvider(ProviderDocker, "", "", "")
 	cases := []struct {
 		network string
-		granted bool
+		// what docker names on the command line: "none", "bridge", or "" for the
+		// daemon default (which is what "platform" means).
+		dockerNet string
+		// whether bubblewrap hands over the host network namespace.
+		shared bool
 	}{
-		{NetworkNone, false},
-		{NetworkAllowlist, false},
-		{"egress", false},
-		{"allowlist", false},
-		{"", false},
-		{"typo-bridge", false},
-		{NetworkBridge, true},
-		{NetworkPlatform, true},
+		{NetworkNone, NetworkNone, false},
+		{NetworkAllowlist, NetworkNone, false},
+		{"egress", NetworkNone, false},
+		{"allowlist", NetworkNone, false},
+		{"", NetworkNone, false},
+		{"typo-bridge", NetworkNone, false},
+		{NetworkBridge, NetworkBridge, false},
+		{NetworkPlatform, "", true},
 	}
 	for _, tc := range cases {
 		profile := Profile{Network: tc.network}
 
 		argv := docker.createArgs(Spec{LeaseID: "l1", Profile: profile})
-		bridge := hasPair(argv, "--network", NetworkBridge)
-		off := hasPair(argv, "--network", NetworkNone)
-		if !bridge && !off {
-			t.Fatalf("docker must always name a network for %q: %v", tc.network, argv)
+		named := ""
+		if hasPair(argv, "--network", NetworkBridge) {
+			named = NetworkBridge
+		} else if hasPair(argv, "--network", NetworkNone) {
+			named = NetworkNone
 		}
-		if bridge != tc.granted {
-			t.Fatalf("docker granted network for %q = %v, want %v", tc.network, bridge, tc.granted)
+		if named != tc.dockerNet {
+			t.Fatalf("docker named network %q for %q, want %q: %v", named, tc.network, tc.dockerNet, argv)
 		}
 
 		bwrap := bwrapArgs(profile, ExecRequest{Command: "true"})
-		if shared := hasElement(bwrap, "--share-net"); shared != tc.granted {
-			t.Fatalf("bwrap granted network for %q = %v, want %v", tc.network, shared, tc.granted)
+		if shared := hasElement(bwrap, "--share-net"); shared != tc.shared {
+			t.Fatalf("bwrap granted network for %q = %v, want %v", tc.network, shared, tc.shared)
 		}
 	}
 }
@@ -354,6 +369,156 @@ func TestTheProviderDescriptorsDoNotSellAFilterTheyLack(t *testing.T) {
 				t.Fatalf("%s advertises %q, which it cannot honour: %v", provider.Name(), NetworkAllowlist, described.Network)
 			}
 		}
+	}
+}
+
+// TestEveryProviderDeclaresExactlyWhatItCanEnforce is the sweep the fifth round
+// asked for, written down: one row per backend, the exact net vocabulary it may
+// advertise, and nothing else. It replaces a single narrow case ("docker and
+// bwrap must not advertise egress_allowlist") that let every other claim go
+// unchecked — which is how bubblewrap kept selling a NAT'd interface it has no
+// way to create, and the platform shims kept selling a network they never touch.
+//
+// Adding a provider means adding a row here. A wrong row fails immediately
+// instead of surfacing on the day somebody asks for isolation they do not get.
+func TestEveryProviderDeclaresExactlyWhatItCanEnforce(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "tool")
+	declared := func(spec DeclarativeSpec) *DeclarativeProvider {
+		t.Helper()
+		spec.Binary = bin
+		provider, err := NewDeclarativeProvider(spec)
+		if err != nil {
+			t.Fatalf("declarative provider: %v", err)
+		}
+		return provider
+	}
+
+	cases := []struct {
+		name     string
+		provider Provider
+		network  []string
+		// envKeys is what the catalogue shows instead of a bogus binary.
+		envKeys []string
+	}{
+		{"local", NewLocalProvider(), []string{NetworkPlatform}, nil},
+		{"mock", NewMockProvider(), []string{NetworkNone}, nil},
+		{"docker", NewDockerProvider(ProviderDocker, "", "", ""), []string{NetworkNone, NetworkBridge, NetworkPlatform}, nil},
+		// No bridge: --share-net is the host namespace, not a NAT'd interface.
+		{"bwrap", NewBwrapProvider(), []string{NetworkNone, NetworkPlatform}, nil},
+		// The node decides; this process can only pass the profile along.
+		{"remote", NewRemoteProvider(nil), []string{NetworkDelegated}, nil},
+		{
+			"e2b", NewHTTPProvider(platformPreset(), nil),
+			[]string{NetworkDelegated}, []string{"E2B_SHIM_URL", "E2B_SHIM_TOKEN"},
+		},
+		{
+			// The operator said nothing: the argv is the policy, and it is not
+			// this process's to describe.
+			"undeclared", declared(DeclarativeSpec{
+				Name: "undeclared", ExecArgs: [][]string{{"{command}"}},
+			}), []string{NetworkDelegated}, nil,
+		},
+		{
+			"declared", declared(DeclarativeSpec{
+				Name: "declared", Network: []string{NetworkNone},
+				ExecArgs: [][]string{{"{command}"}},
+			}), []string{NetworkNone}, nil,
+		},
+		{
+			// A typo must not widen the declaration, and must not turn into "none"
+			// either: an unknown value is dropped, which leaves the honest default.
+			"typo", declared(DeclarativeSpec{
+				Name: "typo", Network: []string{"bridgey", NetworkAllowlist},
+				ExecArgs: [][]string{{"{command}"}},
+			}), []string{NetworkDelegated}, nil,
+		},
+	}
+
+	for _, tc := range cases {
+		described, err := tc.provider.Describe(context.Background())
+		if err != nil {
+			t.Fatalf("describe %s: %v", tc.name, err)
+		}
+		if !equalStrings(described.Network, tc.network) {
+			t.Fatalf("%s declares network %v, want %v", tc.name, described.Network, tc.network)
+		}
+		if !equalStrings(described.EnvKeys, tc.envKeys) {
+			t.Fatalf("%s declares env keys %v, want %v", tc.name, described.EnvKeys, tc.envKeys)
+		}
+		for _, requirement := range described.Requires {
+			if strings.Contains(requirement, "_URL") || strings.Contains(requirement, "_TOKEN") {
+				t.Fatalf("%s lists %q under Requires, which is for binaries: %v", tc.name, requirement, described.Requires)
+			}
+		}
+	}
+}
+
+// TestPresetNetworkDeclarationsMatchTheirArgv keeps the presets from drifting
+// away from the command they ship.
+func TestPresetNetworkDeclarationsMatchTheirArgv(t *testing.T) {
+	for _, spec := range PresetSpecs() {
+		if !equalStrings(spec.Network, []string{NetworkNone}) {
+			t.Fatalf("%s declares %v; every shipped preset cuts the network off", spec.Name, spec.Network)
+		}
+		joined := strings.Join(spec.ExecArgs[0], " ")
+		switch spec.Name {
+		case "nerdctl":
+			// nerdctl's cut-off lives on the create line, not the exec line.
+			created := strings.Join(spec.CreateArgs[0], " ")
+			if !strings.Contains(created, "--network none") {
+				t.Fatalf("nerdctl declares none without --network none: %s", created)
+			}
+		case "systemd-run":
+			// The argv used to inherit the host network while claiming a namespace.
+			if !strings.Contains(joined, "PrivateNetwork=yes") {
+				t.Fatalf("systemd-run declares none without PrivateNetwork=yes: %s", joined)
+			}
+		}
+	}
+}
+
+// TestAcquireRefusesIsolationTheProviderNeverPromised is the half of the fix the
+// descriptors cannot do on their own: the declaration has to be consulted. Before
+// this, a profile asking for "bridge" was handed to whatever the provider did
+// with it, and bubblewrap's answer was the host network namespace.
+func TestAcquireRefusesIsolationTheProviderNeverPromised(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	registry := testRegistry(t, providerFunc{
+		name: "closed",
+		desc: Descriptor{Layer: LayerProcess, Network: []string{NetworkNone}},
+	})
+	manager, _ := newManager(t, registry, store, nil)
+
+	_, err := manager.Acquire(ctx, LeaseRequest{
+		OwnerID: "u1", ResourceID: "r1",
+		Profile: Profile{Provider: "closed", Network: NetworkBridge},
+	})
+	if err == nil {
+		t.Fatal("a provider that only promises \"none\" must refuse \"bridge\"")
+	}
+	if code := codeOf(t, err); code != CodeCapabilityUnavailable {
+		t.Fatalf("expected %s, got %s", CodeCapabilityUnavailable, code)
+	}
+
+	lease, err := manager.Acquire(ctx, LeaseRequest{
+		OwnerID: "u1", ResourceID: "r1",
+		Profile: Profile{Provider: "closed", Network: NetworkNone},
+	})
+	if err != nil {
+		t.Fatalf("the declared mode must still work: %v", err)
+	}
+
+	// The second net: a lease that predates the check (or was written by a version
+	// that accepted the mode) must not execute either.
+	lease.Profile.Network = NetworkPlatform
+	if err := store.SaveLease(ctx, lease); err != nil {
+		t.Fatalf("save lease: %v", err)
+	}
+	if _, err := manager.Exec(ctx, lease.ID, ExecRequest{Command: "true"}); err == nil {
+		t.Fatal("exec on a lease with an undeclared mode must be refused")
+	} else if code := codeOf(t, err); code != CodeCapabilityUnavailable {
+		t.Fatalf("expected %s, got %s", CodeCapabilityUnavailable, code)
 	}
 }
 

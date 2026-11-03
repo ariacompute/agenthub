@@ -171,6 +171,12 @@ search, CloudTrail-equivalent auditing, cross-account RAM sharing, VPC PrivateLi
   (each `@mention` delegates to that agent over A2A via `Hub.Send`, keyed by task id) and
   `GET /api/threads/{id}/events` (SSE replay + live delegated-task replies). Reuses
   `resources:read` / `tasks:read` / `tasks:write`; no new roles or groups.
+- **Connector approvals**: `GET /api/connectors/approvals` plus
+  `POST /api/connectors/approvals/{id}/approve|reject` turn the parked `ask_first` tasks into a
+  queue a person can actually decide (§16).
+- **Shared files**: `GET/POST /api/files`, `GET /api/files/{id}`,
+  `GET /api/files/{id}/content` (Range-capable attachment download) and `DELETE /api/files/{id}`
+  (§16). Off by default; `files_disabled` when the deployment has no backend.
 
 ---
 
@@ -297,6 +303,14 @@ while the container itself stays stateless.
   the secret — alongside an optional `expires_at` and a soft `revoked_at` (a revoked
   key keeps its row for the audit trail but stops authenticating); `api_key_scopes` is
   the key → permission edge.
+- **`threads` / `thread_messages`**: collaboration threads and their turns. Both carry `owner_id`
+  and are under row-level security; a message written by the delegated agent inherits the
+  thread's owner rather than inventing one.
+- **`channel_messages`**: channel deliveries. `owner_id` is inherited from the parent channel, so
+  the inbound webhook (which runs before any session exists) still writes a row that belongs to
+  the channel's owner instead of to nobody.
+- **`shared_files`**: file metadata only — `name` / `mime` / `size` / `sha256` / `backend` /
+  `object_key` / `owner_id`. The bytes live on disk or in S3-compatible storage (§16).
 - **`schema_migrations`**: migration files already applied, skipped at startup.
 - **jsonb payloads**: carried by the in-house `model.JSONField` (`driver.Valuer` /
   `sql.Scanner`) — `gorm.io/datatypes` is **not** introduced.
@@ -315,7 +329,12 @@ while the container itself stays stateless.
   (Persona / Channels / voice origin), and `016_wechat_login.sql` (nullable `users.email`
   so a WeChat account keyed only by its OAuth binding can be stored), and
   `017_computers.sql` / `018_schedules.sql` / `019_knowledge.sql` (agent sandboxes /
-  proactive schedules / mock RAG chunks).
+  proactive schedules / mock RAG chunks), `020_router.sql` / `021_sandboxes.sql` (the scheduler and
+  the sandbox control plane), `022`–`024` (task and knowledge ownership, explicit resource
+  visibility), `025_audit_log.sql`, `026`–`028` (row-level policies), and
+  `029_channel_messages_owner.sql` / `030_threads_rls.sql` / `031_shared_files.sql` — each of the
+  last three backfills the rows it inherits **inside the same transaction** that turns `FORCE` on,
+  so there is no window where a policy exists and the historical rows do not satisfy it.
 - **Conditional updates prevent lost updates**: task transitions use
   `UPDATE ... WHERE id=? AND state=?` plus a `RowsAffected` check, and zero rows is split
   into "no such task" vs "concurrent conflict".
@@ -374,7 +393,7 @@ screen and a visual inspector for the A2A contract.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
   sticky index that follows the reader. The endpoint table covers the full route table
-  (~100 routes) with method, path, required permission and request/response samples taken
+  (141 routes) with method, path, required permission and request/response samples taken
   from the handlers themselves — now including the agent-capability, channel, connector,
   speech and API-key endpoints. It sits after Administration in the sidebar and is
   deliberately **not**
@@ -433,6 +452,11 @@ screen and a visual inspector for the A2A contract.
   `AGENTHUB_CLI_ALLOWLIST` (git / ls / cat / echo / date / aria-memo),
   `AGENTHUB_MAX_OUTPUT_BYTES` (65536), `AGENTHUB_EVENT_BUFFER` (512),
   `AGENTHUB_PUSH_RECORD_LIMIT` (100).
+- **Shared files**: `AGENTHUB_FILES_STORE` (`off` default / `local` / `s3`),
+  `AGENTHUB_FILES_DIR`, `AGENTHUB_FILES_MAX_BYTES` (32 MiB), and for the S3 backend
+  `AGENTHUB_FILES_S3_ENDPOINT` / `_BUCKET` / `_REGION` / `_PATH_STYLE` / `_ACCESS_KEY_ENV` /
+  `_SECRET_KEY_ENV`. Choosing `s3` without an endpoint or a bucket fails `config.Validate()` at
+  startup; the credentials themselves are only ever read from the named environment variables.
 - **Security middleware** (see §13): per-IP rate limiting (auth 10/min/IP, the rest 200/
   min/IP), CSRF origin checks on state-changing requests, and security response headers
   (including HSTS only on TLS). Account brute-force lockout is **5 failures → 15-minute
@@ -518,12 +542,20 @@ screen and a visual inspector for the A2A contract.
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
-- **Frontend**: `bunx vitest run`, 301 tests passing across 17 files (languages /
+- **Frontend**: `bunx vitest run`, 417 tests passing across 21 files (languages /
   copy-fallback / enums-copy / api / api-endpoints / audit / auth-store / format /
   errors / backup-api / docs-content / playground / store / user-form / use-copy /
-  use-dismiss / style guard). `bun run test:coverage` (v8, `src/lib` only — the screens
-  are `.vue` templates these node tests never mount) reports 98.5% statements, 91.5%
-  branches and 92.6% functions.
+  use-dismiss / style guard, plus the sandbox, router and files surfaces).
+  `bun run test:coverage` (v8) reports 100% of statements, 95.8% of branches and 100% of
+  functions; the uncovered branches are the defensive arms a screen never reaches.
+- **The suite runs as the production role too**: a second CI job provisions
+  `agenthub_migrator` / `agenthub_app` from `scripts/provision-db-roles.sql`, migrates as the
+  migrator and then runs the whole `go test ./...` as `agenthub_app` — DML only, no
+  `BYPASSRLS`, no DDL. Cases that need to create tables go through `internal/testdb`:
+  `TempSchema` builds an `it_<random>` schema and points `search_path` at it, and `RequireDDL`
+  turns "this role cannot create tables" into a skip that names the reason
+  (`production role: no DDL, use a migrator DSN`) instead of a failure. Without that, the
+  first production-shaped run would have reported a permission error as a defect.
 - **A2A & control-plane smoke**: send (once per kind), stream (no `[DONE]`, terminal frame
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
@@ -775,6 +807,19 @@ agent runs as the host process any more.
   configuration templates. `mock` is deterministic and offline; `off` refuses everything.
 - **Three extension paths**: compile-time provider, declarative argv template, node protocol. Adding
   a backend changes no Go code above the registry.
+- **Capabilities are declared, then enforced**: each `Descriptor` now names only what that backend
+  can actually do. `local` advertises `platform` alone (a bare child process has no network
+  namespace); `bwrap` dropped `bridge`, because `--share-net` is the host namespace, not a NAT
+  interface; `docker` advertises `none|bridge|platform` and `createArgs` matches it, passing the
+  daemon's own default for `platform` instead of the literal `bridge`; remote nodes, hosted shims
+  and undeclared templates advertise **`delegated`**, because this process constrains nothing and
+  the node does. `Descriptor` also gained `EnvKeys` (environment-variable names a shim needs) and
+  the new `SourcePlatform`, so a shim compiled into the binary no longer pretends to be a
+  declarative template with a binary in `Requires`.
+- **Admission is fail-closed**: `Manager.Acquire` describes the resolved provider and refuses a
+  profile whose network mode the backend never declared — `sandbox_capability_unavailable`, with
+  the backend never called. Asking bubblewrap for `bridge` used to receive the host's network
+  namespace; now it is an answer.
 
 ### Guarantees
 
@@ -833,10 +878,15 @@ only as log text — unverifiable, and trimmable by anyone with a `DELETE`.
 ### Row level security
 
 - **Ownership columns**: `tasks` and its children (`task_artifacts`, `task_spans`,
-  `task_pending`, `task_push`), plus `events` and `knowledge`, carry
-  `owner_id TEXT NOT NULL DEFAULT ''`; `''` means the row was produced by the process
-  itself. Existing rows are **not** backfilled — nobody guesses the owner of history.
-- **Policies** (`026_rls_policies.sql`): those tables and `audit_log` are `ENABLE` +
+  `task_pending`, `task_push`), plus `events`, `knowledge`, `schedules`, `channels`, `computers`,
+  and — since this round — `threads`, `thread_messages`, `channel_messages` and `shared_files`,
+  all carry `owner_id TEXT NOT NULL DEFAULT ''`; `''` means the row was produced by the process
+  itself. Pre-existing task rows are **not** backfilled — nobody guesses the owner of history —
+  but where the owner is *knowable* it is copied rather than invented: a thread message inherits
+  its thread's owner, a delivery inherits its channel's, and each of `029` / `030` does that in
+  the same transaction that turns `FORCE` on.
+- **Policies** (`026_rls_policies.sql`, `028_rls_policies_owned_surfaces.sql`, `029`, `030`,
+  `031` — **fifteen tables**): those tables and `audit_log` are `ENABLE` +
   `FORCE ROW LEVEL SECURITY` (`FORCE` binds the table owner too), and
   `agenthub_row_visible(owner_id)` reads three per-transaction settings — `app.owner_id`
   (the signed-in user), `app.bypass` (administrator) and `app.system` (in-process paths:
@@ -900,3 +950,66 @@ only as log text — unverifiable, and trimmable by anyone with a `DELETE`.
 - `pushNotification/set` used `taskId` while `get` used `id`. Both are accepted now, the
   canonical field wins when they disagree, and every task-scoped method shares one
   resolver — so one client implementation works across all of them.
+
+---
+
+## 16. Shared Files & Connector Approvals (M4)
+
+Two capabilities that existed only as an idea: a file a person can hand to an agent, and a
+`ask_first` decision somebody can actually answer.
+
+### Shared files
+
+The bytes live outside the database; only their metadata does.
+
+- **Switch**: `AGENTHUB_FILES_STORE=off|local|s3`, default **off**. With it off every
+  `/api/files*` route answers `503 files_disabled`, and the console says so rather than
+  showing an empty list.
+- **Endpoints**: `GET /api/files` (`{ files, maxBytes, backend }`), `POST /api/files`
+  (multipart, first file part), `GET /api/files/{id}`,
+  `GET /api/files/{id}/content` (attachment download through `http.ServeContent`, so `Range`
+  works and a large upload can be resumed) and `DELETE /api/files/{id}`. Permissions reuse
+  `tasks:read` / `tasks:write`; no new permission code.
+- **Limits and integrity**: `AGENTHUB_FILES_MAX_BYTES` (32 MiB) is enforced *while* the bytes
+  stream to a temporary file, so an oversized upload never reaches the store (`413
+  file_too_large`). Every row carries the sha256 and the sniffed MIME type; the claimed type is
+  kept only when sniffing cannot do better. A name is reduced to its base name, and an empty one
+  falls back to `upload.bin`.
+- **Local backend**: written to a temporary file and moved into place with `rename` (never a
+  partial file under the final key), mode `0600`, sharded by the first two hex digits of the
+  digest. A key that is not `<2 hex>/<64 hex>` — including anything with `..` — is refused
+  before it touches the filesystem.
+- **S3-compatible backend** (RustFS, MinIO, AWS): SigV4 written against the standard library, so
+  the module adds **no dependency**. Path-style addressing is required (RustFS/MinIO), a single
+  `PUT` carries `x-amz-content-sha256` (no multipart, no chunked signing — a file already has a
+  size cap), and the credentials are read from the environment variables *named* by
+  `_ACCESS_KEY_ENV` / `_SECRET_KEY_ENV`. Logs carry the backend, the object key prefix and the
+  byte count — never the signature, the key or an endpoint with userinfo.
+- **Ownership**: `shared_files.owner_id` plus `FORCE` row-level security, so a second account
+  cannot list, read or delete somebody else's file even with the id. A row that is not yours
+  answers `404 file_not_found`, not `403`.
+- **Tests**: `internal/files` (limits, hashing, name handling, backend failure, key traversal,
+  cancellation) at 86.4% of statements, `s3_test.go` against an `httptest` server (signature
+  headers, escaping, no redirect following, transport failure, size mismatch) and
+  `internal/handlers/files_test.go` for the HTTP surface — upload → list → metadata → download
+  with `Range` → delete, plus 413 / 415 / 404 / 502 / 503.
+
+### Connector approvals
+
+`ask_first` already parked a task; it now parks everything a person needs to decide, and the
+queue is derived from those tasks, so there is **no approval table**.
+
+- **What is parked**: `Hub.ParkConnector` writes `metadata.connectorApproval =
+  { action, args, requestedBy, resourceId }` onto the `input-required` task. The console can
+  therefore show the connector, the action name and the arguments instead of a task id.
+- **Queue**: `GET /api/connectors/approvals` (`tasks:read`) reads the parked tasks directly.
+  `hub.TaskStateLister` is an **optional port** — the GORM repository filters by state (index +
+  row-level security) and the in-memory store filters a slice; the existing `TaskRepository`
+  interface is untouched, so no test double broke.
+- **Decide**: `POST /api/connectors/approvals/{id}/approve` resumes the task with the parked
+  arguments, so the connector runs **exactly once**; `POST .../reject` cancels it and nothing
+  runs. A task that is not parked, already decided, or somebody else's answers `404
+  connector_approval_not_found`; deciding twice answers `409 connector_approval_closed`.
+- **Tests**: `handlers/connectors_approval_test.go` covers the derived queue, approve-runs-once,
+  the duplicate-approval conflict, reject-then-approve conflict, unknown and unrelated tasks, and
+  the `503` when the hub is not wired; `hub/orchestrator_park_test.go` pins the parked metadata.

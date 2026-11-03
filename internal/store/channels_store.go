@@ -55,6 +55,7 @@ func toDomainMessage(r *model.ChannelMessage) *channels.ChannelMessage {
 		Direction:   r.Direction,
 		Status:      r.Status,
 		Error:       r.Error,
+		OwnerID:     r.OwnerID,
 		CreatedAt:   r.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	_ = r.Payload.Decode(&m.Payload)
@@ -169,23 +170,43 @@ func (s *channelsStore) Delete(ctx context.Context, id, ownerID string) error {
 	})
 }
 
+// channelOwner is the owner a receipt has to carry: the one on the channel it
+// was routed through. Copying it here is what makes channel_messages safe to put
+// under a policy — the row can no longer claim an owner its parent does not have.
+func channelOwner(db *gorm.DB, channelID string) (string, error) {
+	var row struct{ OwnerID string }
+	res := db.Model(&model.Channel{}).Select("owner_id").Where("id = ?", channelID).Limit(1).Scan(&row)
+	if res.Error != nil {
+		return "", res.Error
+	}
+	if res.RowsAffected == 0 {
+		return "", channels.ErrChannelNotFound
+	}
+	return row.OwnerID, nil
+}
+
 func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelMessage) (bool, error) {
 	payload, err := model.NewJSONField(m.Payload)
 	if err != nil {
 		return false, err
 	}
-	r := model.ChannelMessage{
-		ChannelID:   m.ChannelID,
-		ExternalRef: m.ExternalRef,
-		ThreadID:    m.ThreadID,
-		TaskID:      m.TaskID,
-		Direction:   m.Direction,
-		Payload:     payload,
-		Status:      m.Status,
-		Error:       m.Error,
-		CreatedAt:   time.Now().UTC(),
-	}
 	return scoped(ctx, s.db, func(db *gorm.DB) (bool, error) {
+		owner, err := channelOwner(db, m.ChannelID)
+		if err != nil {
+			return false, err
+		}
+		r := model.ChannelMessage{
+			ChannelID:   m.ChannelID,
+			ExternalRef: m.ExternalRef,
+			ThreadID:    m.ThreadID,
+			TaskID:      m.TaskID,
+			Direction:   m.Direction,
+			Payload:     payload,
+			Status:      m.Status,
+			Error:       m.Error,
+			OwnerID:     owner,
+			CreatedAt:   time.Now().UTC(),
+		}
 		// The unique index on (channel_id, external_ref) dedupes redeliveries: an
 		// identical key is swallowed rather than erroring.
 		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&r).Error; err != nil {
@@ -202,12 +223,11 @@ func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelM
 	})
 }
 
-func (s *channelsStore) GetDelivery(ctx context.Context, channelID, id string) (*channels.ChannelMessage, error) {
+func (s *channelsStore) GetDelivery(ctx context.Context, channelID, id, ownerID string) (*channels.ChannelMessage, error) {
 	return scoped(ctx, s.db, func(db *gorm.DB) (*channels.ChannelMessage, error) {
 		var r model.ChannelMessage
-		if err := db.
-			Where("channel_id = ? AND external_ref = ?", channelID, id).
-			First(&r).Error; err != nil {
+		q := ownedChildWhere(db.Where("external_ref = ?", id), "channel_id", channelID, ownerID)
+		if err := q.First(&r).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, nil
 			}
@@ -217,15 +237,15 @@ func (s *channelsStore) GetDelivery(ctx context.Context, channelID, id string) (
 	})
 }
 
-func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelMessage) (bool, error) {
+func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelMessage, ownerID string) (bool, error) {
 	payload, err := model.NewJSONField(m.Payload)
 	if err != nil {
 		return false, err
 	}
 	return scoped(ctx, s.db, func(db *gorm.DB) (bool, error) {
-		res := db.
-			Model(&model.ChannelMessage{}).
-			Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ID).
+		// Ownership is never rewritten by an update: the row is matched with the
+		// caller's owner id and the payload written back leaves owner_id alone.
+		res := ownedChildWhere(db.Model(&model.ChannelMessage{}).Where("external_ref = ?", m.ID), "channel_id", m.ChannelID, ownerID).
 			Updates(map[string]any{"status": m.Status, "error": m.Error, "payload": payload})
 		if res.Error != nil {
 			return false, res.Error
@@ -234,11 +254,10 @@ func (s *channelsStore) UpdateDelivery(ctx context.Context, m *channels.ChannelM
 	})
 }
 
-func (s *channelsStore) ListDeliveries(ctx context.Context, channelID string) ([]*channels.ChannelMessage, error) {
+func (s *channelsStore) ListDeliveries(ctx context.Context, channelID, ownerID string) ([]*channels.ChannelMessage, error) {
 	return scoped(ctx, s.db, func(db *gorm.DB) ([]*channels.ChannelMessage, error) {
 		var rows []model.ChannelMessage
-		if err := db.
-			Where("channel_id = ?", channelID).
+		if err := ownedChildWhere(db, "channel_id", channelID, ownerID).
 			Order("created_at DESC").
 			Find(&rows).Error; err != nil {
 			return nil, err

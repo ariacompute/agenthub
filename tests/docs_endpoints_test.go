@@ -132,3 +132,52 @@ func TestNoDocumentedRouteIsDead(t *testing.T) {
 		)
 	}
 }
+
+// httpCodeDeclaration matches `CodeFileNotFound Code = "file_not_found"`.
+var httpCodeDeclaration = regexp.MustCompile(`Code\w+\s+Code\s*=\s*"([a-z0-9_]+)"`)
+
+// TestEveryErrorCodeIsDocumented closes the other half of the same door. The
+// route table was compared against the router; the error table never was, so
+// six codes added with shared files and the approval queue (and the five API-key
+// codes before them) reached a deployment without reaching /docs. The console is
+// where an operator looks a code up, and "not in the table" reads as "not real".
+//
+// The truth is derived from internal/httputil/json.go, the same file whose
+// status mapping another test already pins. A code may appear either in
+// errorGroups (the by-status table) or in adapterCodes (the adapter-owned ones,
+// which say something about the resource rather than the caller).
+func TestEveryErrorCodeIsDocumented(t *testing.T) {
+	source, err := os.ReadFile("../internal/httputil/json.go")
+	if err != nil {
+		t.Fatalf("read httputil codes: %v", err)
+	}
+	docs, err := os.ReadFile("../web/src/lib/docs-content.js")
+	if err != nil {
+		t.Fatalf("read docs-content.js: %v", err)
+	}
+
+	documented := map[string]bool{}
+	for _, m := range regexp.MustCompile(`codes: '([^']+)'`).FindAllStringSubmatch(string(docs), -1) {
+		for _, code := range strings.Split(m[1], ",") {
+			documented[strings.TrimSpace(code)] = true
+		}
+	}
+	for _, m := range regexp.MustCompile(`code: '([a-z0-9_]+)'`).FindAllStringSubmatch(string(docs), -1) {
+		documented[m[1]] = true
+	}
+
+	var missing []string
+	for _, m := range httpCodeDeclaration.FindAllStringSubmatch(string(source), -1) {
+		if !documented[m[1]] {
+			missing = append(missing, m[1])
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Fatalf(
+			"error codes the server can return but /docs never lists:\n  %s\n"+
+				"add them to errorGroups (or adapterCodes) in web/src/lib/docs-content.js and run `make docs-md`",
+			strings.Join(missing, "\n  "),
+		)
+	}
+}

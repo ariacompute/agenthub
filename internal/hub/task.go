@@ -139,6 +139,38 @@ func (s *TaskStore) List(ctx context.Context) []*a2a.Task {
 	return out
 }
 
+// taskStateLister is an optional repository capability: read only the tasks in
+// one lifecycle state.
+//
+// It is optional on purpose. The connector approval queue is the only caller and
+// it must not force every TaskRepository implementation (including the test
+// doubles) to grow a method; a repository without it still answers correctly,
+// just less cheaply.
+type taskStateLister interface {
+	ListState(ctx context.Context, state a2a.TaskState) ([]*a2a.Task, error)
+}
+
+// ListState returns the tasks the caller may see in one state, newest first.
+func (s *TaskStore) ListState(ctx context.Context, state a2a.TaskState) []*a2a.Task {
+	if s.repo != nil {
+		if lister, ok := s.repo.(taskStateLister); ok {
+			tasks, err := lister.ListState(ctx, state)
+			if err != nil {
+				slog.Error("hub: list tasks in state", "state", state, "error", err)
+				return nil
+			}
+			return tasks
+		}
+	}
+	out := make([]*a2a.Task, 0, 4)
+	for _, task := range s.List(ctx) {
+		if task.Status.State == state {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
 // ownedBy reports whether a row owned by rowOwner is visible to a caller whose
 // owner scope is scope. An empty scope means "no owner restriction" (system or
 // bypass); an empty row owner is an instance owned row and stays hidden from

@@ -164,7 +164,7 @@ func TestChannelsAreNotReachableAcrossOwners(t *testing.T) {
 	if code := postSlackWebhook(t, srv, "chan-alice", payload, slackSig("shh", ts, []byte(payload)), ts); code != http.StatusOK {
 		t.Fatalf("the webhook of another owner's channel = %d, want 200", code)
 	}
-	if msgs, _ := fake.ListDeliveries(context.Background(), "chan-alice"); len(msgs) != 1 {
+	if msgs, _ := fake.ListDeliveries(context.Background(), "chan-alice", "alice"); len(msgs) != 1 {
 		t.Fatalf("deliveries = %d, want the inbound message recorded", len(msgs))
 	}
 }

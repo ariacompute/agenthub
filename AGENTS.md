@@ -153,9 +153,15 @@ persistence ← internal/store（GORM 实现）
   `schedules.go`（F13 目标调度：`GET/POST /api/schedules`、`GET/PUT/DELETE /api/schedules/{id}`、
   `POST /api/schedules/{id}/run` 立即触发一次；cron 保存即算 `next_run`，非法表达式返回
   `schedule_invalid`）、`knowledge.go`（F14 知识库：`GET /api/knowledge` mock RAG 检索 +
-  技能蒸馏触发点记录，真实向量检索标 `TODO(real)`）、`router.go`（`/api/router/*` 控制面：
+  技能蒸馏触发点记录，真实向量检索标 `TODO(real)`）、  `router.go`（`/api/router/*` 控制面：
   `stats`/`triggers`/`tickets`/`policies`/`passes`/`events` SSE，`routerReady` 在未注入
-  `Deps.Router` 时统一回 503 `feature_unavailable`）
+  `Deps.Router` 时统一回 503 `feature_unavailable`）、
+  `connectors.go`（策略/动作目录 + **审批队列**：`GET /api/connectors/approvals` 与
+  `POST /api/connectors/approvals/{id}/approve|reject`，队列从 `input-required` 任务派生，
+  批准即 `hub.Resume` 真跑一次，拒绝即 `hub.Cancel`）、
+  `files.go`（共享文件：`GET/POST /api/files`、`GET /api/files/{id}`、
+  `GET /api/files/{id}/content`（`http.ServeContent`，支持 Range + `Content-Disposition`、
+  `nosniff`）、`DELETE /api/files/{id}`；未配置后端时统一 503 `files_disabled`）
 - `migrations/`：`001_resources.sql` … `004_push_records.sql`、`005_auth.sql`（users/sessions/
   oauth_accounts）、`006_rbac.sql`（groups/roles/permissions/各种关联表/resource_grants + 内置
   角色权限种子）、`007_backups.sql`（`backup_checkpoints` / `backup_schedules` + `backups:manage`
@@ -167,7 +173,11 @@ persistence ← internal/store（GORM 实现）
   `019_knowledge.sql`（`knowledge`：mock RAG 片段）、
   `020_router.sql`（`router_triggers` / `router_threads` / `router_subscriptions` / `router_tickets` /
   `router_assignments` / `router_decisions` / `router_policies` / `router_events`，含
-  `(source, dedupe_key)` 与 `(disposition, next_due)` 部分索引），均 `IF NOT EXISTS`，经 `embed.go` 内嵌
+  `(source, dedupe_key)` 与 `(disposition, next_due)` 部分索引），
+  `029_channel_messages_owner.sql`（`channel_messages.owner_id` + 按父通道回填 + 索引 + RLS）、
+  `030_threads_rls.sql`（`threads` 补 `ENABLE`/`FORCE` + 策略；`thread_messages.owner_id` +
+  按父线程回填 + 索引 + 策略）、`031_shared_files.sql`（`shared_files` 元数据表 + owner 索引 + RLS），
+  均 `IF NOT EXISTS`，经 `embed.go` 内嵌
 - `README.md` / `README_cn.md` 的「AWS Agent Registry 特性对比」章：与 AWS Agent Registry 的
   逐项对比（含已有 / 本次补齐 / 明确不做三张清单与 recordType ↔ Kind 字段级映射）
 - `tests/e2e_test.go`：httptest 真实 HTTP 端到端（内存模式）；`tests/integration_test.go` 与
@@ -182,7 +192,7 @@ persistence ← internal/store（GORM 实现）
   `components/EnvEditor.vue`）；`tests/` vitest）
 - `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js` + `web/src/views/DocsView.vue`：
   **控制台自带文档屏**（侧边栏「管理」之后，无权限门控）。内容与文案分家——`docs-content.js` 是
-  语言中立的机器数据（`/a2a` 七方法 + 别名、66 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
+  语言中立的机器数据（`/a2a` 七方法 + 别名、141 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
   原样渲染不翻译；`docs-copy.js` 只放散文，13 语齐备。二者的分界由 `tests/copy-fallback.spec.js`
   强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
   CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。
@@ -216,7 +226,9 @@ persistence ← internal/store（GORM 实现）
   **永远不是「任意 owner」**；越权一律 404，不泄露存在性。唯一的无归属读是显式命名的
   `channels.GetUnscoped`（webhook 验签前要读行），调用方必须自带 `identity.System()`。
   新增任何「按 id 服务某个请求」的读，照抄这条，别再回到只认 id。
-- **RLS 是第二道闸（11 张表）**：`026` 覆盖任务管道 + `knowledge` + `audit_log`，
+- **RLS 是第二道闸（15 张表）**：`026` 覆盖任务管道 + `knowledge` + `audit_log`，
+  `028` 覆盖 `computers`/`schedules` 这类 owned 面，`029` 覆盖 `channel_messages`，
+  `030` 覆盖 `threads` 与 `thread_messages`，`031` 覆盖 `shared_files`，
   `028` 补 `schedules` / `channels` / `computers`，全部 `ENABLE` + `FORCE`，谓词统一是
   `agenthub_row_visible(owner_id)`（`app.system` / `app.bypass` / 精确非空 owner）。
   两条配套要求：后台节拍（cron 扫描、sweeper、同步）必须 `identity.With(ctx, {System:true})`，
@@ -351,8 +363,15 @@ make web-install / make web-dev / make web-build / make web-test
   失败即 `sandbox_policy_denied`。CLI 连接器造租约前已问过 `ArgsAllowed`，但 `Exec` 是所有调用方
   （含 `POST /api/sandboxes/{id}/exec`）的唯一入口——「命令在白名单里、参数不在」正是绕过方式。
 - **后端如实声明能力**：`local` 的 `Describe().Network` 只有 `platform`（裸子进程没有自己的网络
-  命名空间，走宿主的路由与 DNS）；只有容器 / bwrap 才能真的断网。`AGENTHUB_SANDBOX_EGRESS_ALLOWLIST`
-  目前**无人执行**，启动时非空即 `slog.Warn`，语义仍是「无网络」。
+  命名空间，走宿主的路由与 DNS）；`docker` 声明 `none|bridge|platform`，`createArgs` 与之逐项对齐
+  （`platform` 传**守护进程默认网络**而不是字面 `--network bridge`）；`bwrap` **不声明** `bridge`
+  ——它的 `--share-net` 就是宿主命名空间，所以只报 `none|platform`；`remote`、编译进来的 HTTP 垫片
+  与未声明网络的自定义模板一律只报 **`delegated`**：本机不施加任何网络约束，profile 随作业传给
+  真正执行的那一层。`AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` 目前**无人执行**，启动时非空即 `slog.Warn`。
+- **能力声明会被准入消费（fail-closed）**：`Manager.Acquire` 解析出 provider 后调 `Describe()`，
+  若 `NormalizeNetwork(profile.Network)` 不在 `desc.Network` 内即返回 `sandbox_capability_unavailable`，
+  **不再静默降级**成宿主网络。`Describe().EnvKeys` 承载「需要哪些环境变量」（如远程节点的 base URL），
+  与 `Requires`（探针要找的二进制）分开，`SourcePlatform` 标明编译进来的 HTTP 垫片不是声明式模板。
 - **租约与任务解耦**：任务取消/失败/重启不销毁租约；租约丢失不使任务失败（`Manager.Exec` 标 failed，
   下次 `Acquire` 重建）。作用域解析 `metadata.ticket` → `metadata.contextId` → `default`。
 - **owner 必须贯穿**：经 router 发起的执行走 `Hub.SendAs(ticket.ActorID)`，否则租约落进「匿名不复用」。
@@ -365,6 +384,25 @@ make web-install / make web-dev / make web-build / make web-test
   的 `probes`；迁移新增走 `022_*` 及以后，并同步 `store_test.go` 的 `want`。
 - **控制台试跑绕开 router**（`POST /api/sandboxes/{id}/exec`，审计标 `dry_run`）：手工探测不得凭空
   开 ticket、污染统计或触发人工审批。
+
+## 共享文件（`internal/files`）
+
+- **默认关闭**：`AGENTHUB_FILES_STORE=off|local|s3`，未配置即 off，所有 `/api/files*` 回
+  `503 files_disabled`（与 `AGENTHUB_BACKUP_DIR` 同一惯例：空默认即功能开关）。
+- **两个后端、一个端口**：`files.Store`（元数据，GORM 实现在 `internal/store/files_store.go`）与
+  `files.Backend`（字节：`local.go` 落磁盘、`s3.go` 走 SigV4）分开；`Service` 负责大小上限
+  （`AGENTHUB_FILES_MAX_BYTES`）、sha256、MIME 嗅探与后端选择。
+- **本地后端**：临时文件写完校验字节数后**原子 rename**，目录按 sha256 前两位分片；文件 0600；
+  key 只接受 `<2 位>/<64 位十六进制>`，其余（含 `..`）一律 `file_store_error`。
+- **S3 后端**：标准库手写 SigV4（**不新增依赖**），单次 `PUT` 带 `x-amz-content-sha256`，
+  回避分片签名与 chunked 上传；`path-style` 必选（RustFS/MinIO）；endpoint/bucket/region/
+  `PATH_STYLE` 来自配置，**密钥只从环境变量名读**（`ACCESS_KEY_ENV`/`SECRET_KEY_ENV`，
+  与 `model_openai.go` 的 `api_key_env` 同口径）。日志只记 backend / 对象键前缀 / 字节数，
+  **绝不**打印 `Authorization`、`X-Amz-Signature`、密钥或带 userinfo 的 URL。
+- **下载是流**：`GET /api/files/{id}/content` 用 `http.ServeContent`（Range + `Content-Disposition` +
+  `X-Content-Type-Options: nosniff`），不整块进内存；越权与不存在都回 `404 file_not_found`。
+- **归属与隔离**：`shared_files.owner_id` + `ENABLE`/`FORCE` + `shared_files_owner_access`；
+  仓储用 `scoped(ctx)` 发布身份，列表按 owner 精确匹配（空 owner 不等于「任意 owner」）。
 
 ## 端口清单
 

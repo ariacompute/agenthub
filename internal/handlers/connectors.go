@@ -134,7 +134,7 @@ func (d Deps) handleConnectorAction(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusForbidden, httputil.CodeConnectorPolicyOff)
 		return
 	case registry.ConnectorPolicyAskFirst:
-		task, err := d.Hub.ParkConnector(r.Context(), id, req.Action)
+		task, err := d.Hub.ParkConnector(r.Context(), id, req.Action, req.Args)
 		if err != nil {
 			httputil.WriteErr(w, err)
 			return
@@ -159,4 +159,152 @@ func (d Deps) handleConnectorAction(w http.ResponseWriter, r *http.Request) {
 		}
 		httputil.WriteJSON(w, http.StatusOK, task)
 	}
+}
+
+// connectorApprovalMarker is the metadata key that turns a parked task into an
+// approval request. It is written by hub.ParkConnector and never by a caller.
+const connectorApprovalMarker = "connectorApproval"
+
+// connectorApprovalView is one row of the queue: what was asked for, by whom, and
+// which task holds the park.
+type connectorApprovalView struct {
+	TaskID        string         `json:"taskId"`
+	ConnectorID   string         `json:"connectorId"`
+	ConnectorName string         `json:"connectorName,omitempty"`
+	Action        string         `json:"action"`
+	Args          map[string]any `json:"args,omitempty"`
+	RequestedBy   string         `json:"requestedBy,omitempty"`
+	// Asked is the prompt the task is parked on, so the queue shows the same
+	// sentence the HITL card shows.
+	Asked     string `json:"asked,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+// connectorApprovalOf reads the request off a parked task.
+//
+// The marker lives on the task's first message rather than on a table of its
+// own: the approval is the parked A2A task, and a second table would be a second
+// truth to keep in step with the state machine.
+func connectorApprovalOf(task *a2a.Task) (map[string]any, bool) {
+	for i := range task.History {
+		meta := task.History[i].Metadata
+		if meta == nil {
+			continue
+		}
+		if marked, _ := meta[connectorApprovalMarker].(bool); marked {
+			return meta, true
+		}
+	}
+	return nil, false
+}
+
+func (d Deps) approvalView(task *a2a.Task, meta map[string]any) connectorApprovalView {
+	view := connectorApprovalView{TaskID: task.ID, CreatedAt: string(task.Status.Timestamp)}
+	if id, ok := meta["resourceId"].(string); ok {
+		view.ConnectorID = id
+		if entry, found := d.Reg.Get(id); found {
+			view.ConnectorName = entry.Name
+		}
+	}
+	if action, ok := meta["connectorAction"].(string); ok {
+		view.Action = action
+	}
+	if args, ok := meta["args"].(map[string]any); ok {
+		view.Args = args
+	}
+	if who, ok := meta["requestedBy"].(string); ok {
+		view.RequestedBy = who
+	}
+	if task.Status.Message != nil {
+		view.Asked = task.Status.Message.Text()
+	}
+	return view
+}
+
+// handleListConnectorApprovals is the queue the console's approval panel reads.
+//
+// It derives from the parked tasks rather than from a table of its own: "pending
+// approval" already has exactly one representation — a task in input-required
+// whose request carries the connector marker — and a second one would drift.
+func (d Deps) handleListConnectorApprovals(w http.ResponseWriter, r *http.Request) {
+	if d.Hub == nil {
+		httputil.WriteError(w, http.StatusServiceUnavailable, httputil.CodeFeatureUnavailable)
+		return
+	}
+	tasks := d.Hub.ListTasksInState(r.Context(), a2a.TaskStateInputRequired)
+	out := make([]connectorApprovalView, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		meta, ok := connectorApprovalOf(task)
+		if !ok {
+			continue
+		}
+		out = append(out, d.approvalView(task, meta))
+	}
+	httputil.WriteJSON(w, http.StatusOK, out)
+}
+
+// handleApproveConnectorAction resumes the parked task, which runs the action
+// once. The answer repeats the action and its arguments so the resumed flow —
+// and the audit trail — carry the same request the approver read.
+func (d Deps) handleApproveConnectorAction(w http.ResponseWriter, r *http.Request) {
+	d.decideConnectorApproval(w, r, true)
+}
+
+// handleRejectConnectorAction cancels the parked task. Nothing is executed: a
+// refusal must not leave a half-run side effect behind.
+func (d Deps) handleRejectConnectorAction(w http.ResponseWriter, r *http.Request) {
+	d.decideConnectorApproval(w, r, false)
+}
+
+func (d Deps) decideConnectorApproval(w http.ResponseWriter, r *http.Request, approve bool) {
+	if d.Hub == nil {
+		httputil.WriteError(w, http.StatusServiceUnavailable, httputil.CodeFeatureUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	// Nil history length: the marker lives on the first message, so the whole
+	// history is needed to read the request back.
+	task, err := d.Hub.Get(r.Context(), id, nil)
+	if err != nil || task == nil {
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeConnectorApprovalNotFound)
+		return
+	}
+	meta, ok := connectorApprovalOf(task)
+	if !ok {
+		// A task that is not an approval request is reported as absent: saying
+		// "that task exists but is not an approval" would be an id oracle.
+		httputil.WriteError(w, http.StatusNotFound, httputil.CodeConnectorApprovalNotFound)
+		return
+	}
+	if task.Status.State != a2a.TaskStateInputRequired {
+		// Somebody already approved, rejected or the task expired.
+		httputil.WriteError(w, http.StatusConflict, httputil.CodeConnectorApprovalClosed)
+		return
+	}
+	if !approve {
+		updated, cerr := d.Hub.Cancel(r.Context(), id)
+		if cerr != nil {
+			httputil.WriteErr(w, cerr)
+			return
+		}
+		httputil.WriteJSON(w, http.StatusOK, updated)
+		return
+	}
+	answer := a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("approved"))
+	answer.Metadata = map[string]any{
+		"approved":        true,
+		"connectorAction": meta["connectorAction"],
+	}
+	if args, has := meta["args"]; has {
+		answer.Metadata["args"] = args
+	}
+	updated, rerr := d.Hub.Resume(r.Context(), a2a.TaskResumeParams{ID: id, Message: answer})
+	if rerr != nil {
+		httputil.WriteErr(w, rerr)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, updated)
 }

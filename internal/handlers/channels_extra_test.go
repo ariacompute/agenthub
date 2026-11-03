@@ -116,8 +116,8 @@ func TestItoa(t *testing.T) {
 // delegateThread: a channel message reaching the agents in a thread
 // ---------------------------------------------------------------------------
 
-// threadWithParticipants seeds a platform thread: GetThread matches on the
-// owner, and the channel path asks with none.
+// threadWithParticipants seeds a platform thread. The channel path reads it
+// unscoped under the process identity, so no owner is needed here.
 func threadWithParticipants(t *testing.T, mt *memThreads, id string, participants ...string) {
 	t.Helper()
 	mt.mu.Lock()

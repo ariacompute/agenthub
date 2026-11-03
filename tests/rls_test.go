@@ -35,6 +35,7 @@ import (
 	"agenthub/internal/identity"
 	"agenthub/internal/schedules"
 	"agenthub/internal/store"
+	"agenthub/internal/threads"
 )
 
 // rlsSettings publishes the five settings every policy reads in one statement,
@@ -313,6 +314,10 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		// by-id endpoints used to answer any id, so this list is also the
 		// regression guard for that class of bug.
 		"channels", "schedules", "computers",
+		// 029 and 030 closed the last two gaps: a delivery receipt and a thread
+		// message were reached only through their parent row, so the parent was
+		// the whole guarantee. Now the rows carry the owner themselves.
+		"channel_messages", "threads", "thread_messages",
 	}
 	for _, table := range expected {
 		var enabled, forced bool
@@ -354,6 +359,7 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		"knowledge_owner_access",
 		"audit_log_read", "audit_log_append", "audit_log_retention",
 		"channels_owner_access", "schedules_owner_access", "computers_owner_access",
+		"channel_messages_owner_access", "threads_owner_access", "thread_messages_owner_access",
 	} {
 		if !names[want] {
 			t.Fatalf("policy %q is missing, got %v", want, names)
@@ -694,6 +700,107 @@ func TestRLSOwnedSurfacesAreScopedByOwner(t *testing.T) {
 	// Fail closed: a connection that forgot its identity sees none of the three.
 	for _, table := range []string{"channels", "schedules", "computers"} {
 		if n := countIn(t, db, rlsIdentity{}, `SELECT count(*) FROM `+table+` WHERE id IS NOT NULL`); n != 0 {
+			t.Fatalf("a connection with no identity saw %d rows of %s, want 0", n, table)
+		}
+	}
+}
+
+// TestRLSReceiptsAndThreadMessagesInheritTheParentOwner covers what 029 and 030
+// added: the two child tables that used to be reachable only through a parent row
+// now carry the owner themselves, and the owner is copied from that parent — not
+// from whatever the caller claimed.
+func TestRLSReceiptsAndThreadMessagesInheritTheParentOwner(t *testing.T) {
+	db := openRLSDB(t)
+	id := rlsTag(t)
+	alice := "alice-" + id
+	bob := "bob-" + id
+	aliceCtx := identity.With(t.Context(), identity.Identity{OwnerID: alice})
+	bobCtx := identity.With(t.Context(), identity.Identity{OwnerID: bob})
+	system := identity.System()
+
+	chans := store.NewChannelsStore(db)
+	threadStore := store.NewThreadsStore(db)
+
+	channel, err := chans.Create(aliceCtx, &channels.Channel{
+		Kind: channels.KindSlack, Name: "receipts-" + id, Enabled: true,
+		SigningKeyEnv: "RLS_TEST_" + id, OwnerID: alice,
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	thread, err := threadStore.CreateThread(aliceCtx, &threads.Thread{
+		Title: "thread-" + id, OwnerID: alice, Participants: []string{"mcp-1"},
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = execErrIn(db, rlsIdentity{System: true}, `DELETE FROM channel_messages WHERE channel_id = ?`, channel.ID)
+		_ = execErrIn(db, rlsIdentity{System: true}, `DELETE FROM threads WHERE id = ?`, thread.ID)
+		_ = chans.Delete(system, channel.ID, alice)
+	})
+
+	ref := "in-" + id
+	if _, err := chans.RecordDelivery(aliceCtx, &channels.ChannelMessage{
+		ChannelID: channel.ID, ExternalRef: ref, Direction: "inbound", Status: channels.StatusReceived,
+	}); err != nil {
+		t.Fatalf("record delivery: %v", err)
+	}
+
+	// The written row carries the channel's owner, so the policy can see it even
+	// though the receipt never mentions an owner in the request.
+	if n := countIn(t, db, rlsIdentity{OwnerID: alice},
+		`SELECT count(*) FROM channel_messages WHERE channel_id = ? AND owner_id = ?`, channel.ID, alice); n != 1 {
+		t.Fatalf("the receipt does not carry the channel owner (%d rows)", n)
+	}
+
+	// The owner reads their own receipts; a stranger reads none of them, whether
+	// they scope by their own id or by the real owner's.
+	if list, err := chans.ListDeliveries(aliceCtx, channel.ID, alice); err != nil || len(list) != 1 {
+		t.Fatalf("owner deliveries = %d (err=%v), want 1", len(list), err)
+	}
+	if list, err := chans.ListDeliveries(bobCtx, channel.ID, bob); err != nil || len(list) != 0 {
+		t.Fatalf("stranger deliveries = %d (err=%v), want 0", len(list), err)
+	}
+	if got, err := chans.GetDelivery(bobCtx, channel.ID, ref, alice); err != nil || got != nil {
+		t.Fatalf("stranger read with the real owner id = %+v (err=%v), want absent", got, err)
+	}
+	if ok, err := chans.UpdateDelivery(bobCtx, &channels.ChannelMessage{
+		ID: ref, ChannelID: channel.ID, Status: channels.StatusDelivered,
+	}, alice); err != nil || ok {
+		t.Fatalf("stranger retry touched the receipt (ok=%v err=%v)", ok, err)
+	}
+
+	// Thread messages take the thread's owner. A stranger cannot append to a
+	// thread they cannot see, and cannot read it back either.
+	if _, err := threadStore.AddMessage(aliceCtx, &threads.Message{
+		ThreadID: thread.ID, AuthorType: "user", AuthorID: alice, Body: "hello",
+	}); err != nil {
+		t.Fatalf("owner append: %v", err)
+	}
+	if _, err := threadStore.AddMessage(bobCtx, &threads.Message{
+		ThreadID: thread.ID, AuthorType: "user", AuthorID: bob, Body: "pwned",
+	}); err == nil {
+		t.Fatal("a stranger appended a message to somebody else's thread")
+	}
+	if msgs, err := threadStore.ListMessages(aliceCtx, thread.ID, 0); err != nil || len(msgs) != 1 {
+		t.Fatalf("owner messages = %d (err=%v), want 1", len(msgs), err)
+	}
+	if msgs, err := threadStore.ListMessages(bobCtx, thread.ID, 0); err != nil || len(msgs) != 0 {
+		t.Fatalf("stranger messages = %d (err=%v), want 0", len(msgs), err)
+	}
+
+	// The webhook's unscoped read is process-only, exactly like GetUnscoped.
+	if got, err := threadStore.GetThreadUnscoped(system, thread.ID); err != nil || got == nil {
+		t.Fatalf("the webhook cannot read a thread: %+v (err=%v)", got, err)
+	}
+	if got, err := threadStore.GetThreadUnscoped(bobCtx, thread.ID); err == nil || got != nil {
+		t.Fatalf("a signed in stranger read a thread unscoped: %+v (err=%v)", got, err)
+	}
+
+	// Fail closed on all three tables.
+	for _, table := range []string{"channel_messages", "threads", "thread_messages"} {
+		if n := countIn(t, db, rlsIdentity{}, `SELECT count(*) FROM `+table+` WHERE owner_id <> ''`); n != 0 {
 			t.Fatalf("a connection with no identity saw %d rows of %s, want 0", n, table)
 		}
 	}

@@ -133,6 +133,12 @@ Agent 调用。
   `GET /api/threads/{id}`、`POST /api/threads/{id}/messages`（每个 `@mention` 经 `Hub.Send` 走 A2A
   委派，以任务 id 关联）、`GET /api/threads/{id}/events`（SSE 回访 + 被委派任务实时回复）。复用
   `resources:read` / `tasks:read` / `tasks:write`，不新增角色或用户组。
+- **连接器审批**：`GET /api/connectors/approvals` 与
+  `POST /api/connectors/approvals/{id}/approve|reject`，把 `ask_first` 挂起的任务变成人真的能决策的
+  队列（见 §十六）。
+- **共享文件**：`GET/POST /api/files`、`GET /api/files/{id}`、
+  `GET /api/files/{id}/content`（支持 Range 的附件下载）、`DELETE /api/files/{id}`（见 §十六）。
+  默认关闭；部署没配后端时统一回 `files_disabled`。
 
 ---
 
@@ -232,6 +238,12 @@ Agent 调用。
   `sha256`（`token_hash`）与展示用 `prefix`（`ahk_xxxxxxxx`），**绝不存密钥本身**；
   另含可选 `expires_at` 与软删除 `revoked_at`（吊销后仍保留行以留存审计线索，但
   立即失去认证能力）；`api_key_scopes` 是 key → permission 的边。
+- **`threads` / `thread_messages`**：协作线程与其中的消息。两者都带 `owner_id` 且在行级安全之下；
+  被委派 agent 写入的消息继承线程属主，而不是凭空造一个。
+- **`channel_messages`**：通道投递。`owner_id` 继承自父通道，因此入站 webhook（此时还没有任何会话）
+  写下的行属于通道属主，而不是「无人」。
+- **`shared_files`**：只有文件元数据——`name` / `mime` / `size` / `sha256` / `backend` /
+  `object_key` / `owner_id`；字节落在本地磁盘或 S3 兼容存储（见十六）。
 - **`schema_migrations`**：已执行的迁移文件，启动时跳过。
 - **jsonb 载荷**：由自实现 `model.JSONField`（`driver.Valuer` / `sql.Scanner`）承载，
   **不引入** `gorm.io/datatypes`。
@@ -245,8 +257,13 @@ Agent 调用。
   后续迁移沿用同一契约：`010_api_keys.sql`（API 密钥表）、`011_login_protection.sql`（账户锁定列）、
   `012_threads.sql`（协作线程）、  `013_persona.sql` / `014_channels.sql` / `015_thread_origin.sql`
   （Persona / Channels / 语音 origin），以及 `016_wechat_login.sql`（放开 `users.email` 非空约束，
-  以便仅由 OAuth 绑定 `(provider, subject)` 标识的微信账号也能入库），以及 `017_computers.sql` /
-  `018_schedules.sql` / `019_knowledge.sql`（agent 沙箱 / 主动调度 / mock RAG 片段）。
+  以便仅由 OAuth 绑定 `(provider, subject)` 标识的微信账号也能入库），`017_computers.sql` /
+  `018_schedules.sql` / `019_knowledge.sql`（agent 沙箱 / 主动调度 / mock RAG 片段）、
+  `020_router.sql` / `021_sandboxes.sql`（调度器与沙盒控制面）、`022`–`024`（任务与知识归属、
+  资源可见性显式化）、`025_audit_log.sql`、`026`–`028`（行级策略），以及
+  `029_channel_messages_owner.sql` / `030_threads_rls.sql` / `031_shared_files.sql`——后三个都
+  在**打开 `FORCE` 的同一个事务里**回填自己继承来的归属，因此不存在「策略已生效、历史行却还不
+  满足它」的窗口。
 - **条件更新防丢更新**：任务状态迁移走 `UPDATE ... WHERE id=? AND state=?` 并校验
   `RowsAffected`，0 行时区分「任务不存在」与「并发冲突」。
 - **持久化不阻塞运行**：状态 / artifact / span 同步写；`events` 与 `push_records`
@@ -288,7 +305,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   请求 ID、主体、动作、资源、状态码与耗时条形图），以及并排展示 `prev_hash` 与 `hash` 的取证抽屉；
   链校验会指出第一处断链的行。空态与无权限态都是正经界面，不是一张空表。
 - **文档**（`/docs`）：控制台自带文档，随构建发版、离线可读。五章——核心概念、A2A 方法、
-  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**完整路由表（约 100 条）**，
+  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**完整路由表（141 条）**，
   逐条给出方法、路径、所需权限，以及取自各 handler 真实编解码结构的请求/响应示例。
   入口位于侧边栏「管理」之后，**不加权限门控**：任何已登录账号都可读；而「管理」自身
   仍按其权限显隐，文档项不随之消失。
@@ -337,6 +354,10 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `AGENTHUB_CLI_ALLOWLIST`（git / ls / cat / echo / date / aria-memo）、
   `AGENTHUB_MAX_OUTPUT_BYTES`（65536）、`AGENTHUB_EVENT_BUFFER`（512）、
   `AGENTHUB_PUSH_RECORD_LIMIT`（100）。
+- **共享文件**：`AGENTHUB_FILES_STORE`（默认 `off` / `local` / `s3`）、`AGENTHUB_FILES_DIR`、
+  `AGENTHUB_FILES_MAX_BYTES`（32 MiB）；S3 后端另需 `AGENTHUB_FILES_S3_ENDPOINT` / `_BUCKET` /
+  `_REGION` / `_PATH_STYLE` / `_ACCESS_KEY_ENV` / `_SECRET_KEY_ENV`。选了 `s3` 却没给 endpoint
+  或 bucket 时 `config.Validate()` 在启动就失败；密钥本身只从被点名的环境变量读取。
 - **安全中间件**（见第十三节）：按 IP 限流（认证端点 10 次/分钟/IP，其余 200 次/分钟/IP）、
   对变更型请求做 CSRF 同源 `Origin` 校验、以及安全响应头（HSTS 仅在 TLS 下发出）。账户暴力破解
   防护为**连续 5 次失败锁定 15 分钟**（迁移 `011_login_protection.sql`）。
@@ -401,11 +422,17 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `auth-store.spec.js` 直接读 Go 源码里的 `authz.AllPermissions`，两端词表无法再悄悄漂移。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
-- **前端**：`bunx vitest run` 17 个文件 **301 项通过**（languages / copy-fallback / enums-copy /
+- **前端**：`bunx vitest run` 21 个文件 **417 项通过**（languages / copy-fallback / enums-copy /
   api / api-endpoints / audit / auth-store / format / errors / backup-api / docs-content /
-  playground / store / user-form / use-copy / use-dismiss / style 护栏）。
-  `bun run test:coverage`（v8，仅统计 `src/lib`——各屏是 `.vue` 模板，这些 node 用例根本不挂载）
-  报告：语句 98.5%、分支 91.5%、函数 92.6%。
+  playground / store / user-form / use-copy / use-dismiss / style 护栏，外加沙盒、调度与
+  共享文件三块面）。`bun run test:coverage`（v8）报告：语句 100%、分支 95.8%、函数 100%；
+  未覆盖的分支是界面永远走不到的防御臂。
+- **同一套用例也以生产角色跑**：CI 的第二个 job 依据 `scripts/provision-db-roles.sql` 建出
+  `agenthub_migrator` / `agenthub_app`，用 migrator 迁移，再以 `agenthub_app`（只有 DML、
+  `NOBYPASSRLS`、无 DDL）跑完整 `go test ./...`。需要建表的用例统一走 `internal/testdb`：
+  `TempSchema` 建一个 `it_<随机>` schema 并把 `search_path` 指过去，`RequireDDL` 把「这个角色
+  建不了表」变成带原因的跳过（`production role: no DDL, use a migrator DSN`），而不是失败——
+  否则生产形态第一次进流水线时会报一个根本不是缺陷的「权限不足」。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
@@ -607,6 +634,15 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   确定性离线；`off` 拒绝一切。
 - **三条扩展路径**：编译期实现接口、声明式 argv 模板、节点协议。新增一类后端不改注册表以上的
   任何 Go 代码。
+- **能力先声明、再执行**：每个 `Descriptor` 只报自己真能兑现的东西。`local` 只声明 `platform`
+  （裸子进程没有自己的网络命名空间）；`bwrap` 去掉了 `bridge`——它的 `--share-net` 是宿主命名
+  空间而不是 NAT 接口；`docker` 声明 `none|bridge|platform` 且 `createArgs` 逐项对齐，`platform`
+  交给守护进程默认网络而不再发字面 `bridge`；远端节点、平台垫片与未声明网络的模板只声明
+  **`delegated`**，因为本进程不施加约束、约束发生在节点。`Descriptor` 另增 `EnvKeys`（垫片需要的
+  环境变量名）与 `SourcePlatform`，编译进二进制的垫片不再假装自己是「带一个二进制」的声明式模板。
+- **准入失败即拒绝**：`Manager.Acquire` 先 `Describe()`，profile 的网络模式不在声明内就返回
+  `sandbox_capability_unavailable`，后端一次都不会被调用。向 bubblewrap 要 `bridge` 过去会拿到
+  宿主的网络命名空间，现在它得到的是一个答复。
 
 ### 保证
 
@@ -656,9 +692,13 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
 ### 行级安全
 
 - **归属列**：`tasks` 及其子表（`task_artifacts`、`task_spans`、`task_pending`、`task_push`），
-  以及 `events` 与 `knowledge`，都带 `owner_id TEXT NOT NULL DEFAULT ''`；`''` 表示进程自己写入的行。
-  存量行**不做回填**——没有人去猜历史数据的归属。
-- **策略**（`026_rls_policies.sql`）：上述各表与 `audit_log` 一律 `ENABLE` + `FORCE ROW LEVEL
+  以及 `events`、`knowledge`、`schedules`、`channels`、`computers`，与本轮补齐的 `threads`、
+  `thread_messages`、`channel_messages`、`shared_files`，都带 `owner_id TEXT NOT NULL DEFAULT ''`；
+  `''` 表示进程自己写入的行。存量任务行**不做回填**——没有人去猜历史数据的归属；但归属**可推导**的
+  地方就照抄而不是编：线程消息继承线程、投递继承通道，`029` / `030` 都在打开 `FORCE` 的同一个事务里
+  完成这件事。
+- **策略**（`026_rls_policies.sql`、`028_rls_policies_owned_surfaces.sql`、`029`、`030`、`031`
+  ——共**十五张表**）：上述各表与 `audit_log` 一律 `ENABLE` + `FORCE ROW LEVEL
   SECURITY`（`FORCE` 让表属主同样受约束），`agenthub_row_visible(owner_id)` 读三个事务内设置——
   `app.owner_id`（登录用户）、`app.bypass`（管理员）、`app.system`（进程内路径：任务状态机、事件扇出、
   seed、迁移、备份、审计写入）。设置未注入时读作 NULL，于是忘记注入身份的请求**什么也看不到**：
@@ -704,3 +744,54 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   他人任务一律返回 `task_not_found` 而非 403，避免 ID 枚举；匿名调用这些方法返回 `-32009 unauthenticated`。
 - `pushNotification/set` 用 `taskId`、`get` 用 `id` 的历史不一致：两个字段都接受，同时出现时以规范字段为准，
   且全部任务维度方法共用一个解析函数——客户端一套实现即可覆盖全部。
+
+---
+
+## 十六、共享文件与连接器审批（M4）
+
+两个此前只停留在设想上的能力：一份人真的能交给 agent 的文件，一个 `ask_first` 之后人真的能回答的决定。
+
+### 共享文件
+
+字节存在数据库之外，库里只放元数据。
+
+- **开关**：`AGENTHUB_FILES_STORE=off|local|s3`，默认 **off**。关着时所有 `/api/files*` 一律回
+  `503 files_disabled`，界面直接说明，而不是显示空列表。
+- **端点**：`GET /api/files`（`{ files, maxBytes, backend }`）、`POST /api/files`（multipart，取第一个
+  文件分片）、`GET /api/files/{id}`、`GET /api/files/{id}/content`（经 `http.ServeContent` 的附件下载，
+  因此 `Range` 可用、大文件可续传）、`DELETE /api/files/{id}`。权限沿用 `tasks:read` /
+  `tasks:write`，不新增权限码。
+- **上限与完整性**：`AGENTHUB_FILES_MAX_BYTES`（32 MiB）在字节**流入临时文件的过程中**判定，超限的
+  上传根本到不了存储（`413 file_too_large`）。每行都带 sha256 与嗅探出的 MIME；只有嗅探给不出结论时
+  才采信客户端声明的类型。文件名只保留基名，空名回落 `upload.bin`。
+- **本地后端**：先写临时文件，再以 `rename` 原子就位（最终键下永不出现半个文件），权限 `0600`，
+  目录按摘要前两位十六进制分片。键不符合 `<2 位十六进制>/<64 位十六进制>`（含任何 `..`）时，
+  在碰到文件系统之前就被拒绝。
+- **S3 兼容后端**（RustFS、MinIO、AWS）：SigV4 用标准库手写，模块**零新依赖**。必须 path-style
+  （RustFS/MinIO），单次 `PUT` 带 `x-amz-content-sha256`（不做分片、不做 chunked 签名——单文件本来就
+  有上限），密钥只从 `_ACCESS_KEY_ENV` / `_SECRET_KEY_ENV` **点名的**环境变量读取。日志只记后端、
+  对象键前缀与字节数，绝不记签名、密钥或带 userinfo 的 endpoint。
+- **归属**：`shared_files.owner_id` + `FORCE` 行级安全，第二个账号即使拿到 id 也无法列出、读取或删除
+  别人的文件；不是你的行回 `404 file_not_found`，而不是 `403`。
+- **测试**：`internal/files`（上限、哈希、文件名处理、后端故障、键穿越、取消）语句覆盖 86.4%；
+  `s3_test.go` 用 `httptest` 桩验证签名头、路径转义、不跟随重定向、传输失败与体积不符；
+  `internal/handlers/files_test.go` 覆盖 HTTP 面——上传 → 列表 → 元数据 → 带 `Range` 下载 → 删除，
+  外加 413 / 415 / 404 / 502 / 503。
+
+### 连接器审批
+
+`ask_first` 此前只挂起一个任务；现在它把「人做决定所需的一切」一并留下，队列由这些任务派生，
+因此**没有审批表**。
+
+- **挂起什么**：`Hub.ParkConnector` 把 `metadata.connectorApproval =
+  { action, args, requestedBy, resourceId }` 写进 `input-required` 任务。控制台因此能显示连接器、
+  动作名与参数，而不是一串任务 id。
+- **队列**：`GET /api/connectors/approvals`（`tasks:read`）直接读这些挂起任务。`hub.TaskStateLister`
+  是**可选端口**——GORM 仓储按 `state` 过滤（索引 + 行级隔离），内存实现过滤切片；既有
+  `TaskRepository` 接口一字未改，因此没有测试替身被打破。
+- **决策**：`POST /api/connectors/approvals/{id}/approve` 带着挂起的参数恢复任务，连接器**恰好执行
+  一次**；`POST .../reject` 取消任务，什么都不执行。不是待审批、已决策、或不属于调用者的任务回
+  `404 connector_approval_not_found`；重复决策回 `409 connector_approval_closed`。
+- **测试**：`handlers/connectors_approval_test.go` 覆盖派生队列、批准只跑一次、重复批准冲突、
+  拒绝后再批准冲突、未知与无关任务，以及 Hub 未接线时的 `503`；`hub/orchestrator_park_test.go`
+  钉住挂起元数据。

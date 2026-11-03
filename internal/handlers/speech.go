@@ -33,7 +33,7 @@ func (d Deps) handleThreadAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	th, err := d.Threads.GetThread(r.Context(), id, "")
+	th, err := d.Threads.GetThread(r.Context(), id, callerID(r))
 	if err != nil || th == nil {
 		httputil.WriteError(w, http.StatusNotFound, httputil.CodeChannelNotFound)
 		return

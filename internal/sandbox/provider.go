@@ -57,7 +57,23 @@ type providerFunc struct {
 
 func (p providerFunc) Name() string { return p.name }
 
-func (p providerFunc) Describe(context.Context) (Descriptor, error) { return p.desc, nil }
+// Describe fills in a name and, when a test left it empty, the whole network
+// vocabulary.
+//
+// The default is deliberate: this stub is not a boundary, so declaring nothing
+// would make every case that builds a lease fail the capability gate in
+// Manager.Acquire and prove nothing about the sink under test. A test that wants
+// to exercise the gate sets Network itself.
+func (p providerFunc) Describe(context.Context) (Descriptor, error) {
+	desc := p.desc
+	if desc.Name == "" {
+		desc.Name = p.name
+	}
+	if desc.Network == nil {
+		desc.Network = []string{NetworkNone, NetworkBridge, NetworkPlatform}
+	}
+	return desc, nil
+}
 
 func (p providerFunc) Probe(context.Context) (Availability, error) {
 	return Availability{Available: true}, nil

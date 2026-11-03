@@ -19,6 +19,7 @@ import (
 	"agenthub/internal/channels"
 	"agenthub/internal/computers"
 	"agenthub/internal/config"
+	"agenthub/internal/files"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
 	"agenthub/internal/knowledge"
@@ -72,6 +73,11 @@ type Deps struct {
 	Schedules schedules.Store
 	// Knowledge persists RAG chunks (mock). Nil when disabled.
 	Knowledge knowledge.Store
+	// Files is the shared-file store: metadata plus a byte backend (local disk or
+	// S3-compatible). It is always non-nil, because "no backend configured" is a
+	// supported state the endpoints must report (files_disabled) rather than a
+	// nil pointer to guard everywhere.
+	Files *files.Service
 	// Router is the scheduler: the single writer that turns triggers into
 	// tickets and launches them as tasks. Nil when the feature is off, in which
 	// case its endpoints answer 503 rather than 404 and the thread / channel
@@ -191,6 +197,13 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("PUT /api/connectors/{id}/policy", d.requirePermission(authz.PermResourcesWrite, d.handlePutConnectorPolicy))
 	mux.HandleFunc("GET /api/connectors/{id}/actions", d.requirePermission(authz.PermResourcesRead, d.handleListConnectorActions))
 	mux.HandleFunc("POST /api/connectors/{id}/actions", d.requirePermission(authz.PermResourcesWrite, d.handleConnectorAction))
+	// The "ask first" queue. It is derived from the parked tasks rather than
+	// stored separately, so an approval cannot exist as a row without a task
+	// behind it. Read and write hang off tasks permissions: approving is running
+	// work, the same act as sending a message.
+	mux.HandleFunc("GET /api/connectors/approvals", d.requirePermission(authz.PermTasksRead, d.handleListConnectorApprovals))
+	mux.HandleFunc("POST /api/connectors/approvals/{id}/approve", d.requirePermission(authz.PermTasksWrite, d.handleApproveConnectorAction))
+	mux.HandleFunc("POST /api/connectors/approvals/{id}/reject", d.requirePermission(authz.PermTasksWrite, d.handleRejectConnectorAction))
 
 	// F11: Agent computers — per-agent sandboxes (browser / shell / screen) the
 	// console may attach to. Read/write hang off resources permissions.
@@ -268,6 +281,19 @@ func Register(d Deps) http.Handler {
 
 	// Voice: a recorded clip is transcribed server side and forwarded into the thread.
 	mux.HandleFunc("POST /api/threads/{id}/audio", d.requirePermission(authz.PermTasksWrite, d.handleThreadAudio))
+
+	// Shared files: bytes a person uploads and can hand to an agent later. The
+	// bytes live behind a backend (local disk by default, S3-compatible on
+	// request); this surface is the same either way. Read/write hang off tasks
+	// permissions, the pair the thread and channel surfaces use, because a shared
+	// file is context for a task.
+	mux.HandleFunc("GET /api/files", d.requirePermission(authz.PermTasksRead, d.handleListFiles))
+	mux.HandleFunc("POST /api/files", d.requirePermission(authz.PermTasksWrite, d.handleUploadFile))
+	mux.HandleFunc("GET /api/files/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetFile))
+	// The download route serves bytes, not JSON: no Accept negotiation, no
+	// envelope, and Range support so a large upload can be resumed.
+	mux.HandleFunc("GET /api/files/{id}/content", d.requirePermission(authz.PermTasksRead, d.handleDownloadFile))
+	mux.HandleFunc("DELETE /api/files/{id}", d.requirePermission(authz.PermTasksWrite, d.handleDeleteFile))
 
 	// Administration: users, groups, roles, permissions and resource grants.
 	mux.HandleFunc("GET /api/users", d.requirePermission(authz.PermUsersManage, d.handleListUsers))

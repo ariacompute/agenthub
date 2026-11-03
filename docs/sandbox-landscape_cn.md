@@ -34,7 +34,21 @@
 4. **`mock` 只用来保持离线。** 单测、`make web-dev`、演示显式指定；它不执行任何东西，并在每次回执里写明。
 5. **提供方永不被推断。** 资源声明了自己拿不到的提供方时，在注册阶段就被拒绝，而不是运行期降级。
 
-## 4. agenthub 的位置
+## 4. 能力声明与准入
+
+`Describe()` 是 manager 在「租约存在之前」就执行的契约：`Network` 列出该提供方**真能施加**的网络模式，
+`Requires` 是探针必须找到的二进制，`EnvKeys` 是垫片需要的环境变量，`Source` 说明它是内置、声明式、
+远端节点还是平台垫片。`delegated` 是给「把 profile 交给别人的执行点」的那一层的诚实取值——它说的是
+边界在谁那里，而不是没有边界。
+
+落到各后端：`docker` 声明 `none|bridge|platform`，并把 `platform` 交给守护进程的默认网络（不再发字面
+`bridge`）；`bwrap` 只声明 `none|platform`，因为 `--share-net` 是宿主网络命名空间、它给不出 NAT 接口；
+`local` 只声明 `platform`；远端节点、平台垫片与未声明网络的模板一律声明 `delegated`。
+
+`Manager.Acquire` 拒绝「提供方从未声明过的模式」——`sandbox_capability_unavailable`，且提供方一次都
+不会被调用。在这条规则出现之前，声明只是装饰：向 bubblewrap 要 `bridge` 会静默拿到宿主的网络。
+
+## 5. agenthub 的位置
 
 agenthub 是**控制面**：决定谁能执行、在哪执行、限额多少、存活多久，并记录发生了什么。它刻意不是沙盒实现本身。提供方目录就是那条缝：新增一档意味着注册一个提供方或写一段模板，而不是改 hub、改适配器、改控制台。
 

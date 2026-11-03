@@ -67,7 +67,28 @@ referenced by environment variable name, never stored.
    provider it cannot get is rejected at registration time, not downgraded at
    run time.
 
-## 4. Where agenthub sits
+## 4. Declared capabilities
+
+`Describe()` is the contract the manager enforces before a lease exists: `Network`
+lists the modes a provider can actually apply, `Requires` the binaries a probe has
+to find, `EnvKeys` the environment variables a shim needs, and `Source` whether it
+is built in, declarative, a remote node or a platform shim. `delegated` is the
+honest value for a layer that hands the profile to somebody else's enforcement
+point: it says where the boundary lives, not that none exists.
+
+Per backend that means: `docker` advertises `none|bridge|platform` and maps
+`platform` onto the daemon's own default network (never a literal `bridge`);
+`bwrap` advertises `none|platform` only, because `--share-net` is the host's
+network namespace and there is no NAT interface to offer; `local` advertises
+`platform` and nothing else; remote nodes, platform shims and templates that
+declare no network all advertise `delegated`.
+
+`Manager.Acquire` refuses a profile whose mode the provider never declared —
+`sandbox_capability_unavailable`, with the provider never called. Before that
+rule existed the declaration was decoration, and asking bubblewrap for `bridge`
+silently returned the host's network.
+
+## 5. Where agenthub sits
 
 agenthub is the **control plane**: it decides who may execute, where, with what
 limits, for how long, and it records what happened. It is deliberately not a
