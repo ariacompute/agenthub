@@ -6,7 +6,7 @@ export const shellCopy = {
     navRegistry: 'Registry',
     navTrace: 'Task trace',
     navTopology: 'Topology',
-    navRegistries: 'Registries',
+    navRegistries: 'Namespaces',
     navSources: 'Sources',
     navPlayground: 'Playground',
     navAdmin: 'Administration',

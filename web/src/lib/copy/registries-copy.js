@@ -1,7 +1,7 @@
-// Screen 4 — Registries: namespaces and the curator's queue.
+// Screen 4 — Namespaces and the curator's queue.
 export const registriesCopy = {
   'en': {
-    title: 'Registries',
+    title: 'Namespaces',
     subtitle: 'Namespaces and the curation queue',
     actionNew: 'New namespace',
     drawerTitle: 'Namespace',
