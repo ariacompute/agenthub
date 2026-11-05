@@ -789,3 +789,41 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
 - 文件：上传→列表→元数据→下载（含 `Range` 206）→删除全链路通；超限 413、缺文件 404、
   功能关闭 503、后端故障 502 都有用例；`content` 下载带 `nosniff` 与 attachment。
 - 能力准入：申请后端未声明的网络模式 → `409 sandbox_capability_unavailable`，后端零调用。
+
+## 12. 本地运行链路修复（M3 网络隔离回归，2026-11-05）
+
+### 12.1 边界
+
+- 只修 `make run` / `make db-up` / `make up` 的本地启动链路：compose 网络拓扑、宿主可达性
+  校验、两套 DSN 与端口表口径。不改 A2A / `/api` 契约、权限模型、schema 与业务代码。
+- `data` 保持 `internal: true`，控制台侧与数据库的网络隔离不得放宽。
+
+### 12.2 行为契约
+
+- postgres 同时加入 `data` 与 `hostpg`；`hostpg` 只有 postgres 一个成员且关闭 masquerade，
+  唯一用途是让 Docker 发布宿主端口（只连 internal 网络的容器会记下 `PortBindings`，
+  但 `NetworkSettings.Ports` 仍为 null）。
+- 宿主端口与容器内端口统一由 `POSTGRES_PORT`（默认 5434）决定，两端一起移动；compose 的
+  默认容器内 DSN、`scripts/compose-ports.sh` 的容器端口常量、README 端口表都跟随它。
+- `.env` / `.env.example` 的 `DATABASE_URL` 是**容器内**地址 `postgres:5434`（compose 会把它
+  注入 agenthub 容器）；`make run` 内联覆盖成 `localhost:5434`，两者互不泄漏。
+- `make db-up` 的 ready 判定 = 容器内 `pg_isready` 通过 **且** 宿主
+  `127.0.0.1:POSTGRES_PORT` 的 TCP 可连。
+
+### 12.3 异常
+
+- 端口未发布或数据库未起：30s 后 `make db-up` 失败，打印
+  `container pg_isready=<0|1>, host port=<0|1>` 与 `docker compose ps postgres`；
+  不允许把容器健康当成宿主可达，也不允许把错误拖到 `go run` 才暴露。
+- `POSTGRES_PORT` 被覆盖时，宿主 DSN、容器内监听、健康探测、端口表四处必须一致；
+  不一致由 `docker compose config` 与 `make db-up` 暴露，不静默降级。
+
+### 12.4 验收标准
+
+- `docker compose port postgres 5434` 返回真实宿主端口，`NetworkSettings.Ports` 非 null。
+- `make db-up` 打印 `postgres ready on localhost:5434`；异常路径能给出 `hp=0` 诊断。
+- `make run` 完成 Open → Migrate → Seed，`curl :3500/healthz` 返回 `status: ok`。
+- `make ports` 打印 `5434 -> 5434` 与 `inside compose it is postgres:5434`。
+- 宿主 DSN 的库门控用例 `go test ./internal/store/` 全绿；`docker compose config` 中
+  agenthub 的 DSN 为 `postgres:5434` 而非 `localhost`。
+- `docker compose config -q`、`sh -n scripts/compose-ports.sh` 通过。

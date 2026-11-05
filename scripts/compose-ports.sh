@@ -14,7 +14,9 @@ set -eu
 cd "$(dirname "$0")/.."
 
 AH_CONTAINER_PORT=3500
-PG_CONTAINER_PORT=5432
+# docker-compose.yml runs postgres on POSTGRES_PORT inside the container as
+# well as publishing it on the host; both ends move together.
+PG_CONTAINER_PORT="${POSTGRES_PORT:-5434}"
 WEB_CONTAINER_PORT=5173
 
 AH_HOST_PORT="${AGENTHUB_HTTP_PORT:-3500}"
@@ -92,7 +94,7 @@ printf '  %-52s %s\n' "http://127.0.0.1:${ah}/.well-known/agent.json" 'A2A Agent
 printf '  %-52s %s\n' "POST http://127.0.0.1:${ah}/a2a" 'A2A JSON-RPC: message/send, message/stream, tasks/*'
 printf '  %-52s %s\n' "http://127.0.0.1:${ah}/api/*" 'control plane: resources, tasks, events, push records'
 printf '  %-52s %s\n' "http://127.0.0.1:${ah}/healthz" 'health probe, also the container healthcheck'
-printf '  %-52s %s\n' "postgres://agenthub@localhost:${pg}/agenthub" 'host DSN (inside compose it is postgres:5432)'
+printf '  %-52s %s\n' "postgres://agenthub@localhost:${pg}/agenthub" "host DSN (inside compose it is postgres:${PG_CONTAINER_PORT})"
 if [ "$webState" != "down" ]; then
 	printf '  %-52s %s\n' "http://127.0.0.1:${web}/" 'console dev server (proxies /api, /a2a, /healthz)'
 fi

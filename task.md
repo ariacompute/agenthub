@@ -1163,3 +1163,46 @@ HTTPS 目标——SSRF 防护会拒掉一切私网地址，本地 `httptest` 桩
 - `go vet ./...`、`go test ./...` 全绿；`web` `bun run test` 455 用例全绿。
 - 本机无库：`internal/store` / `tests/` 的库门控用例仍按既有口径跳过，`RowsAffected`、
   RLS 与 `-race` 由 CI 把关。
+
+## M19 — 本地运行链路修复：宿主端口发布与两套 DSN（bug fix，2026-11-05）
+
+`make run` 报 `dial tcp 127.0.0.1:5434: connect: connection refused`。容器本身 healthy、
+postgres 明确在 5434 监听，但 `docker compose ps` 的 PORTS 只有 EXPOSE、
+`docker compose port postgres 5434` 返回 `:0`、`NetworkSettings.Ports` 全 null：
+`HostConfig.PortBindings` 记了 `5434:5434`，却没有任何宿主发布。根因是网络隔离加固后
+postgres 只挂在 `internal: true` 的 `data` 网络上，Docker 不给只连 internal 网络的容器
+发布端口；`make db-up` 又只用 `docker compose exec pg_isready` 检查容器内，于是静默放行，
+错误一直拖到 `go run`。同一改动还留下几处口径漂移：`.env.example` 的 `localhost` DSN 会被
+注入 agenthub 容器、`compose-ports.sh` 仍按容器内 5432 探测、README 端口表仍写
+`5434 -> 5432`、compose 默认 DSN 端口硬编码 5434 不跟随 `POSTGRES_PORT`。
+
+### 1. 改动
+
+- `docker-compose.yml`：新增 `hostpg` 网络（仅 postgres 加入、关闭 masquerade，`data` 保持
+  internal）；默认容器内 DSN 的端口改跟随 `POSTGRES_PORT`。
+- `Makefile`：`db-up` 增加宿主端口 TCP 探测，失败时打印容器内/宿主两项状态和容器状态再退出。
+- `.env.example` / 本地 `.env`：`DATABASE_URL` 改为容器内地址 `postgres:5434`；宿主 DSN
+  继续由 `make run` 内联提供。
+- `scripts/compose-ports.sh`：容器端口常量跟随 `POSTGRES_PORT`，脚注同步。
+- `README.md` / `README_cn.md`：两套 DSN 的用途、端口表 `5434 -> 5434`、`hostpg` 的缘由
+  与安全边界；`requirements.md` §12 记录边界、契约、异常与验收。
+
+### 2. 校验（WSL2 / Docker 29.1.3）
+
+- `docker compose config -q`、`sh -n scripts/compose-ports.sh`、`make -n db-up` 通过；
+  config 里 agenthub 的 DSN 为 `postgres://agenthub:agenthub@postgres:5434/agenthub`。
+- `docker compose up -d --force-recreate postgres` 后：`0.0.0.0:5434->5434/tcp`、
+  `docker compose port postgres 5434` = `0.0.0.0:5434`、宿主 TCP 可连。
+- `make db-up` → `postgres ready on localhost:5434`。
+- `make run` 端到端启动成功，`curl :3500/healthz` 返回 `status: ok`，日志中
+  Open → Migrate → Seed 与各仓储查询正常；验证结束已停服，3500 无残留监听。
+- 宿主 DSN 的真实库用例
+  `DATABASE_URL=postgres://agenthub:agenthub@localhost:5434/agenthub go test -count=1 ./internal/store/`
+  → `ok 3.026s`。
+- `make ports` → `5434 -> 5434` / `inside compose it is postgres:5434`。
+- 异常路径：用临时 compose override（`ports: !reset []`，用完即删）制造"容器内 healthy
+  但宿主端口未发布"，`make db-up` 30s 后失败并打印
+  `container pg_isready=1, host port=0 (hp=0 means the compose port publish is missing)`，
+  `make` 以非 0 退出；撤掉 override 重建后 `make db-up` 恢复为 ready。
+- 未跑 `make up` 的镜像全量构建（本次无 Dockerfile / Go / 前端改动），容器化 DSN 由
+  `docker compose config` 与 `internal/store` 的宿主连库用例间接覆盖。

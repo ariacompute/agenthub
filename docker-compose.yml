@@ -9,9 +9,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agenthub}
       POSTGRES_USER: ${POSTGRES_USER:-agenthub}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agenthub}
-    # Listen on 5434 inside the compose network (and publish the same port to the
-    # host) so the app connects with `postgres:5434`. POSTGRES_PORT moves the
-    # published host port and the container port follows it.
+    # Listen on POSTGRES_PORT (default 5434) on every attached network and
+    # publish the same port to the host, so `postgres:<port>` (compose) and
+    # `localhost:<port>` (make run) both resolve. POSTGRES_PORT moves both ends
+    # together. The host-side publication needs the `hostpg` network below.
     command: ["postgres", "-p", "${POSTGRES_PORT:-5434}"]
     ports:
       - "${POSTGRES_PORT:-5434}:${POSTGRES_PORT:-5434}"
@@ -41,8 +42,13 @@ services:
     mem_limit: 2g
     # The database is reachable only from the application network: nothing on
     # the console side (not even the vite dev server) can open a connection.
+    # `hostpg` carries no other service: Docker skips host-port publication for
+    # a container attached only to an `internal` network, so `make run`'s
+    # localhost DSN needs one non-internal endpoint. See the network definition
+    # at the bottom of this file.
     networks:
       - data
+      - hostpg
     restart: unless-stopped
 
   # Single binary: A2A data plane (/.well-known/agent.json, POST /a2a),
@@ -81,7 +87,7 @@ services:
       # override the connection. The default keeps the bundled postgres usable for
       # local/dev. When you override it, the password must match POSTGRES_PASSWORD
       # below.
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:5434/${POSTGRES_DB:-agenthub}}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:${POSTGRES_PORT:-5434}/${POSTGRES_DB:-agenthub}}
       # Identities live in Postgres. The bootstrap administrator is upserted at
       # every boot; without it the first registered account becomes the owner.
       AGENTHUB_BOOTSTRAP_ADMIN_EMAIL: ${AGENTHUB_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
@@ -212,3 +218,13 @@ networks:
   edge: {}
   data:
     internal: true
+  # Only postgres joins this network. Docker skips port publication for a
+  # container whose every network is `internal`: PortBindings is recorded but
+  # NetworkSettings.Ports stays null, so `ports: 5434:5434` becomes a no-op and
+  # a host-run `make run` gets "connection refused" on localhost:5434. Keeping
+  # the publication on a network no other service joins preserves the console
+  # isolation; disabling masquerade keeps the database from gaining a route out.
+  hostpg:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

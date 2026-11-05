@@ -154,12 +154,17 @@ down:
 
 db-up:
 	docker compose up -d postgres
-	@echo "waiting for postgres to accept connections on localhost:$(POSTGRES_PORT)"
+	@echo "waiting for postgres on localhost:$(POSTGRES_PORT) (container + published port)"
 	@for i in $$(seq 1 30); do \
-		docker compose exec -T postgres pg_isready -q -U agenthub -p $(POSTGRES_PORT) && exit 0; \
+		pg=0; hp=0; \
+		docker compose exec -T postgres pg_isready -q -U agenthub -p $(POSTGRES_PORT) >/dev/null 2>&1 && pg=1; \
+		bash -c 'exec 3<>/dev/tcp/127.0.0.1/$(POSTGRES_PORT)' 2>/dev/null && hp=1; \
+		if [ "$$pg" = 1 ] && [ "$$hp" = 1 ]; then echo "postgres ready on localhost:$(POSTGRES_PORT)"; exit 0; fi; \
 		sleep 1; \
 	done; \
-	echo "postgres did not become ready in time"; exit 1
+	echo "postgres not reachable on localhost:$(POSTGRES_PORT) after 30s"; \
+	echo "container pg_isready=$$pg, host port=$$hp (hp=0 means the compose port publish is missing)"; \
+	docker compose ps postgres; exit 1
 
 db-down:
 	docker compose down

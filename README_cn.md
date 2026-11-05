@@ -41,7 +41,14 @@ curl localhost:3500/.well-known/agent.json
 ```
 
 `DATABASE_URL` **必填**：缺失时 `config.Validate` 拒绝启动（不存在无库降级路径）。
-本地地址：`postgres://agenthub:agenthub@localhost:5434/agenthub`（见 `.env.example`）。
+两处 DSN 的主机不同，别混用：
+
+- `.env`（复制自 `.env.example`）填**容器内**地址
+  `postgres://agenthub:agenthub@postgres:5434/agenthub`：compose 会把它注入 `agenthub`
+  容器，容器里的 `localhost` 是容器自己，不是数据库。
+- `make run` 会内联覆盖成 `postgres://agenthub:agenthub@localhost:5434/agenthub`，供宿主
+  进程使用。`make db-up` 现在同时等容器内健康检查与**宿主端口可达**，端口没发布会立刻
+  报错并打印诊断，不会再拖到 `go run` 才抛 `connection refused`。
 
 若是加固的生产部署而非本地开发，从加固模板起步更省事：`cp .env.sec.example .env`（见
 [安全加固](#安全加固)）。它已预先套用下面全部生产防护项，并仅带占位密钥，需你先替换才能启动。
@@ -126,7 +133,7 @@ agenthub listening ports
 
   SERVICE            HOST -> CTR      STATE      PURPOSE
   agenthub-server    3500 -> 3500     healthy    the only HTTP listener: console + A2A + control plane + healthz
-  postgres           5434 -> 5432     healthy    the only state: resources, tasks, spans, events, push records
+  postgres           5434 -> 5434     healthy    the only state: resources, tasks, spans, events, push records
 
   ENDPOINT                                            USE
   http://127.0.0.1:3500/                              Vue 3 console (bundle baked into the image)
@@ -134,12 +141,16 @@ agenthub listening ports
   POST http://127.0.0.1:3500/a2a                      A2A JSON-RPC: message/send, message/stream, tasks/*
   http://127.0.0.1:3500/api/*                         control plane: resources, tasks, events, push records
   http://127.0.0.1:3500/healthz                       health probe, also the container healthcheck
-  postgres://agenthub@localhost:5434/agenthub         host DSN (inside compose it is postgres:5432)
+  postgres://agenthub@localhost:5434/agenthub         host DSN (inside compose it is postgres:5434)
 ```
 
 上面这些端点在容器内同属**一个监听端口**（恒为 3500），宿主侧映射只有 compose 知道，所以要这张表。
 服务自身启动时也会在日志里逐条打印同样的端点清单，因此 `docker compose up`（前台）或
 `docker compose logs -f agenthub` 也能看到用途说明。
+
+数据库还额外挂在专用的 `hostpg` 网络：Docker 不会给**只连 `internal` 网络**的容器发布宿主端口，
+缺了它 `ports: 5434:5434` 就是空配置，`make run` 必然连不上。`hostpg` 只有 postgres 一个成员，
+且关闭了 masquerade，因此控制台侧仍碰不到数据库，数据库也没多出一条出网路径。
 
 ### Docker compose
 

@@ -45,8 +45,15 @@ curl localhost:3500/.well-known/agent.json
 ```
 
 `DATABASE_URL` is **mandatory**: `config.Validate` refuses to start without it (there is no
-database-less fallback). Local value:
-`postgres://agenthub:agenthub@localhost:5434/agenthub` (see `.env.example`).
+database-less fallback). Two different hosts are involved:
+
+- `.env` (copied from `.env.example`) holds the **in-container** value
+  `postgres://agenthub:agenthub@postgres:5434/agenthub`: compose injects it into the
+  `agenthub` container, where `localhost` is the container itself, not the database.
+- `make run` overrides it inline with `postgres://agenthub:agenthub@localhost:5434/agenthub`
+  for the host-run server. `make db-up` waits for both the container's healthcheck **and**
+  the published host port, so a missing port publish fails early with an explicit message
+  instead of surfacing as `connection refused` from `go run`.
 
 For a hardened production deployment rather than local development, start from the
 security-hardened template instead: `cp .env.sec.example .env` (see
@@ -141,7 +148,7 @@ agenthub listening ports
 
   SERVICE            HOST -> CTR      STATE      PURPOSE
   agenthub-server    3500 -> 3500     healthy    the only HTTP listener: console + A2A + control plane + healthz
-  postgres           5434 -> 5432     healthy    the only state: resources, tasks, spans, events, push records
+  postgres           5434 -> 5434     healthy    the only state: resources, tasks, spans, events, push records
 
   ENDPOINT                                            USE
   http://127.0.0.1:3500/                              Vue 3 console (bundle baked into the image)
@@ -149,12 +156,18 @@ agenthub listening ports
   POST http://127.0.0.1:3500/a2a                      A2A JSON-RPC: message/send, message/stream, tasks/*
   http://127.0.0.1:3500/api/*                         control plane: resources, tasks, events, push records
   http://127.0.0.1:3500/healthz                       health probe, also the container healthcheck
-  postgres://agenthub@localhost:5434/agenthub         host DSN (inside compose it is postgres:5432)
+  postgres://agenthub@localhost:5434/agenthub         host DSN (inside compose it is postgres:5434)
 ```
 
 Everything above is one listener inside the container (always 3500); the published host port is
 compose-only knowledge, hence the table. The server itself logs the same endpoint list on boot, so
 an attached `docker compose up` or `docker compose logs -f agenthub` spells it out too.
+
+The database also joins a dedicated `hostpg` network: Docker does not publish a host port for a
+container attached only to an `internal` network, so without it `ports: 5434:5434` silently does
+nothing and `make run` cannot connect. Only postgres joins `hostpg` and masquerade is disabled
+there, so the console side still cannot reach the database and the database gains no outbound
+route.
 
 ### Docker compose
 
