@@ -16,8 +16,8 @@ endpoints by any agent that speaks the protocol.
   `TaskRepository`, `EventRepository`, `PushRepository` — are declared by their
   consuming packages, with implementations in `internal/store`, so `hub` and
   `registry` never import `store`.
-- **Single binary**: Go 1.27 + the standard library `net/http`, no framework; GORM is
-  the only production dependency.
+- **Single binary**: Go 1.27 + the standard library `net/http`, no framework;
+  production dependencies are GORM + pgx.
 - **Default port 3500**; the compose database publishes host port **5434** (avoiding
   5432 / 5433).
 - **Governed catalogue**: a record belongs to a namespace, carries a curation

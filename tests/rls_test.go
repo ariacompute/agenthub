@@ -315,10 +315,12 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		// by-id endpoints used to answer any id, so this list is also the
 		// regression guard for that class of bug.
 		"channels", "schedules", "computers",
-		// 029 and 030 closed the last two gaps: a delivery receipt and a thread
+		// 029 and 030 closed two more gaps: a delivery receipt and a thread
 		// message were reached only through their parent row, so the parent was
 		// the whole guarantee. Now the rows carry the owner themselves.
 		"channel_messages", "threads", "thread_messages",
+		// 031 added the shared-file surface; it carries its own owner.
+		"shared_files",
 	}
 	for _, table := range expected {
 		var enabled, forced bool
@@ -361,6 +363,7 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		"audit_log_read", "audit_log_append", "audit_log_retention",
 		"channels_owner_access", "schedules_owner_access", "computers_owner_access",
 		"channel_messages_owner_access", "threads_owner_access", "thread_messages_owner_access",
+		"shared_files_owner_access",
 	} {
 		if !names[want] {
 			t.Fatalf("policy %q is missing, got %v", want, names)

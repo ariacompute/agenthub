@@ -411,7 +411,7 @@ POST   /api/router/passes                     → 202 {kicked:true}（tasks:writ
 GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 router_event，先回放再实时）
 ```
 
-#### 4.2.1 路由分组索引（当前 128 条 `/api` 路由）
+#### 4.2.1 路由分组索引（当前 136 条 `/api` 路由）
 
 不逐条罗列，避免与 `handlers.go` 反复漂移；每条路径的请求/响应示例由控制台 `/docs` 屏给出
 （`web/src/lib/docs-content.js`），路由搬动时两处必须同步。
@@ -427,7 +427,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | 导出 | 2 | `/api/export/mcp`、`/api/export/agent-card` | `resources:read` |
 | 工作台与线程 | 7 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`、`{id}/messages`、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
 | 通道 | 9 | `/api/channels`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/deliveries`、`{id}/deliveries/{did}/retry`、`{id}/webhook`（**公开，签名校验**）、`{id}/deliver` | `tasks:read` / `tasks:write`；webhook 无会话 |
-| 连接器 | 4 | `/api/connectors`、`{id}/policy`（PUT）、`{id}/actions`（GET/POST） | `resources:read` / `resources:write` |
+| 连接器 | 7 | `/api/connectors`、`{id}/policy`（PUT）、`{id}/actions`（GET/POST）、`approvals`（GET）、`approvals/{id}/approve|reject`（POST） | `resources:read` / `resources:write`；审批队列用 `tasks:read` / `tasks:write` |
 | 计算机 | 4 | `/api/computers`（GET/POST）、`{id}`（GET/DELETE） | `resources:read` / `resources:write` |
 | 目标与周期 | 6 | `/api/schedules`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/run` | `tasks:read` / `tasks:write` |
 | 调度器 | 13 | `/api/router/*`（stats / triggers / tickets / policies / passes / events） | `tasks:read` / `tasks:write` |
@@ -438,6 +438,13 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | 用户与授权 | 18 | `/api/users`（5）、`{id}/sessions`、`/api/permissions`、`/api/roles`（4）、`/api/groups`（4）、`/api/grants`（3） | `users:manage` / `roles:manage` / `sessions:manage` / `grants:manage` |
 | 备份 | 8 | `/api/backups`（GET/POST）、`schedule`（GET/PUT）、`{id}`（GET/DELETE）、`{id}/download`、`{id}/restore` | `backups:manage` |
 | API Key | 5 | `/api/api-keys`（GET/POST）、`{id}`（GET/PUT/DELETE） | `requireAuth`（各自持有者的 key） |
+| 共享文件 | 5 | `/api/files`（GET/POST）、`{id}`（GET/DELETE）、`{id}/content` | `tasks:read` / `tasks:write`；下载支持 `Range` |
+
+上表分组条数合计 **136** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
+另有 5 条协议面路由（`POST /a2a`、`GET /a2a/stream`、`GET /a2a/agent-card`、
+`GET /.well-known/agent.json`、`GET /healthz`），合计 **141** 条 `mux.HandleFunc`。
+`/docs` 屏与 `docs/*.md` 的分组口径略有不同（把 `/api/schedules/{id}/run` 归入调度器组，
+故该组为 14 条），但端点集合一致。
 
 分组内不新增权限码：沙盒复用 `resources:*` / `tasks:*`，审计新增唯一的 `audit:read`。
 
@@ -649,9 +656,10 @@ M3 各块的逐项验收写在对应子文档（`requirements-security.md` §验
 
 - 功能：六类资源通道、任务状态机（`submitted → working → input-required → completed/failed/canceled`）、
   健康值**只由探测或运行写入**的语义、记录审批状态机。
-- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 128 条路由**，逐条给出方法、
-  路径、所需权限、请求体与响应体示例，按 §4.2.1 的分组组织（协议/鉴权/资源/命名空间/上游源/任务/
-  导出/工作台与线程/通道/连接器/计算机/目标与周期/调度器/沙盒与节点/知识/用户与授权/备份/API Key/审计）。
+- 接口：`/a2a` 七方法 + v0.1 别名 + Message/Task 形状；**`/api/*` 全部 136 条路由**，逐条给出方法、
+  路径、所需权限、请求体与响应体示例；无权限码的端点按 `public`（匿名）/ `session`（仅需登录）标注，
+  按 §4.2.1 的分组组织（协议/鉴权/资源/命名空间/上游源/任务/导出/工作台与线程/通道/连接器/计算机/
+  目标与周期/调度器/沙盒与节点/共享文件/知识/用户与授权/备份/API Key/审计）。
 - 沙盒：隔离层概念、类型目录与执行节点协议（与 `requirements-sandbox.md` 同源）。
 - 鉴权与错误码：会话 cookie、权限模型与 owner 语义；错误码按 HTTP 状态码分组 + 适配器码。
 

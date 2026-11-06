@@ -13,7 +13,7 @@ Agent 调用。
 - **持久层依赖倒置**：`ResourceStore` / `TaskRepository` / `EventRepository` /
   `PushRepository` 四个端口由消费方包定义，实现落在 `internal/store`，
   因此 `hub`、`registry` 不 import `store`。
-- **单二进制**：Go 1.27 + 标准库 `net/http`，无框架；GORM 是唯一生产依赖。
+- **单二进制**：Go 1.27 + 标准库 `net/http`，无框架；生产依赖为 GORM + pgx。
 - **默认端口 3500**，compose 数据库宿主端口 **5434**（避开 5432 / 5433）。
 - **受治理的目录**：条目归属一个命名空间、带审批状态、按
   `(namespace, name, version)` 去重；消费方只见已批准的条目。

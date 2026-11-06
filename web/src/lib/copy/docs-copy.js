@@ -70,7 +70,7 @@ export const docsCopy = {
     a2aBody:
       'A single JSON-RPC 2.0 endpoint answers every method below. The HTTP status stays 200 even when the task fails: read result.state, not the status line.',
     httpBody:
-      'The control plane the console itself talks to. Each route needs a session cookie; the permission column names what the caller must hold. A delete answers the way a read does: an id the caller cannot see is 404, whether it is already gone or belongs to somebody else. The console treats that answer as already done.',
+      'The control plane the console itself talks to. Routes marked `public` are anonymous; routes marked `session` need a signed-in session but no permission code; every other route needs a session cookie plus the permission named in the column. A delete answers the way a read does: an id the caller cannot see is 404, whether it is already gone or belongs to somebody else. The console treats that answer as already done.',
     authBody:
       'Identity comes from a session cookie, authorisation from permissions resolved once per request. Per-resource grants narrow this further.',
     errorsBody: 'Failures answer with a machine-readable code. Grouped here by the HTTP status they map to.',
@@ -310,7 +310,7 @@ export const docsCopy = {
     conceptsBody:
       'agenthub 登记五类资源外加一个自定义通道，再通过 A2A 调用它们。每次调用都会定位到一个资源、产生一个任务，并上报一个它真正实测过的健康值。',
     a2aBody: '下列所有方法共用同一个 JSON-RPC 2.0 端点。任务失败时 HTTP 状态码仍是 200：要看 result.state，而不是状态行。',
-    httpBody: '控制台自身使用的控制面。每条路由都需要会话 cookie；权限列标明调用方必须持有哪一项。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。',
+    httpBody: '控制台自身使用的控制面。标为 `public` 的路由无需会话；标为 `session` 的路由只需登录、不校验权限码；其余路由需要会话 cookie 加权限列标明的权限。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。',
     authBody: '身份来自会话 cookie，授权来自每次请求解析一次的权限集合。资源级授权会在此基础上进一步收窄。',
     errorsBody: '失败时返回机器可读的错误码。这里按它们映射到的 HTTP 状态码分组。',
 
@@ -544,7 +544,7 @@ export const docsCopy = {
     conceptsBody:
       'agenthub 登錄五類資源外加一個自訂通道，再透過 A2A 呼叫它們。每次呼叫都會定位到一個資源、產生一個任務，並回報一個它真正實測過的健康值。',
     a2aBody: '下列所有方法共用同一個 JSON-RPC 2.0 端點。任務失敗時 HTTP 狀態碼仍是 200：要看 result.state，而不是狀態行。',
-    httpBody: '主控台本身使用的控制面。每條路由都需要工作階段 cookie；權限欄標明呼叫方必須持有哪一項。刪除的答覆與讀取一致：讀不到的 id 一律 404——已經沒了與屬於他人的是同一個答案——主控台會把它當作「已經刪掉了」。',
+    httpBody: '主控台本身使用的控制面。標為 `public` 的路由無需工作階段；標為 `session` 的路由只需登入、不校驗權限碼；其餘路由需要工作階段 cookie 加權限欄標明的權限。刪除的答覆與讀取一致：讀不到的 id 一律 404——已經沒了與屬於他人的是同一個答案——主控台會把它當作「已經刪掉了」。',
     authBody: '身分來自工作階段 cookie，授權來自每次請求解析一次的權限集合。資源層級授權會在此基礎上進一步收斂。',
     errorsBody: '失敗時回傳機器可讀的錯誤碼。此處依它們對應的 HTTP 狀態碼分組。',
 
@@ -783,7 +783,7 @@ export const docsCopy = {
     a2aBody:
       'Un único endpoint JSON-RPC 2.0 responde a todos los métodos siguientes. El estado HTTP sigue siendo 200 aunque la tarea falle: lee result.state, no la línea de estado.',
     httpBody:
-      'El plano de control con el que habla la propia consola. Cada ruta necesita una cookie de sesión; la columna de permiso indica cuál exige. Una eliminación responde igual que una lectura: un id que el llamante no puede ver es 404, ya haya desaparecido o sea de otra persona. La consola interpreta esa respuesta como «ya está hecho».',
+      'El plano de control con el que habla la propia consola. Las rutas marcadas `public` son anónimas; las marcadas `session` solo requieren una sesión iniciada sin código de permiso; las demás necesitan una cookie de sesión y el permiso indicado en la columna. Una eliminación responde igual que una lectura: un id que el llamante no puede ver es 404, ya haya desaparecido o sea de otra persona. La consola interpreta esa respuesta como «ya está hecho».',
     authBody:
       'La identidad viene de una cookie de sesión y la autorización de permisos resueltos una vez por petición. Las concesiones por recurso lo estrechan aún más.',
     errorsBody: 'Los fallos responden con un código legible por máquina. Aquí se agrupan por el estado HTTP al que corresponden.',
@@ -1025,7 +1025,7 @@ export const docsCopy = {
     a2aBody:
       'Un seul endpoint JSON-RPC 2.0 répond à toutes les méthodes ci-dessous. Le statut HTTP reste 200 même si la tâche échoue : lisez result.state, pas la ligne de statut.',
     httpBody:
-      'Le plan de contrôle utilisé par la console elle-même. Chaque route exige un cookie de session ; la colonne permission indique lequel. Une suppression répond comme une lecture : un id que l’appelant ne voit pas renvoie 404, qu’il ait déjà disparu ou qu’il appartienne à quelqu’un d’autre. La console considère cette réponse comme « déjà fait ».',
+      'Le plan de contrôle utilisé par la console elle-même. Les routes marquées `public` sont anonymes ; celles marquées `session` demandent seulement une session ouverte, sans code de permission ; toutes les autres exigent un cookie de session et la permission indiquée dans la colonne. Une suppression répond comme une lecture : un id que l’appelant ne voit pas renvoie 404, qu’il ait déjà disparu ou qu’il appartienne à quelqu’un d’autre. La console considère cette réponse comme « déjà fait ».',
     authBody:
       'L’identité vient d’un cookie de session, l’autorisation de permissions résolues une fois par requête. Les autorisations par ressource resserrent encore cela.',
     errorsBody: 'Les échecs répondent avec un code lisible par machine. Regroupés ici par statut HTTP.',
@@ -1267,7 +1267,7 @@ export const docsCopy = {
     a2aBody:
       'Ein einziger JSON-RPC-2.0-Endpoint bedient alle folgenden Methoden. Der HTTP-Status bleibt 200, auch wenn die Aufgabe scheitert: lies result.state, nicht die Statuszeile.',
     httpBody:
-      'Die Steuerungsebene, mit der die Konsole selbst spricht. Jede Route braucht ein Sitzungscookie; die Spalte Recht nennt die Bedingung. Ein Löschen antwortet wie ein Lesen: eine id, die der Aufrufer nicht sieht, ergibt 404 — ob sie schon weg ist oder jemand anderem gehört. Die Konsole wertet das als „bereits erledigt“.',
+      'Die Steuerungsebene, mit der die Konsole selbst spricht. Mit `public` markierte Routen sind anonym; mit `session` markierte brauchen nur eine angemeldete Sitzung ohne Berechtigungscode; alle anderen brauchen ein Sitzungscookie und die in der Spalte genannte Berechtigung. Ein Löschen antwortet wie ein Lesen: eine id, die der Aufrufer nicht sieht, ergibt 404 — ob sie schon weg ist oder jemand anderem gehört. Die Konsole wertet das als „bereits erledigt“.',
     authBody:
       'Identität kommt aus einem Sitzungscookie, Autorisierung aus Rechten, die einmal pro Anfrage aufgelöst werden. Freigaben je Ressource verengen das weiter.',
     errorsBody: 'Fehler antworten mit einem maschinenlesbaren Code. Hier nach HTTP-Status gruppiert.',
@@ -1509,7 +1509,7 @@ export const docsCopy = {
     a2aBody:
       'Un solo endpoint JSON-RPC 2.0 risponde a tutti i metodi qui sotto. Lo stato HTTP resta 200 anche se il task fallisce: leggi result.state, non la riga di stato.',
     httpBody:
-      'Il piano di controllo usato dalla console stessa. Ogni rotta richiede un cookie di sessione; la colonna del permesso indica quale. Una cancellazione risponde come una lettura: un id che il chiamante non vede è 404, che sia già sparito o appartenga a qualcun altro. La console tratta quella risposta come «già fatto».',
+      'Il piano di controllo usato dalla console stessa. Le rotte contrassegnate con `public` sono anonime; quelle con `session` richiedono solo una sessione attiva, senza codice di permesso; tutte le altre richiedono un cookie di sessione e il permesso indicato nella colonna. Una cancellazione risponde come una lettura: un id che il chiamante non vede è 404, che sia già sparito o appartenga a qualcun altro. La console tratta quella risposta come «già fatto».',
     authBody:
       'L’identità viene da un cookie di sessione, l’autorizzazione dai permessi risolti una volta per richiesta. Le concessioni per risorsa restringono ulteriormente.',
     errorsBody: 'Gli errori rispondono con un codice leggibile dalla macchina. Qui raggruppati per stato HTTP.',
@@ -1751,7 +1751,7 @@ export const docsCopy = {
     a2aBody:
       'Одна точка JSON-RPC 2.0 отвечает на все методы ниже. HTTP-статус остаётся 200 даже при сбое задачи: читайте result.state, а не строку статуса.',
     httpBody:
-      'Плоскость управления, которой пользуется сама консоль. Каждому маршруту нужна сессионная cookie; колонка права называет требуемое. Удаление отвечает так же, как чтение: недоступный вызывающему id — это 404, уже удалён он или принадлежит другому. Консоль считает такой ответ признаком того, что всё уже сделано.',
+      'Плоскость управления, которой пользуется сама консоль. Маршруты с пометкой `public` анонимны; с пометкой `session` нужна только активная сессия без кода права; остальным нужны сессионная cookie и право, указанное в колонке. Удаление отвечает так же, как чтение: недоступный вызывающему id — это 404, уже удалён он или принадлежит другому. Консоль считает такой ответ признаком того, что всё уже сделано.',
     authBody:
       'Идентичность приходит из сессионной cookie, авторизация — из прав, разрешаемых один раз за запрос. Выдачи прав на ресурс сужают это ещё сильнее.',
     errorsBody: 'Сбои отвечают машинно-читаемым кодом. Здесь сгруппированы по HTTP-статусу.',
@@ -1993,7 +1993,7 @@ export const docsCopy = {
     a2aBody:
       '単一の JSON-RPC 2.0 エンドポイントが以下の全メソッドに応答します。タスクが失敗しても HTTP ステータスは 200 のままです。ステータス行ではなく result.state を読んでください。',
     httpBody:
-      'コンソール自身が使うコントロールプレーンです。各ルートはセッション cookie を必要とし、権限列が必要なものを示します。削除は読み取りと同じように答えます。呼び出し元から見えない id は、既に無いものでも他人のものでも 404 です。コンソールはその応答を「既に削除済み」として扱います。',
+      'コンソール自身が使うコントロールプレーンです。`public` のルートは匿名で利用でき、`session` のルートはログインのみで権限コードを要求しません。その他のルートにはセッション cookie と権限列の権限が必要です。削除は読み取りと同じように答えます。呼び出し元から見えない id は、既に無いものでも他人のものでも 404 です。コンソールはその応答を「既に削除済み」として扱います。',
     authBody:
       '識別はセッション cookie から、認可はリクエストごとに 1 回解決される権限から得られます。リソース単位の付与がさらに絞り込みます。',
     errorsBody: '失敗は機械可読なコードで応答します。ここでは対応する HTTP ステータスごとに分類しています。',
@@ -2235,7 +2235,7 @@ export const docsCopy = {
     a2aBody:
       '하나의 JSON-RPC 2.0 엔드포인트가 아래 모든 메서드에 응답합니다. 태스크가 실패해도 HTTP 상태는 200입니다. 상태 줄이 아니라 result.state를 읽으세요.',
     httpBody:
-      '콘솔 스스로 사용하는 제어 평면입니다. 모든 라우트에는 세션 쿠키가 필요하며, 권한 열이 필요한 것을 나타냅니다. 삭제는 읽기와 같은 방식으로 응답합니다. 호출자가 볼 수 없는 id는 이미 사라졌든 다른 사람의 것이든 404이며, 콘솔은 그 응답을 "이미 처리됨"으로 받아들입니다.',
+      '콘솔 스스로 사용하는 제어 평면입니다. `public` 라우트는 익명으로 호출할 수 있고, `session` 라우트는 로그인만 필요하며 권한 코드를 요구하지 않습니다. 나머지 라우트에는 세션 쿠키와 권한 열의 권한이 필요합니다. 삭제는 읽기와 같은 방식으로 응답합니다. 호출자가 볼 수 없는 id는 이미 사라졌든 다른 사람의 것이든 404이며, 콘솔은 그 응답을 "이미 처리됨"으로 받아들입니다.',
     authBody:
       '신원은 세션 쿠키에서, 인가는 요청마다 한 번 해석되는 권한에서 옵니다. 리소스별 권한 부여가 이를 더 좁힙니다.',
     errorsBody: '실패는 기계가 읽을 수 있는 코드로 응답합니다. 여기서는 대응하는 HTTP 상태별로 묶었습니다.',
@@ -2477,7 +2477,7 @@ export const docsCopy = {
     a2aBody:
       'Um único endpoint JSON-RPC 2.0 responde a todos os métodos abaixo. O status HTTP permanece 200 mesmo quando a tarefa falha: leia result.state, não a linha de status.',
     httpBody:
-      'O plano de controle usado pelo próprio console. Cada rota exige um cookie de sessão; a coluna de permissão indica qual. Uma exclusão responde como uma leitura: um id que o chamador não vê é 404, já tenha desaparecido ou seja de outra pessoa. O console trata essa resposta como «já feito».',
+      'O plano de controle usado pelo próprio console. As rotas marcadas `public` são anônimas; as marcadas `session` exigem apenas uma sessão iniciada, sem código de permissão; as demais exigem um cookie de sessão e a permissão indicada na coluna. Uma exclusão responde como uma leitura: um id que o chamador não vê é 404, já tenha desaparecido ou seja de outra pessoa. O console trata essa resposta como «já feito».',
     authBody:
       'A identidade vem de um cookie de sessão, a autorização de permissões resolvidas uma vez por requisição. As concessões por recurso estreitam isso ainda mais.',
     errorsBody: 'As falhas respondem com um código legível por máquina. Agrupadas aqui pelo status HTTP correspondente.',
@@ -2719,7 +2719,7 @@ export const docsCopy = {
     a2aBody:
       'تستجيب نقطة JSON-RPC 2.0 واحدة لكل الطرق أدناه. يبقى status HTTP مساوياً 200 حتى عند فشل المهمة: اقرأ result.state لا سطر الحالة.',
     httpBody:
-      'مستوى التحكم الذي تستخدمه وحدة التحكم نفسها. يحتاج كل مسار إلى cookie جلسة؛ ويوضّح عمود الصلاحية المطلوب. يجيب الحذف كما تجيب القراءة: المعرّف الذي لا يراه المستدعي يعطي 404، سواء أكان قد اختفى أم يملكه شخص آخر. وتعتبر وحدة التحكم هذا الجواب بمنزلة «تمّ سابقاً».',
+      'مستوى التحكم الذي تستخدمه وحدة التحكم نفسها. المسارات المعلّمة بـ `public` لا تحتاج جلسة؛ والمعلّمة بـ `session` تحتاج جلسة مسجّلة فقط دون رمز صلاحية؛ أما البقية فتحتاج cookie جلسة والصلاحية الموضّحة في العمود. يجيب الحذف كما تجيب القراءة: المعرّف الذي لا يراه المستدعي يعطي 404، سواء أكان قد اختفى أم يملكه شخص آخر. وتعتبر وحدة التحكم هذا الجواب بمنزلة «تمّ سابقاً».',
     authBody:
       'تأتي الهوية من cookie جلسة، والتصريح من صلاحيات تُحَل مرة واحدة لكل طلب. وتضيّق المنح لكل مورد هذا أكثر.',
     errorsBody: 'تستجيب الإخفاقات برمز قابل للقراءة الآلية. مجمّعة هنا حسب status HTTP المقابل.',
@@ -2961,7 +2961,7 @@ export const docsCopy = {
     a2aBody:
       'एक ही JSON-RPC 2.0 एंडपॉइंट नीचे दी सभी विधियों को उत्तर देता है। टास्क विफल होने पर भी HTTP स्थिति 200 रहती है: status पंक्ति नहीं, result.state पढ़ें।',
     httpBody:
-      'वह नियंत्रण तल जिससे कंसोल स्वयं बात करता है। हर मार्ग को सत्र कुकी चाहिए; अनुमति स्तंभ बताता है कि कौन सी। मिटाना पढ़ने की तरह उत्तर देता है: जो id कॉलर को दिखती नहीं, उसके लिए 404 आता है — चाहे वह पहले ही जा चुकी हो या किसी और की हो। कंसोल उस उत्तर को «पहले ही हो गया» मानता है।',
+      'वह नियंत्रण तल जिससे कंसोल स्वयं बात करता है। `public` चिह्नित मार्गों को सत्र नहीं चाहिए; `session` चिह्नित मार्गों को केवल लॉगिन चाहिए, अनुमति कोड नहीं; बाकी मार्गों को सत्र कुकी और स्तंभ में दी अनुमति चाहिए। मिटाना पढ़ने की तरह उत्तर देता है: जो id कॉलर को दिखती नहीं, उसके लिए 404 आता है — चाहे वह पहले ही जा चुकी हो या किसी और की हो। कंसोल उस उत्तर को «पहले ही हो गया» मानता है।',
     authBody:
       'पहचान सत्र कुकी से आती है, प्राधिकरण उन अनुमतियों से जो हर अनुरोध पर एक बार सुलझाई जाती हैं। संसाधन-स्तरीय अनुदान इसे और संकरा करते हैं।',
     errorsBody: 'विफलताएँ मशीन-पठनीय कोड के साथ उत्तर देती हैं। यहाँ संबंधित HTTP स्थिति के अनुसार समूहीकृत।',

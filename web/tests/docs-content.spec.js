@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   docsSections,
   endpointGroups,
   httpEndpoints,
+  publicEndpoints,
   sandboxLayers,
+  sessionOnlyEndpoints,
   sandboxNetworkModes,
   sandboxPolicyKinds,
   sandboxPolicySample,
@@ -166,5 +170,40 @@ describe('docs content', () => {
     for (const endpoint of httpEndpoints) {
       expect(declared, `${endpoint.method} ${endpoint.path} has no group`).toContain(endpoint.group)
     }
+  })
+
+  it('derives the public / session classes from the Go route registry', () => {
+    // Marking a requireAuth route `public`, or an anonymous discovery route
+    // `session`, documents an auth boundary that does not exist. The two lists
+    // are checked against the wrappers in handlers.go, not against themselves.
+    const raw = readFileSync(
+      fileURLToPath(new URL('../../internal/handlers/handlers.go', import.meta.url)),
+      'utf8',
+    )
+    const publicFromGo = []
+    const sessionFromGo = []
+    for (const line of raw.split(/\r?\n/)) {
+      const match = line.match(/HandleFunc\("([A-Z]+) (\/[^" ]+)",\s*(.+)\)\s*$/)
+      if (!match) continue
+      const [, method, path, wrapper] = match
+      const key = `${method} ${path}`
+      if (/requirePermission\(authz\.Perm/.test(wrapper)) continue
+      if (/requireAuth\(/.test(wrapper)) sessionFromGo.push(key)
+      else publicFromGo.push(key)
+    }
+    expect(publicFromGo.length).toBeGreaterThan(0)
+    expect(sessionFromGo.length).toBeGreaterThan(0)
+    expect([...publicEndpoints].sort()).toEqual(publicFromGo.sort())
+    expect([...sessionOnlyEndpoints].sort()).toEqual(sessionFromGo.sort())
+  })
+
+  it('classifies every endpoint that has no permission code', () => {
+    const classified = [...publicEndpoints, ...sessionOnlyEndpoints]
+    expect(new Set(classified).size, 'a route is classified twice').toBe(classified.length)
+    const blank = httpEndpoints
+      .filter((endpoint) => !endpoint.permission)
+      .map((endpoint) => `${endpoint.method} ${endpoint.path}`)
+      .sort()
+    expect([...classified].sort()).toEqual(blank)
   })
 })

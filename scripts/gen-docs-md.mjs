@@ -20,7 +20,9 @@ import {
   errorGroups,
   healthStates,
   httpEndpoints,
+  publicEndpoints,
   recordStatuses,
+  sessionOnlyEndpoints,
   resourceKinds,
   sandboxLayers,
   sandboxNetworkModes,
@@ -54,6 +56,14 @@ function descFor(dict, endpoint) {
   const template = t(dict, endpoint.descKey)
   if (!endpoint.nounKey) return template
   return template.replace('{n}', t(dict, endpoint.nounKey))
+}
+
+/** A blank permission is either anonymous or session-only, not "no authz". */
+function accessCell(endpoint) {
+  const key = `${endpoint.method} ${endpoint.path}`
+  if (publicEndpoints.includes(key)) return '`public`'
+  if (sessionOnlyEndpoints.includes(key)) return '`session`'
+  return '—'
 }
 
 /** A cell may not contain an unescaped pipe or a raw newline. */
@@ -183,7 +193,7 @@ function render(lang) {
             `\`${endpoint.path}\``,
             endpoint.permission
               ? `\`${endpoint.permission}\` — ${enumLabel('permission', endpoint.permission, lang)}`
-              : '—',
+              : accessCell(endpoint),
             descFor(dict, endpoint),
             endpoint.request ? `\`${endpoint.request}\`` : '—',
             `\`${endpoint.response}\``,
@@ -194,7 +204,13 @@ function render(lang) {
     // Same slot the screen uses: a group's one prose note, under its table.
     if (group.noteKey) out.push(t(dict, group.noteKey), '')
   }
-  out.push(t(dict, 'endpointsNote'), '')
+  // The screen's "open a row" hint describes an interaction markdown has no
+  // equivalent for; here the shapes already sit in the last two columns.
+  const staticNote = {
+    en: 'Request and response shapes are listed in the last two columns of each table.',
+    zh: '每条端点的请求与响应见表格的最后两列。',
+  }
+  out.push(staticNote[lang] ?? staticNote.en, '')
 
   // --- Authentication ---
   out.push(

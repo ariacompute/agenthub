@@ -4,7 +4,7 @@
 
 基于 **A2A（Agent2Agent）协议**的互连平台：把 **model / agent / mcp / skill / CLI** 五类异构资产统一注册、发现、路由与编排，对外以标准 A2A 端点被任何遵循协议的 Agent 调用。
 
-- 后端：Go 1.27 + `net/http`，单二进制（唯一生产依赖为 GORM）
+- 后端：Go 1.27 + `net/http`，单二进制（生产依赖为 GORM + pgx）
 - 前端：Vue 3 + Vite（bun），**13 种语言**，纯黑/白/灰单色视觉
 - 持久化：**PostgreSQL + GORM**（资源、任务、artifact、span、事件流、回调留痕全部落库）
 - 五类适配器**默认离线可跑**：无网络、无子进程、无凭据即可启动——model 条目可选接入真实的

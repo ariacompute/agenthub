@@ -96,30 +96,30 @@ The stream ends on the terminal status frame; there is no sentinel frame after i
 
 ## HTTP API
 
-The control plane the console itself talks to. Each route needs a session cookie; the permission column names what the caller must hold. A delete answers the way a read does: an id the caller cannot see is 404, whether it is already gone or belongs to somebody else. The console treats that answer as already done.
+The control plane the console itself talks to. Routes marked `public` are anonymous; routes marked `session` need a signed-in session but no permission code; every other route needs a session cookie plus the permission named in the column. A delete answers the way a read does: an id the caller cannot see is 404, whether it is already gone or belongs to somebody else. The console treats that answer as already done.
 
 ### Protocol
 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/.well-known/agent.json` | — | The A2A Agent Card: where discovery starts. | — | `AgentCard { name, description, url, version, protocolVersion, capabilities, skills[] }` |
-| `GET` | `/a2a/agent-card` | — | The same card served on a second path. | — | `AgentCard` |
-| `POST` | `/a2a` | — | One JSON-RPC 2.0 endpoint carrying every A2A method. | `{ jsonrpc: "2.0", id, method: "message/send", params }` | `{ jsonrpc: "2.0", id, result } \| { jsonrpc: "2.0", id, error: { code, message } }` |
+| `GET` | `/.well-known/agent.json` | `public` | The A2A Agent Card: where discovery starts. | — | `AgentCard { name, description, url, version, protocolVersion, capabilities, skills[] }` |
+| `GET` | `/a2a/agent-card` | `public` | The same card served on a second path. | — | `AgentCard` |
+| `POST` | `/a2a` | `public` | One JSON-RPC 2.0 endpoint carrying every A2A method. | `{ jsonrpc: "2.0", id, method: "message/send", params }` | `{ jsonrpc: "2.0", id, result } \| { jsonrpc: "2.0", id, error: { code, message } }` |
 | `GET` | `/a2a/stream` | `tasks:read` — Read tasks | Server-sent events for one task. | `?task=<id>&since=<seq>` | `text/event-stream, keep-alive every 15s` |
 
 ### Authentication
 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/auth/config` | — | What the login screen is allowed to offer. | — | `{ providers: [{ name }], password, registrationOpen, configured }` |
-| `POST` | `/api/auth/register` | — | Create an account while registration is open. | `{ email, password, name }` | `{ user } — 201` |
-| `POST` | `/api/auth/login` | — | Trade an email and password for a session cookie. | `{ email, password }` | `{ user } and a session cookie` |
-| `POST` | `/api/auth/logout` | — | Drop the session you are using. | — | `204, no body` |
-| `GET` | `/api/auth/me` | — | Who you are, and what you are allowed to do. | — | `{ user: { id, email, name, isOwner, roles, groups }, permissions: [] }` |
-| `GET` | `/api/auth/sessions` | — | List all sessions | — | `{ sessions: [{ id, createdAt, expiresAt, lastSeenAt, current }] }` |
-| `DELETE` | `/api/auth/sessions/{id}` | — | Delete one of the sessions | — | `204, no body` |
-| `GET` | `/api/auth/oauth/{provider}` | — | Begin an OAuth round trip. | — | `302 to the provider, PKCE + state` |
-| `GET` | `/api/auth/oauth/{provider}/callback` | — | Finish it and land back on the console. | — | `302 to the console with a session cookie` |
+| `GET` | `/api/auth/config` | `public` | What the login screen is allowed to offer. | — | `{ providers: [{ name }], password, registrationOpen, configured }` |
+| `POST` | `/api/auth/register` | `public` | Create an account while registration is open. | `{ email, password, name }` | `{ user } — 201` |
+| `POST` | `/api/auth/login` | `public` | Trade an email and password for a session cookie. | `{ email, password }` | `{ user } and a session cookie` |
+| `POST` | `/api/auth/logout` | `session` | Drop the session you are using. | — | `204, no body` |
+| `GET` | `/api/auth/me` | `session` | Who you are, and what you are allowed to do. | — | `{ user: { id, email, name, isOwner, roles, groups }, permissions: [] }` |
+| `GET` | `/api/auth/sessions` | `session` | List all sessions | — | `{ sessions: [{ id, createdAt, expiresAt, lastSeenAt, current }] }` |
+| `DELETE` | `/api/auth/sessions/{id}` | `session` | Delete one of the sessions | — | `204, no body` |
+| `GET` | `/api/auth/oauth/{provider}` | `public` | Begin an OAuth round trip. | — | `302 to the provider, PKCE + state` |
+| `GET` | `/api/auth/oauth/{provider}/callback` | `public` | Finish it and land back on the console. | — | `302 to the console with a session cookie` |
 
 ### Resources
 
@@ -219,17 +219,17 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/api-keys` | — | List API keys. A holder of apikeys:manage sees every key; anyone else sees only their own. | — | `{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }` |
-| `POST` | `/api/api-keys` | — | Create a key. The token is returned once and never stored; scopes may not exceed what you can grant. | `{ name, scopes[], userId?, expiresInDays? }` | `{ apiKey, token } — 201, token shown once` |
-| `GET` | `/api/api-keys/{id}` | — | Fetch one of your own keys, or any key with apikeys:manage. | — | `{ apiKey }` |
-| `PUT` | `/api/api-keys/{id}` | — | Rename, set an expiry, or replace the scopes of a key you may manage. | `{ name?, scopes[], expiresAt? }` | `{ apiKey }` |
-| `DELETE` | `/api/api-keys/{id}` | — | Revoke a key. It stops authenticating immediately but the row is kept for audit. | — | `204, no body` |
+| `GET` | `/api/api-keys` | `session` | List API keys. A holder of apikeys:manage sees every key; anyone else sees only their own. | — | `{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }` |
+| `POST` | `/api/api-keys` | `session` | Create a key. The token is returned once and never stored; scopes may not exceed what you can grant. | `{ name, scopes[], userId?, expiresInDays? }` | `{ apiKey, token } — 201, token shown once` |
+| `GET` | `/api/api-keys/{id}` | `session` | Fetch one of your own keys, or any key with apikeys:manage. | — | `{ apiKey }` |
+| `PUT` | `/api/api-keys/{id}` | `session` | Rename, set an expiry, or replace the scopes of a key you may manage. | `{ name?, scopes[], expiresAt? }` | `{ apiKey }` |
+| `DELETE` | `/api/api-keys/{id}` | `session` | Revoke a key. It stops authenticating immediately but the row is kept for audit. | — | `204, no body` |
 
 ### Operations
 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/healthz` | — | Liveness, version and what the build was made from. | — | `{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down` |
+| `GET` | `/healthz` | `public` | Liveness, version and what the build was made from. | — | `{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down` |
 
 ### Collaboration
 
@@ -247,7 +247,7 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | `PUT` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Update a channel's name, enabled flag, config, signing key, or bound thread. | `{ name?, enabled, config?, signingKeyEnv?, threadId? }` | `Channel` |
 | `DELETE` | `/api/channels/{id}` | `tasks:write` — Cancel and resume tasks | Delete one of the channels | — | `204 \| 404 channel_not_found` |
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — Read tasks | List all deliveries | — | `ChannelMessage[]` |
-| `POST` | `/api/channels/{id}/webhook` | — | Inbound webhook: verify the signature, dedupe by external ref, then forward the message into the bound thread. | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
+| `POST` | `/api/channels/{id}/webhook` | `public` | Inbound webhook: verify the signature, dedupe by external ref, then forward the message into the bound thread. | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
 | `POST` | `/api/channels/{id}/deliver` | `tasks:write` — Cancel and resume tasks | Outbound delivery: post the message to the channel target_url (config.target_url) via an SSRF-safe client and echo the provider raw response (status plus truncated body). | `{ "message": "string" }` | `DeliverResult { status, raw }` |
 | `POST` | `/api/channels/{id}/deliveries/{did}/retry` | `tasks:write` — Cancel and resume tasks | Retry an outbound receipt that never landed: the same row flips to delivered instead of a new one being added. | — | `DeliverResult { status, raw } \| 404 delivery_not_found \| 409 delivery_not_retryable \| 502 delivery_failed (the receipt stays retryable)` |
 | `GET` | `/api/connectors` | `resources:read` — Read resources | List all connectors | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
@@ -331,7 +331,7 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | `GET` | `/api/audit/verify` | `audit:read` — Read the audit trail | Recompute the hash chain over the window and report the first row that does not link. | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
 | `GET` | `/api/audit/{id}` | `audit:read` — Read the audit trail | Read one of the audit events by id | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
 
-Open a row to see its request and response.
+Request and response shapes are listed in the last two columns of each table.
 
 ## Authentication and permissions
 

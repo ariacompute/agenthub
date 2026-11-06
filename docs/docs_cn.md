@@ -96,30 +96,30 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 
 ## HTTP 接口
 
-控制台自身使用的控制面。每条路由都需要会话 cookie；权限列标明调用方必须持有哪一项。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。
+控制台自身使用的控制面。标为 `public` 的路由无需会话；标为 `session` 的路由只需登录、不校验权限码；其余路由需要会话 cookie 加权限列标明的权限。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。
 
 ### 协议
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/.well-known/agent.json` | — | A2A Agent Card，发现的起点。 | — | `AgentCard { name, description, url, version, protocolVersion, capabilities, skills[] }` |
-| `GET` | `/a2a/agent-card` | — | 同一张卡，另一个路径。 | — | `AgentCard` |
-| `POST` | `/a2a` | — | 承载全部 A2A 方法的同一个 JSON-RPC 2.0 端点。 | `{ jsonrpc: "2.0", id, method: "message/send", params }` | `{ jsonrpc: "2.0", id, result } \| { jsonrpc: "2.0", id, error: { code, message } }` |
+| `GET` | `/.well-known/agent.json` | `public` | A2A Agent Card，发现的起点。 | — | `AgentCard { name, description, url, version, protocolVersion, capabilities, skills[] }` |
+| `GET` | `/a2a/agent-card` | `public` | 同一张卡，另一个路径。 | — | `AgentCard` |
+| `POST` | `/a2a` | `public` | 承载全部 A2A 方法的同一个 JSON-RPC 2.0 端点。 | `{ jsonrpc: "2.0", id, method: "message/send", params }` | `{ jsonrpc: "2.0", id, result } \| { jsonrpc: "2.0", id, error: { code, message } }` |
 | `GET` | `/a2a/stream` | `tasks:read` — 查看任务 | 单个任务的 server-sent events。 | `?task=<id>&since=<seq>` | `text/event-stream, keep-alive every 15s` |
 
 ### 认证
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/auth/config` | — | 登录页可以提供哪些方式。 | — | `{ providers: [{ name }], password, registrationOpen, configured }` |
-| `POST` | `/api/auth/register` | — | 注册开放时创建账号。 | `{ email, password, name }` | `{ user } — 201` |
-| `POST` | `/api/auth/login` | — | 用邮箱和密码换取会话 cookie。 | `{ email, password }` | `{ user } and a session cookie` |
-| `POST` | `/api/auth/logout` | — | 注销当前会话。 | — | `204, no body` |
-| `GET` | `/api/auth/me` | — | 你是谁，以及你被允许做什么。 | — | `{ user: { id, email, name, isOwner, roles, groups }, permissions: [] }` |
-| `GET` | `/api/auth/sessions` | — | 列出全部会话 | — | `{ sessions: [{ id, createdAt, expiresAt, lastSeenAt, current }] }` |
-| `DELETE` | `/api/auth/sessions/{id}` | — | 删除其中一条会话 | — | `204, no body` |
-| `GET` | `/api/auth/oauth/{provider}` | — | 开始一次 OAuth 往返。 | — | `302 to the provider, PKCE + state` |
-| `GET` | `/api/auth/oauth/{provider}/callback` | — | 完成往返并回到控制台。 | — | `302 to the console with a session cookie` |
+| `GET` | `/api/auth/config` | `public` | 登录页可以提供哪些方式。 | — | `{ providers: [{ name }], password, registrationOpen, configured }` |
+| `POST` | `/api/auth/register` | `public` | 注册开放时创建账号。 | `{ email, password, name }` | `{ user } — 201` |
+| `POST` | `/api/auth/login` | `public` | 用邮箱和密码换取会话 cookie。 | `{ email, password }` | `{ user } and a session cookie` |
+| `POST` | `/api/auth/logout` | `session` | 注销当前会话。 | — | `204, no body` |
+| `GET` | `/api/auth/me` | `session` | 你是谁，以及你被允许做什么。 | — | `{ user: { id, email, name, isOwner, roles, groups }, permissions: [] }` |
+| `GET` | `/api/auth/sessions` | `session` | 列出全部会话 | — | `{ sessions: [{ id, createdAt, expiresAt, lastSeenAt, current }] }` |
+| `DELETE` | `/api/auth/sessions/{id}` | `session` | 删除其中一条会话 | — | `204, no body` |
+| `GET` | `/api/auth/oauth/{provider}` | `public` | 开始一次 OAuth 往返。 | — | `302 to the provider, PKCE + state` |
+| `GET` | `/api/auth/oauth/{provider}/callback` | `public` | 完成往返并回到控制台。 | — | `302 to the console with a session cookie` |
 
 ### 资源
 
@@ -219,17 +219,17 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/api-keys` | — | 列出 API 密钥。持有 apikeys:manage 者可查看全部，其他人只能查看自己的。 | — | `{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }` |
-| `POST` | `/api/api-keys` | — | 创建密钥。令牌仅返回一次且不会存储；权限范围不得超过你可授予的权限。 | `{ name, scopes[], userId?, expiresInDays? }` | `{ apiKey, token } — 201, token shown once` |
-| `GET` | `/api/api-keys/{id}` | — | 获取你自己的某个密钥，或（持有 apikeys:manage 时）任意密钥。 | — | `{ apiKey }` |
-| `PUT` | `/api/api-keys/{id}` | — | 重命名、设置过期时间，或替换你可管理的密钥的权限范围。 | `{ name?, scopes[], expiresAt? }` | `{ apiKey }` |
-| `DELETE` | `/api/api-keys/{id}` | — | 吊销密钥。它将立即停止认证，但会保留记录以供审计。 | — | `204, no body` |
+| `GET` | `/api/api-keys` | `session` | 列出 API 密钥。持有 apikeys:manage 者可查看全部，其他人只能查看自己的。 | — | `{ apiKeys: [{ id, name, prefix, scopes, createdAt, lastUsedAt, expiresAt, revoked }] }` |
+| `POST` | `/api/api-keys` | `session` | 创建密钥。令牌仅返回一次且不会存储；权限范围不得超过你可授予的权限。 | `{ name, scopes[], userId?, expiresInDays? }` | `{ apiKey, token } — 201, token shown once` |
+| `GET` | `/api/api-keys/{id}` | `session` | 获取你自己的某个密钥，或（持有 apikeys:manage 时）任意密钥。 | — | `{ apiKey }` |
+| `PUT` | `/api/api-keys/{id}` | `session` | 重命名、设置过期时间，或替换你可管理的密钥的权限范围。 | `{ name?, scopes[], expiresAt? }` | `{ apiKey }` |
+| `DELETE` | `/api/api-keys/{id}` | `session` | 吊销密钥。它将立即停止认证，但会保留记录以供审计。 | — | `204, no body` |
 
 ### 运维
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/healthz` | — | 存活状态、版本，以及这个构建由什么构成。 | — | `{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down` |
+| `GET` | `/healthz` | `public` | 存活状态、版本，以及这个构建由什么构成。 | — | `{ status, version, commit, buildNote, protocolVersion, resources, health, tasks, methods[], auth, database } — 503 when the database is down` |
 
 ### 协作
 
@@ -247,7 +247,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `PUT` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 更新通道的名称、启用状态、配置、签名密钥或绑定线程。 | `{ name?, enabled, config?, signingKeyEnv?, threadId? }` | `Channel` |
 | `DELETE` | `/api/channels/{id}` | `tasks:write` — 取消与恢复任务 | 删除其中一条通道 | — | `204 \| 404 channel_not_found` |
 | `GET` | `/api/channels/{id}/deliveries` | `tasks:read` — 查看任务 | 列出全部投递 | — | `ChannelMessage[]` |
-| `POST` | `/api/channels/{id}/webhook` | — | 入站 webhook：校验签名，按外部引用去重，再将消息转发到绑定线程。 | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
+| `POST` | `/api/channels/{id}/webhook` | `public` | 入站 webhook：校验签名，按外部引用去重，再将消息转发到绑定线程。 | `raw provider payload (verified by signature)` | `ChannelMessage \| 200 (deduplicated)` |
 | `POST` | `/api/channels/{id}/deliver` | `tasks:write` — 取消与恢复任务 | 出站投递：经 SSRF 安全客户端把消息发往通道的 config.target_url，并回显 Provider 原始响应（状态码 + 截断后的响应体）。 | `{ "message": "string" }` | `DeliverResult { status, raw }` |
 | `POST` | `/api/channels/{id}/deliveries/{did}/retry` | `tasks:write` — 取消与恢复任务 | 重试一条从未送达的出向回执：原地翻成 delivered，不新增行。 | — | `DeliverResult { status, raw } \| 404 delivery_not_found \| 409 delivery_not_retryable \| 502 delivery_failed (the receipt stays retryable)` |
 | `GET` | `/api/connectors` | `resources:read` — 查看资源 | 列出全部连接器 | — | `ConnectorView[] { id, name, endpoint, transport, policy, health }` |
@@ -331,7 +331,7 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 | `GET` | `/api/audit/verify` | `audit:read` — 查看审计日志 | 重算该时间窗的哈希链，并指出第一处断链的行。 | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
 | `GET` | `/api/audit/{id}` | `audit:read` — 查看审计日志 | 按 id 读取其中一条审计事件 | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
 
-展开一行即可看到它的请求与响应。
+每条端点的请求与响应见表格的最后两列。
 
 ## 认证与权限
 

@@ -200,6 +200,42 @@ export const endpointGroups = [
 ]
 
 /**
+ * Access class for routes with no authz code. A blank `permission` used to be
+ * ambiguous: discovery, registration, OAuth, the channel webhook and healthz
+ * are anonymous, while logout / me / sessions / api-keys only need a signed-in
+ * session. The /docs screen and the generated markdown render these as
+ * `public` / `session`; any other blank is a bug.
+ *
+ * Keys are "METHOD /path". web/tests/docs-content.spec.js compares them with
+ * the wrappers in internal/handlers/handlers.go, so a newly public route
+ * cannot silently lose its authz here.
+ */
+export const publicEndpoints = [
+  'GET /.well-known/agent.json',
+  'GET /a2a/agent-card',
+  'POST /a2a',
+  'GET /api/auth/config',
+  'POST /api/auth/register',
+  'POST /api/auth/login',
+  'GET /api/auth/oauth/{provider}',
+  'GET /api/auth/oauth/{provider}/callback',
+  'POST /api/channels/{id}/webhook',
+  'GET /healthz',
+]
+
+export const sessionOnlyEndpoints = [
+  'POST /api/auth/logout',
+  'GET /api/auth/me',
+  'GET /api/auth/sessions',
+  'DELETE /api/auth/sessions/{id}',
+  'GET /api/api-keys',
+  'POST /api/api-keys',
+  'GET /api/api-keys/{id}',
+  'PUT /api/api-keys/{id}',
+  'DELETE /api/api-keys/{id}',
+]
+
+/**
  * Every route the single listener serves.
  *
  * `permission` is the authz code the route demands and is rendered verbatim

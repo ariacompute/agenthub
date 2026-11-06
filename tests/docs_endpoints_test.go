@@ -1,23 +1,18 @@
-// The endpoint table in docs/docs.md and the route registry in
-// internal/handlers/handlers.go are written by hand, in different languages, and
-// nothing compared them.
+// docs/docs.md and docs/docs_cn.md are generated from
+// web/src/lib/docs-content.js by `make docs-md`; the route registry in
+// internal/handlers/handlers.go is maintained separately. Nothing used to
+// compare them, which is how `DELETE /api/computers/{id}` shipped live while
+// missing from the table.
 //
-// The existing guard is web/tests/docs-content.spec.js, and it can only detect a
-// deletion from the table: it asserts the table against itself (a count and the
-// presence of every descKey), so a route that was registered in Go and never
-// added here is invisible to it. That is exactly how `DELETE /api/computers/{id}`
-// stayed undocumented while the handler was live.
+// These tests derive the truth from the Go source and compare it in both
+// directions against BOTH generated files:
 //
-// This test derives the truth from the Go source instead. It reads the
-// registrations, normalises them the way the table writes them, and reports the
-// difference in both directions of the hand-off:
+//   - a registered route with no row in either table;
+//   - a table row for a path the router does not serve.
 //
-//   - a registered /api route with no row in docs/docs.md;
-//   - a docs row that warns about a path the router does not register.
-//
-// docs/docs.md is generated from web/src/lib/docs-content.js by
-// `make docs-md`, so a route added to the JS and not regenerated fails here too,
-// with the command in the message.
+// Because the tables are generated, a route added to the JS but not regenerated
+// fails here too; the failure message carries the command. The screen's own
+// copy keys and access classes are guarded by web/tests/docs-content.spec.js.
 
 package tests
 
@@ -74,18 +69,22 @@ func registeredRoutes(t *testing.T) []routeEndpoint {
 	return out
 }
 
-func documentedRoutes(t *testing.T) map[routeEndpoint]bool {
+// generatedDocs is every markdown the generator writes. The Chinese table used
+// to be invisible to this guard, so a stale zh file could ship unnoticed.
+var generatedDocs = []string{"../docs/docs.md", "../docs/docs_cn.md"}
+
+func documentedRoutes(t *testing.T, file string) map[routeEndpoint]bool {
 	t.Helper()
-	raw, err := os.ReadFile("../docs/docs.md")
+	raw, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatalf("read docs/docs.md: %v", err)
+		t.Fatalf("read %s: %v", file, err)
 	}
 	out := map[routeEndpoint]bool{}
 	for _, m := range documentedEndpoint.FindAllStringSubmatch(string(raw), -1) {
 		out[routeEndpoint{method: m[1], path: m[2]}] = true
 	}
 	if len(out) < 100 {
-		t.Fatalf("parsed only %d documented routes; the table format changed and this guard is blind", len(out))
+		t.Fatalf("parsed only %d documented routes from %s; the table format changed and this guard is blind", len(out), file)
 	}
 	return out
 }
@@ -93,20 +92,23 @@ func documentedRoutes(t *testing.T) map[routeEndpoint]bool {
 // TestEveryRouteIsDocumented is the set-difference guard: registered but
 // undocumented is the failure that shipped a live DELETE with no table row.
 func TestEveryRouteIsDocumented(t *testing.T) {
-	documented := documentedRoutes(t)
-	var missing []string
-	for _, route := range registeredRoutes(t) {
-		if !documented[route] {
-			missing = append(missing, route.String())
+	registered := registeredRoutes(t)
+	for _, file := range generatedDocs {
+		documented := documentedRoutes(t, file)
+		var missing []string
+		for _, route := range registered {
+			if !documented[route] {
+				missing = append(missing, route.String())
+			}
 		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		t.Fatalf(
-			"these routes are registered in internal/handlers/handlers.go but absent from docs/docs.md:\n  %s\n"+
-				"add them to web/src/lib/docs-content.js (group + descKey) and run `make docs-md`",
-			strings.Join(missing, "\n  "),
-		)
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			t.Fatalf(
+				"these routes are registered in internal/handlers/handlers.go but absent from %s:\n  %s\n"+
+					"add them to web/src/lib/docs-content.js (group + descKey) and run `make docs-md`",
+				file, strings.Join(missing, "\n  "),
+			)
+		}
 	}
 }
 
@@ -117,19 +119,21 @@ func TestNoDocumentedRouteIsDead(t *testing.T) {
 	for _, route := range registeredRoutes(t) {
 		registered[route] = true
 	}
-	var stale []string
-	for route := range documentedRoutes(t) {
-		if !registered[route] {
-			stale = append(stale, route.String())
+	for _, file := range generatedDocs {
+		var stale []string
+		for route := range documentedRoutes(t, file) {
+			if !registered[route] {
+				stale = append(stale, route.String())
+			}
 		}
-	}
-	if len(stale) > 0 {
-		sort.Strings(stale)
-		t.Fatalf(
-			"docs/docs.md documents routes that no handler serves:\n  %s\n"+
-				"either register them or drop them from web/src/lib/docs-content.js and run `make docs-md`",
-			strings.Join(stale, "\n  "),
-		)
+		if len(stale) > 0 {
+			sort.Strings(stale)
+			t.Fatalf(
+				"%s documents routes that no handler serves:\n  %s\n"+
+					"either register them or drop them from web/src/lib/docs-content.js and run `make docs-md`",
+				file, strings.Join(stale, "\n  "),
+			)
+		}
 	}
 }
 

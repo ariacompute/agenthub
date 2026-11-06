@@ -9,7 +9,9 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
 对外以标准 A2A 端点被任何遵循协议的 Agent 调用。
 
 - 后端：**Go 1.27.3 + 标准库 `net/http`**，单二进制；持久层为 **PostgreSQL + GORM**
-  （`gorm.io/gorm` + `gorm.io/driver/postgres`，与 `bankmind` 一致，是本仓唯一生产依赖）。
+  （`gorm.io/gorm` + `gorm.io/driver/postgres`）与 **pgx**（`github.com/jackc/pgx/v5`，
+  `internal/backup` 的纯 Go COPY / pg_dump 引擎直接引用；pgx 本是 driver 的传递依赖，
+  故依赖图未新增第三方包）。
 - 前端：Vue 3 + Vite（**bun 1.4.4+** 包管理/测试），十屏控制台（registry / registries / sources / trace /
   topology / **playground** / login / admin / audit / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
 - 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通；真实对接以 `TODO(real)` 标注边界。
@@ -234,10 +236,12 @@ persistence ← internal/store（GORM 实现）
   `agenthub_row_visible(owner_id)`（`app.system` / `app.bypass` / 精确非空 owner）。
   两条配套要求：后台节拍（cron 扫描、sweeper、同步）必须 `identity.With(ctx, {System:true})`，
   否则 `FORCE` 下读到 0 行、表现为「定时任务再也不触发」；公开回调只有 webhook 一处例外，
-  走 `GetUnscoped` + 系统身份。`tests/rls_test.go` 的表清单与策略名断言同步在 11 张表上。
+  走 `GetUnscoped` + 系统身份。`tests/rls_test.go` 的表清单与策略名断言同步在 15 张表上。
 - **文档与路由双向守恒**：新增/删除 `mux.HandleFunc` 必须同步 `web/src/lib/docs-content.js`
-  （再 `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md`）。`tests/docs_endpoints_test.go`
-  对 `handlers.go` 与 `docs.md` 做双向差集：漏项与幽灵条目都会让 `go test` 变红。
+  （再 `bun scripts/gen-docs-md.mjs` 一次重生成 `docs/docs.md` 与 `docs/docs_cn.md` 两个文件）。
+  `tests/docs_endpoints_test.go` 对 `handlers.go` 与两份 md 都做双向差集：漏项与幽灵条目
+  都会让 `go test` 变红；`web/tests/docs-content.spec.js` 另把公开 / 仅会话端点的分类与
+  `handlers.go` 的 wrapper 钉住，改认证包装必须同步 `publicEndpoints` / `sessionOnlyEndpoints`。
 - **持久化不得阻塞运行**：状态/artifact/span 同步写，`events` 与 `push_records` **尽力而为**
   （有界队列 + 异步 writer，队列满或失败只 `slog.Warn`，绝不回压任务执行）；
   所有持久层调用统一走 `context.Background()`（客户端断连不得丢弃任务状态）。

@@ -6,7 +6,7 @@ An interconnection platform built on the **A2A (Agent2Agent) protocol**: it regi
 routes and orchestrates five heterogeneous asset classes — **model / agent / mcp / skill / cli** —
 and exposes them as standard A2A endpoints that any protocol-conforming agent can call.
 
-- Backend: Go 1.27 + `net/http`, single binary (GORM is the only production dependency)
+- Backend: Go 1.27 + `net/http`, single binary (production dependencies: GORM + pgx)
 - Frontend: Vue 3 + Vite (bun), **13 languages**, pure black / white / grey monochrome UI
 - Persistence: **PostgreSQL + GORM** — resources, tasks, artifacts, spans, the event stream and
   push callback records are all durable

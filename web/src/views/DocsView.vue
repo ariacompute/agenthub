@@ -17,7 +17,9 @@ import {
   errorGroups,
   healthStates,
   httpEndpoints,
+  publicEndpoints,
   recordStatuses,
+  sessionOnlyEndpoints,
   resourceKinds,
   sandboxLayers,
   sandboxNetworkModes,
@@ -42,8 +44,15 @@ function descFor(endpoint) {
   return template.replace('{n}', t(endpoint.nounKey))
 }
 
+const publicRoutes = new Set(publicEndpoints)
+const sessionRoutes = new Set(sessionOnlyEndpoints)
+
 function permissionFor(endpoint) {
-  return endpoint.permission ? enumLabel('permission', endpoint.permission) : '—'
+  if (endpoint.permission) return enumLabel('permission', endpoint.permission)
+  const key = `${endpoint.method} ${endpoint.path}`
+  if (publicRoutes.has(key)) return 'public'
+  if (sessionRoutes.has(key)) return 'session'
+  return '—'
 }
 
 const grouped = computed(() =>
