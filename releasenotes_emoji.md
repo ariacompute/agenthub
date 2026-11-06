@@ -1,6 +1,6 @@
 # 🚀 AgentHub 发布说明
 
-> AgentHub 把模型、Agent、工具、技能和命令行接进同一套 A2A 互连平台。后端是一个二进制加 PostgreSQL，前端是十屏控制台。
+> AgentHub 把模型、Agent、工具、技能和命令行接进同一套 A2A 互连平台。
 
 ---
 
