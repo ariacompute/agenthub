@@ -13,6 +13,9 @@
 //   - `ep*` keys describe one specific endpoint; they are never templated.
 export const docsCopy = {
   en: {
+    baseUrlTitle: 'Base URL',
+    baseUrlBody:
+      'The console, the A2A endpoint and every control-plane path share one listener. The address below is the default; the environment variable beside it overrides that port. Compose also publishes the development database on its own host port.',
     authSignupTitle: 'Sign-up and first login',
     authSignupBody:
       'Self-service sign-up is available when AGENTHUB_ALLOW_REGISTRATION is on. A password must be at least 8 bytes, the address must look like an address, and the first account on an empty instance becomes the owner. Accounts created this way - and accounts a first OAuth login provisions - start on the read-only viewer role: they read the catalogue and nothing more until an administrator widens them. Accounts created through POST /api/users get exactly the roles that were asked for.',
@@ -258,6 +261,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: replay history, then follow delegated tasks and persist agent replies.",
 },
   zh: {
+    baseUrlTitle: '服务地址',
+    baseUrlBody:
+      '控制台、A2A 端点与全部控制面路径共用同一个监听器。下面是默认地址，旁边的环境变量可覆盖该端口；compose 还会把开发用数据库发布到自己的宿主端口。',
     authSignupTitle: '注册与首次登录',
     authSignupBody:
       '开启 AGENTHUB_ALLOW_REGISTRATION 后可自助注册。密码至少 8 字节，邮箱需符合基本结构；空实例上的第一个账号成为所有者。这类账号（以及 OAuth 首次登录自动创建的账号）一律从只读的 viewer 角色起步，只能读目录，直到管理员放宽。通过 POST /api/users 创建的账号则完全按请求里的角色落库。',
@@ -492,6 +498,9 @@ export const docsCopy = {
     epThreadEvents: "SSE：先回访历史，再跟随被委派任务并落库 agent 回复。",
 },
   'zh-TW': {
+    baseUrlTitle: '服務位址',
+    baseUrlBody:
+      '主控台、A2A 端點與所有控制面路徑共用同一個監聽器。以下是預設位址，旁邊的環境變數可覆寫該連接埠；compose 另將開發用資料庫發佈到自己的宿主連接埠。',
     authSignupTitle: '註冊與首次登入',
     authSignupBody:
       '開啟 AGENTHUB_ALLOW_REGISTRATION 後可自助註冊。密碼至少 8 位元組，電子郵件需符合基本結構；空實例上的第一個帳號成為擁有者。這類帳號（以及 OAuth 首次登入自動建立的帳號）一律從唯讀的 viewer 角色起步，只能讀目錄，直到管理員放寬。透過 POST /api/users 建立的帳號則完全依請求中的角色落庫。',
@@ -726,6 +735,9 @@ export const docsCopy = {
     epThreadEvents: "SSE：先回訪歷史，再跟隨被委派任務並寫入 agent 回覆。",
 },
   es: {
+    baseUrlTitle: 'URL base',
+    baseUrlBody:
+      'La consola, el servicio A2A y todas las rutas del plano de control comparten un solo escucha. La dirección de abajo es el valor predeterminado; la variable de entorno a su lado sustituye ese puerto. Compose también publica la base de datos de desarrollo en su propio puerto del host.',
     authSignupTitle: 'Registro y primer inicio de sesión',
     authSignupBody:
       'El registro libre está disponible con AGENTHUB_ALLOW_REGISTRATION activo. La contraseña debe tener al menos 8 bytes, la dirección debe parecer una dirección, y la primera cuenta de una instancia vacía pasa a ser la propietaria. Las cuentas creadas así —y las que provisiona el primer inicio de sesión OAuth— empiezan con el rol de solo lectura viewer: leen el catálogo y nada más hasta que un administrador las amplíe. Las cuentas creadas con POST /api/users reciben exactamente los roles solicitados.',
@@ -968,6 +980,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: reproduce el historial y luego sigue las tareas delegadas y persiste las respuestas del agente.",
 },
   fr: {
+    baseUrlTitle: 'URL de base',
+    baseUrlBody:
+      'La console, le service A2A et toutes les routes du plan de contrôle partagent un seul écouteur. Cette adresse est celle par défaut ; la variable indiquée à côté remplace ce port. Compose publie aussi la base de données de développement sur son propre port hôte.',
     authSignupTitle: 'Inscription et première connexion',
     authSignupBody:
       'L’inscription libre est disponible quand AGENTHUB_ALLOW_REGISTRATION est actif. Le mot de passe doit faire au moins 8 octets, l’adresse doit ressembler à une adresse, et le premier compte d’une instance vide devient propriétaire. Les comptes créés ainsi — comme ceux provisionnés par une première connexion OAuth — démarrent avec le rôle en lecture seule viewer : ils lisent le catalogue et rien de plus tant qu’un administrateur ne les élargit pas. Les comptes créés via POST /api/users reçoivent exactement les rôles demandés.',
@@ -1210,6 +1225,9 @@ export const docsCopy = {
     epThreadEvents: "SSE : rejoue l'historique, puis suit les tâches déléguées et persiste les réponses de l'agent.",
 },
   de: {
+    baseUrlTitle: 'Basis-URL',
+    baseUrlBody:
+      'Konsole, A2A-Endpunkt und alle Routen der Steuerungsebene teilen sich einen Listener. Die Adresse unten ist der Standardwert; die daneben genannte Umgebungsvariable ersetzt diesen Port. Compose veröffentlicht außerdem die Entwicklungsdatenbank auf einem eigenen Host-Port.',
     authSignupTitle: 'Registrierung und erste Anmeldung',
     authSignupBody:
       'Selbstregistrierung ist mit AGENTHUB_ALLOW_REGISTRATION verfügbar. Das Passwort muss mindestens 8 Bytes haben, die Adresse wie eine Adresse aussehen, und das erste Konto einer leeren Instanz wird Eigentümer. So entstandene Konten – und Konten, die eine erste OAuth-Anmeldung anlegt – starten mit der schreibgeschützten Rolle viewer: Sie lesen den Katalog und sonst nichts, bis ein Administrator sie erweitert. Über POST /api/users angelegte Konten erhalten genau die angeforderten Rollen.',
@@ -1452,6 +1470,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: spielt den Verlauf erneut ab und verfolgt dann delegierte Tasks und speichert Agent-Antworten.",
 },
   it: {
+    baseUrlTitle: 'URL di base',
+    baseUrlBody:
+      'La console, il servizio A2A e tutte le rotte del piano di controllo condividono un solo listener. Questo indirizzo è il valore predefinito; la variabile di ambiente accanto sostituisce tale porta. Compose pubblica anche il database di sviluppo su una propria porta host.',
     authSignupTitle: 'Registrazione e primo accesso',
     authSignupBody:
       'La registrazione libera è disponibile con AGENTHUB_ALLOW_REGISTRATION attivo. La password deve essere di almeno 8 byte, l’indirizzo deve sembrare un indirizzo e il primo account di un’istanza vuota diventa proprietario. Gli account creati così — e quelli creati al primo accesso OAuth — partono con il ruolo di sola lettura viewer: leggono il catalogo e nulla più finché un amministratore non li amplia. Gli account creati con POST /api/users ricevono esattamente i ruoli richiesti.',
@@ -1694,6 +1715,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: riproduce la cronologia, poi segue le attività delegate e persiste le risposte dell'agente.",
 },
   ru: {
+    baseUrlTitle: 'Базовый адрес',
+    baseUrlBody:
+      'Консоль, точка A2A и все маршруты плоскости управления используют один слушатель. Адрес ниже задан по умолчанию; переменная окружения рядом заменяет этот порт. Compose также публикует базу данных для разработки на отдельном порту хоста.',
     authSignupTitle: 'Регистрация и первый вход',
     authSignupBody:
       'Самостоятельная регистрация доступна при включённом AGENTHUB_ALLOW_REGISTRATION. Пароль должен быть не короче 8 байт, адрес — походить на адрес, а первая учётная запись на пустом экземпляре становится владельцем. Такие записи — и записи, созданные при первом входе через OAuth — начинают с роли «только чтение» viewer: они видят каталог и ничего больше, пока администратор не расширит их права. Записи, созданные через POST /api/users, получают ровно запрошенные роли.',
@@ -1936,6 +1960,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: воспроизводит историю, затем отслеживает делегированные задачи и сохраняет ответы агента.",
 },
   ja: {
+    baseUrlTitle: 'ベース URL',
+    baseUrlBody:
+      'コンソール、A2A エンドポイント、制御面のすべてのパスは同じリスナーを共有します。下記は既定のアドレスで、隣の環境変数がこのポートを上書きします。Compose は開発用データベースも別のホストポートに公開します。',
     authSignupTitle: '登録と初回ログイン',
     authSignupBody:
       'AGENTHUB_ALLOW_REGISTRATION を有効にするとセルフサインアップが使えます。パスワードは 8 バイト以上、メールアドレスはアドレスの形をしている必要があり、空のインスタンスで最初のアカウントは所有者になります。この方法で作られたアカウントと、OAuth の初回ログインで作られたアカウントは、読み取り専用の viewer ロールから始まります。管理者が広げるまでカタログを読むだけで、それ以外はできません。POST /api/users で作ったアカウントには、要求したロールがそのまま付きます。',
@@ -2178,6 +2205,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: 履歴を再生した後、委任されたタスクを追跡し、エージェントの応答を保存します。",
 },
   ko: {
+    baseUrlTitle: '기본 URL',
+    baseUrlBody:
+      '콘솔, A2A 엔드포인트, 모든 제어 평면 경로가 하나의 리스너를 공유합니다. 아래 주소는 기본값이며 옆의 환경 변수가 이 포트를 덮어씁니다. Compose는 개발용 데이터베이스도 별도의 호스트 포트로 공개합니다.',
     authSignupTitle: '가입과 첫 로그인',
     authSignupBody:
       'AGENTHUB_ALLOW_REGISTRATION 이 켜져 있으면 셀프 가입을 쓸 수 있습니다. 비밀번호는 8바이트 이상이어야 하고, 주소는 주소 형태여야 하며, 빈 인스턴스의 첫 계정은 소유자가 됩니다. 이렇게 만든 계정과 OAuth 첫 로그인으로 만들어진 계정은 읽기 전용 viewer 역할에서 시작합니다. 관리자가 넓혀 주기 전까지는 카탈로그만 읽을 수 있습니다. POST /api/users 로 만든 계정에는 요청한 역할이 그대로 적용됩니다.',
@@ -2420,6 +2450,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: 기록을 재생한 후 위임된 작업을 추적하고 에이전트 응답을 저장합니다.",
 },
   pt: {
+    baseUrlTitle: 'URL base',
+    baseUrlBody:
+      'O console, o serviço A2A e todas as rotas do plano de controle compartilham um único listener. O endereço abaixo é o padrão; a variável de ambiente ao lado substitui essa porta. O Compose também publica o banco de dados de desenvolvimento em uma porta própria do host.',
     authSignupTitle: 'Cadastro e primeiro acesso',
     authSignupBody:
       'O cadastro livre fica disponível com AGENTHUB_ALLOW_REGISTRATION ativo. A senha precisa ter ao menos 8 bytes, o endereço precisa parecer um endereço e a primeira conta de uma instância vazia torna-se proprietária. Contas criadas assim — e as provisionadas no primeiro acesso via OAuth — começam com o papel somente leitura viewer: leem o catálogo e nada mais até um administrador ampliá-las. Contas criadas por POST /api/users recebem exatamente os papéis pedidos.',
@@ -2662,6 +2695,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: reproduz o histórico e então acompanha as tarefas delegadas e persiste as respostas do agente.",
 },
   ar: {
+    baseUrlTitle: 'العنوان الأساسي',
+    baseUrlBody:
+      'تشارك وحدة التحكم ونقطة A2A وجميع مسارات مستوى التحكم في مستمع واحد. العنوان أدناه هو الافتراضي، ويستبدل متغير البيئة بجانبه هذا المنفذ. كما ينشر Compose قاعدة بيانات التطوير على منفذ خاص بها على المضيف.',
     authSignupTitle: 'التسجيل وأول دخول',
     authSignupBody:
       'يتوفر التسجيل الذاتي عند تفعيل AGENTHUB_ALLOW_REGISTRATION. يجب أن تكون كلمة المرور 8 بايتات على الأقل وأن يشبه العنوان عنوانًا، ويصبح أول حساب في نسخة فارغة هو المالك. الحسابات المنشأة بهذه الطريقة — وتلك التي ينشئها أول دخول عبر OAuth — تبدأ بدور viewer للقراءة فقط: تقرأ الكتالوج ولا شيء غيره حتى يوسّعها المسؤول. أما الحسابات المنشأة عبر POST /api/users فتحصل على الأدوار المطلوبة تمامًا.',
@@ -2904,6 +2940,9 @@ export const docsCopy = {
     epThreadEvents: "SSE: يعيد تشغيل السجل، ثم يتابع المهام المفوّضة ويحفظ ردود الوكيل.",
 },
   hi: {
+    baseUrlTitle: 'आधार URL',
+    baseUrlBody:
+      'कंसोल, A2A एंडपॉइंट और सभी नियंत्रण-तल मार्ग एक ही श्रोता साझा करते हैं। नीचे दिया पता डिफ़ॉल्ट है; बगल का पर्यावरण चर इस पोर्ट को बदलता है। Compose विकास डेटाबेस को मेज़बान के अपने अलग पोर्ट पर भी प्रकाशित करता है।',
     authSignupTitle: 'साइन-अप और पहला लॉगिन',
     authSignupBody:
       'AGENTHUB_ALLOW_REGISTRATION चालू होने पर स्वयं साइन-अप उपलब्ध है। पासवर्ड कम से कम 8 बाइट का होना चाहिए, पता पते जैसा दिखना चाहिए, और खाली इंस्टेंस पर पहला खाता स्वामी बनता है। इस तरह बने खाते — और OAuth के पहले लॉगिन से बने खाते — केवल-पढ़ने वाली viewer भूमिका से शुरू होते हैं: वे कैटलॉग पढ़ सकते हैं और कुछ नहीं, जब तक प्रशासक अधिकार न बढ़ाए। POST /api/users से बने खातों को ठीक वही भूमिकाएँ मिलती हैं जो माँगी गई थीं।',

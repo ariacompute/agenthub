@@ -25,6 +25,7 @@ import {
   sandboxNetworkModes,
   sandboxPolicyKinds,
   sandboxPolicySample,
+  serverBaseLines,
   taskStates,
 } from '../lib/docs-content.js'
 
@@ -213,6 +214,12 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
         <section :id="`sec-http`" class="card panel">
           <h3>{{ t('sectionHttp') }}</h3>
           <p class="lede">{{ t('httpBody') }}</p>
+
+          <div class="endpoint-group">
+            <h4>{{ t('baseUrlTitle') }}</h4>
+            <p class="note">{{ t('baseUrlBody') }}</p>
+            <pre class="code mono">{{ serverBaseLines.join('\n') }}</pre>
+          </div>
 
           <div v-for="group in grouped" :key="group.id" class="endpoint-group">
             <h4>{{ group.label }}</h4>

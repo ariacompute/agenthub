@@ -241,7 +241,9 @@ persistence ← internal/store（GORM 实现）
   （再 `bun scripts/gen-docs-md.mjs` 一次重生成 `docs/docs.md` 与 `docs/docs_cn.md` 两个文件）。
   `tests/docs_endpoints_test.go` 对 `handlers.go` 与两份 md 都做双向差集：漏项与幽灵条目
   都会让 `go test` 变红；`web/tests/docs-content.spec.js` 另把公开 / 仅会话端点的分类与
-  `handlers.go` 的 wrapper 钉住，改认证包装必须同步 `publicEndpoints` / `sessionOnlyEndpoints`。
+  `handlers.go` 的 wrapper 钉住，改认证包装必须同步 `publicEndpoints` / `sessionOnlyEndpoints`；
+  文档里的 base URL / 端口取自 `docs-content.js` 的 `serverBase`，同一 spec 把它与 `config.go`
+  及 `docker-compose.yml` 的默认值钉住，改默认端口必须同步。
 - **持久化不得阻塞运行**：状态/artifact/span 同步写，`events` 与 `push_records` **尽力而为**
   （有界队列 + 异步 writer，队列满或失败只 `slog.Warn`，绝不回压任务执行）；
   所有持久层调用统一走 `context.Background()`（客户端断连不得丢弃任务状态）。

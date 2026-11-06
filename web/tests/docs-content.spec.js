@@ -7,6 +7,8 @@ import {
   httpEndpoints,
   publicEndpoints,
   sandboxLayers,
+  serverBase,
+  serverBaseLines,
   sessionOnlyEndpoints,
   sandboxNetworkModes,
   sandboxPolicyKinds,
@@ -205,5 +207,34 @@ describe('docs content', () => {
       .map((endpoint) => `${endpoint.method} ${endpoint.path}`)
       .sort()
     expect([...classified].sort()).toEqual(blank)
+  })
+
+  it('pins the documented base URL to the server defaults', () => {
+    // A port in prose goes stale the moment config.go or compose changes. The
+    // numbers live in docs-content.js and are checked against both sources.
+    const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+    const defaultPort = read('../../internal/config/config.go').match(
+      /envStr\("AGENTHUB_HTTP_PORT",\s*"(\d+)"\)/,
+    )?.[1]
+    const dbPort = read('../../docker-compose.yml').match(/\$\{POSTGRES_PORT:-(\d+)\}/)?.[1]
+    expect(defaultPort, 'config.go default port not found').toBeTruthy()
+    expect(dbPort, 'compose default database port not found').toBeTruthy()
+    expect(serverBase.port).toBe(defaultPort)
+    expect(serverBase.dbPort).toBe(dbPort)
+
+    const sample = serverBaseLines.join('\n')
+    for (const value of [
+      serverBase.port,
+      serverBase.portEnv,
+      serverBase.dbPort,
+      serverBase.dbPortEnv,
+    ]) {
+      expect(sample, `base URL sample is missing ${value}`).toContain(value)
+    }
+    for (const lang of LANGS) {
+      const dict = resolve(lang)
+      expect(dict.baseUrlTitle, `${lang}.baseUrlTitle missing`).toBeTruthy()
+      expect(dict.baseUrlBody, `${lang}.baseUrlBody missing`).toBeTruthy()
+    }
   })
 })

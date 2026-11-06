@@ -20,6 +20,25 @@ export const docsSections = [
 ]
 
 /**
+ * Where the single listener lives. Ports are machine data, so they render
+ * verbatim in every locale; only the prose around them lives in docs-copy.js.
+ * web/tests/docs-content.spec.js pins these values to config.go and
+ * docker-compose.yml, so a port change cannot leave the docs behind.
+ */
+export const serverBase = {
+  port: '3500',
+  portEnv: 'AGENTHUB_HTTP_PORT',
+  dbPort: '5434',
+  dbPortEnv: 'POSTGRES_PORT',
+}
+
+/** One sample block shared by the /docs screen and the generated markdown. */
+export const serverBaseLines = [
+  `http://localhost:${serverBase.port}          ${serverBase.portEnv} (default)`,
+  `localhost:${serverBase.dbPort}                 ${serverBase.dbPortEnv} (compose development database only)`,
+]
+
+/**
  * The execution layers, strongest boundary first. The layer identifier renders
  * verbatim in every locale — it is the same token the API returns — and only the
  * description crosses into docs-copy.js.

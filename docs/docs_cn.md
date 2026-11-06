@@ -98,6 +98,15 @@ draft 到 pending 再到 approved，之后可置为 deprecated。只有 approved
 
 控制台自身使用的控制面。标为 `public` 的路由无需会话；标为 `session` 的路由只需登录、不校验权限码；其余路由需要会话 cookie 加权限列标明的权限。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。
 
+### 服务地址
+
+控制台、A2A 端点与全部控制面路径共用同一个监听器。下面是默认地址，旁边的环境变量可覆盖该端口；compose 还会把开发用数据库发布到自己的宿主端口。
+
+```text
+http://localhost:3500          AGENTHUB_HTTP_PORT (default)
+localhost:5434                 POSTGRES_PORT (compose development database only)
+```
+
 ### 协议
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |

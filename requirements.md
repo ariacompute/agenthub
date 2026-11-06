@@ -660,6 +660,10 @@ M3 各块的逐项验收写在对应子文档（`requirements-security.md` §验
   路径、所需权限、请求体与响应体示例；无权限码的端点按 `public`（匿名）/ `session`（仅需登录）标注，
   按 §4.2.1 的分组组织（协议/鉴权/资源/命名空间/上游源/任务/导出/工作台与线程/通道/连接器/计算机/
   目标与周期/调度器/沙盒与节点/共享文件/知识/用户与授权/备份/API Key/审计）。
+- 服务地址：HTTP 章开头给出默认 base URL 与端口，数值取自 `config.go` 的
+  `AGENTHUB_HTTP_PORT` 与 compose 的 `POSTGRES_PORT`；语言中立的数值放
+  `web/src/lib/docs-content.js` 的 `serverBase`，散文 13 语放 `docs-copy.js`，由
+  `docs-content.spec.js` 与两处源头双向钉住。
 - 沙盒：隔离层概念、类型目录与执行节点协议（与 `requirements-sandbox.md` 同源）。
 - 鉴权与错误码：会话 cookie、权限模型与 owner 语义；错误码按 HTTP 状态码分组 + 适配器码。
 

@@ -28,6 +28,7 @@ import {
   sandboxNetworkModes,
   sandboxPolicyKinds,
   sandboxPolicySample,
+  serverBaseLines,
   taskStates,
 } from '../web/src/lib/docs-content.js'
 import { docsCopy } from '../web/src/lib/copy/docs-copy.js'
@@ -172,6 +173,19 @@ function render(lang) {
 
   // --- HTTP API ---
   out.push(`## ${t(dict, 'sectionHttp')}`, '', t(dict, 'httpBody'), '')
+  // A port is machine data, so the sample block is shared with the /docs screen
+  // and rendered verbatim in both locales. No table pipes here: the Go guard
+  // reads `| `METHOD` | `/path` |` rows as endpoint documentation.
+  out.push(
+    `### ${t(dict, 'baseUrlTitle')}`,
+    '',
+    t(dict, 'baseUrlBody'),
+    '',
+    '```text',
+    serverBaseLines.join('\n'),
+    '```',
+    '',
+  )
   const header = [
     t(dict, 'colMethod'),
     t(dict, 'colPath'),

@@ -98,6 +98,15 @@ The stream ends on the terminal status frame; there is no sentinel frame after i
 
 The control plane the console itself talks to. Routes marked `public` are anonymous; routes marked `session` need a signed-in session but no permission code; every other route needs a session cookie plus the permission named in the column. A delete answers the way a read does: an id the caller cannot see is 404, whether it is already gone or belongs to somebody else. The console treats that answer as already done.
 
+### Base URL
+
+The console, the A2A endpoint and every control-plane path share one listener. The address below is the default; the environment variable beside it overrides that port. Compose also publishes the development database on its own host port.
+
+```text
+http://localhost:3500          AGENTHUB_HTTP_PORT (default)
+localhost:5434                 POSTGRES_PORT (compose development database only)
+```
+
 ### Protocol
 
 | Method | Path | Permission | What it does | Request | Response |
