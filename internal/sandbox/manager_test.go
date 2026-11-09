@@ -533,20 +533,27 @@ func TestAFailedExecIsLoggedWithoutItsCommandLine(t *testing.T) {
 		// every one of them against the profile first.
 		o.Defaults.ArgsPolicy = ArgsPassthrough
 	})
+	// A lease ID is "lease_" plus 24 hex digits. A short, hex-looking sentinel
+	// such as "abc" can occur inside that random ID by chance, failing this case
+	// on a log line that never carried the command line at all. Keep every
+	// sentinel outside the hex alphabet so the ID cannot be mistaken for a leak.
+	const command, flag, secret = "top-secret-command", "--token", "s3cr3t-value-not-hex"
 	ctx := context.Background()
 	lease, err := manager.Acquire(ctx, LeaseRequest{OwnerID: "u1", ResourceID: "a", Provider: "lost"})
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	if _, err := manager.Exec(ctx, lease.ID, ExecRequest{Command: "top-secret-command", Args: []string{"--token", "abc"}}); err == nil {
+	if _, err := manager.Exec(ctx, lease.ID, ExecRequest{Command: command, Args: []string{flag, secret}}); err == nil {
 		t.Fatal("the provider refused the command")
 	}
 	line := logged.String()
 	if !strings.Contains(line, "sandbox exec failed") || !strings.Contains(line, lease.ID) {
 		t.Fatalf("the log line must identify the lease: %q", line)
 	}
-	if strings.Contains(line, "top-secret-command") || strings.Contains(line, "abc") {
-		t.Fatalf("the log line must never carry the command line: %q", line)
+	for _, leaked := range []string{command, flag, secret} {
+		if strings.Contains(line, leaked) {
+			t.Fatalf("the log line must never carry the command line (%q leaked): %q", leaked, line)
+		}
 	}
 }
 
