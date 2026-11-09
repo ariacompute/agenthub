@@ -2,15 +2,15 @@
      web/src/lib/copy/docs-copy.js — the same modules the /docs screen reads.
      Run `make docs-md` to regenerate. Do not edit by hand. -->
 
-# agenthub Documentation
+# AgentHub Documentation
 
-What agenthub does, and every endpoint it answers.
+What AgentHub does, and every endpoint it answers.
 
 > Ships with this console build
 
 ## Concepts
 
-agenthub registers five kinds of resource plus a custom lane, then runs them over A2A. Every call resolves to one resource, produces one task, and reports one health value that it actually measured.
+AgentHub registers five kinds of resource plus a custom lane, then runs them over A2A. Every call resolves to one resource, produces one task, and reports one health value that it actually measured.
 
 ### Resource lanes
 

@@ -1,6 +1,6 @@
 # Open-source sandbox landscape
 
-Why this document exists: agenthub used to call itself a control plane while
+Why this document exists: AgentHub used to call itself a control plane while
 leaving every execution to an external process it never constrained. The
 sandbox work replaces that with a provider catalogue, and a catalogue is only
 useful if the operator can tell what each entry actually buys.
@@ -11,7 +11,7 @@ packaging, not in what a compromise can reach.
 
 ## 1. Layers
 
-| # | Layer | Representative projects | Boundary enforced by | Cold start | Kernel attack surface | Toolchain compatibility | Licence | How it plugs into agenthub | Built in |
+| # | Layer | Representative projects | Boundary enforced by | Cold start | Kernel attack surface | Toolchain compatibility | Licence | How it plugs into AgentHub | Built in |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ① | microVM | Firecracker, Cloud Hypervisor, libkrun, crosvm, Kata Containers | hardware virtualisation + guest kernel | sub-second to seconds (Firecracker ≈125 ms) | minimal — the host kernel is not shared | complete (a real Linux kernel) | Apache-2.0 | Kata through `docker/podman --runtime=kata`; Firecracker-class platforms through the remote node protocol | preset `kata` |
 | ② | user-space kernel | gVisor (runsc + Sentry + Gofer) | Sentry intercepts syscalls in user space | ≈100 ms | greatly reduced | good (a few syscalls unimplemented) | Apache-2.0 | `docker --runtime=runsc`, i.e. the docker provider with a runtime argument | preset `gvisor` |
@@ -40,14 +40,14 @@ descriptor reports `isolation: container` rather than "sandboxed".
 **④ — the cheap local option.** `bwrap` starts in milliseconds and needs no
 image, which is what makes it the right answer for a developer laptop or a CI
 box without a container runtime. The honest limit: without a seccomp profile it
-is a namespace boundary, not a syscall boundary, and agenthub labels it as
+is a namespace boundary, not a syscall boundary, and AgentHub labels it as
 such. nsjail and isolate add seccomp; both are reachable as declarative
 templates so they do not need a Go release to become available.
 
 **Platforms — do not embed the SDK.** E2B, microsandbox, Daytona, CubeSandbox
 and OpenHands each own a lifecycle vocabulary (`sandbox`, `machine`,
 `workspace`, `session`) and a client library. Baking one in would make a
-vendor's SDK a production dependency of agenthub and would pick a winner on the
+vendor's SDK a production dependency of AgentHub and would pick a winner on the
 operator's behalf. The remote node protocol keeps them at arm's length: a thin
 adapter translates create/exec/attach/destroy/status, and the credential is
 referenced by environment variable name, never stored.
@@ -88,9 +88,9 @@ declare no network all advertise `delegated`.
 rule existed the declaration was decoration, and asking bubblewrap for `bridge`
 silently returned the host's network.
 
-## 5. Where agenthub sits
+## 5. Where AgentHub sits
 
-agenthub is the **control plane**: it decides who may execute, where, with what
+AgentHub is the **control plane**: it decides who may execute, where, with what
 limits, for how long, and it records what happened. It is deliberately not a
 sandbox implementation. The provider catalogue is the seam: adding a layer
 means registering a provider or writing a template, not changing the hub, the

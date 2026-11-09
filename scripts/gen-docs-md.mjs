@@ -98,7 +98,7 @@ function render(lang) {
     '     web/src/lib/copy/docs-copy.js — the same modules the /docs screen reads.',
     '     Run `make docs-md` to regenerate. Do not edit by hand. -->',
     '',
-    `# agenthub ${t(dict, 'pageTitle')}`,
+    `# AgentHub ${t(dict, 'pageTitle')}`,
     '',
     t(dict, 'pageSub'),
     '',

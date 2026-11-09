@@ -94,7 +94,7 @@ const buildLabel = computed(() => (buildNote.value ? `${build.value} · ${buildN
         <BrandMark :size="30" />
       </div>
       <div>
-        <div class="brand-name">agenthub</div>
+        <div class="brand-name">AgentHub</div>
         <div class="brand-tagline">{{ t('brandTagline') }}</div>
       </div>
     </div>

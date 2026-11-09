@@ -2,15 +2,15 @@
      web/src/lib/copy/docs-copy.js — the same modules the /docs screen reads.
      Run `make docs-md` to regenerate. Do not edit by hand. -->
 
-# agenthub 文档
+# AgentHub 文档
 
-agenthub 能做什么，以及它应答的每一个端点。
+AgentHub 能做什么，以及它应答的每一个端点。
 
 > 随本控制台版本一起发版
 
 ## 核心概念
 
-agenthub 登记五类资源外加一个自定义通道，再通过 A2A 调用它们。每次调用都会定位到一个资源、产生一个任务，并上报一个它真正实测过的健康值。
+AgentHub 登记五类资源外加一个自定义通道，再通过 A2A 调用它们。每次调用都会定位到一个资源、产生一个任务，并上报一个它真正实测过的健康值。
 
 ### 资源通道
 

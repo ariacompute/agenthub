@@ -72,7 +72,7 @@ async function submit() {
           <BrandMark :size="30" />
         </div>
         <div>
-          <div class="brand-name">agenthub</div>
+          <div class="brand-name">AgentHub</div>
           <div class="brand-tagline">{{ shell.t('brandTagline') }}</div>
         </div>
       </div>

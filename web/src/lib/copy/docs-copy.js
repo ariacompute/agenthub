@@ -32,7 +32,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Rename, set an expiry, or replace the scopes of a key you may manage.",
     epApiKeyRevoke: "Revoke a key. It stops authenticating immediately but the row is kept for audit.",
     pageTitle: 'Documentation',
-    pageSub: 'What agenthub does, and every endpoint it answers.',
+    pageSub: 'What AgentHub does, and every endpoint it answers.',
     versionNote: 'Ships with this console build',
     indexTitle: 'On this page',
 
@@ -69,7 +69,7 @@ export const docsCopy = {
       "Whatever the host runtime calls its default. A container gets the daemon's bridge; bubblewrap shares the host network.",
 
     conceptsBody:
-      'agenthub registers five kinds of resource plus a custom lane, then runs them over A2A. Every call resolves to one resource, produces one task, and reports one health value that it actually measured.',
+      'AgentHub registers five kinds of resource plus a custom lane, then runs them over A2A. Every call resolves to one resource, produces one task, and reports one health value that it actually measured.',
     a2aBody:
       'A single JSON-RPC 2.0 endpoint answers every method below. The HTTP status stays 200 even when the task fails: read result.state, not the status line.',
     httpBody:
@@ -280,7 +280,7 @@ export const docsCopy = {
     epApiKeyUpdate: "重命名、设置过期时间，或替换你可管理的密钥的权限范围。",
     epApiKeyRevoke: "吊销密钥。它将立即停止认证，但会保留记录以供审计。",
     pageTitle: '文档',
-    pageSub: 'agenthub 能做什么，以及它应答的每一个端点。',
+    pageSub: 'AgentHub 能做什么，以及它应答的每一个端点。',
     versionNote: '随本控制台版本一起发版',
     indexTitle: '本页章节',
 
@@ -314,7 +314,7 @@ export const docsCopy = {
     sandboxNetworkPlatformDesc: '宿主运行时所谓的默认网络。容器取守护进程的 bridge；bubblewrap 直接共享宿主网络。',
 
     conceptsBody:
-      'agenthub 登记五类资源外加一个自定义通道，再通过 A2A 调用它们。每次调用都会定位到一个资源、产生一个任务，并上报一个它真正实测过的健康值。',
+      'AgentHub 登记五类资源外加一个自定义通道，再通过 A2A 调用它们。每次调用都会定位到一个资源、产生一个任务，并上报一个它真正实测过的健康值。',
     a2aBody: '下列所有方法共用同一个 JSON-RPC 2.0 端点。任务失败时 HTTP 状态码仍是 200：要看 result.state，而不是状态行。',
     httpBody: '控制台自身使用的控制面。标为 `public` 的路由无需会话；标为 `session` 的路由只需登录、不校验权限码；其余路由需要会话 cookie 加权限列标明的权限。删除的回答与读一致：读不到的 id 一律 404——已经没了和是他人的是同一个答案——控制台把它当作「已经删掉了」。',
     authBody: '身份来自会话 cookie，授权来自每次请求解析一次的权限集合。资源级授权会在此基础上进一步收窄。',
@@ -517,7 +517,7 @@ export const docsCopy = {
     epApiKeyUpdate: "重新命名、設定過期時間，或替換你可管理的金鑰的權限範圍。",
     epApiKeyRevoke: "撤銷金鑰。它會立即停止認證，但會保留記錄以供審計。",
     pageTitle: '文件',
-    pageSub: 'agenthub 能做什麼，以及它會回應的每一個端點。',
+    pageSub: 'AgentHub 能做什麼，以及它會回應的每一個端點。',
     versionNote: '隨本主控台版本一同發行',
     indexTitle: '本頁章節',
 
@@ -551,7 +551,7 @@ export const docsCopy = {
     sandboxNetworkPlatformDesc: '主機執行環境所謂的預設網路。容器取守護程序的 bridge；bubblewrap 直接共用主機網路。',
 
     conceptsBody:
-      'agenthub 登錄五類資源外加一個自訂通道，再透過 A2A 呼叫它們。每次呼叫都會定位到一個資源、產生一個任務，並回報一個它真正實測過的健康值。',
+      'AgentHub 登錄五類資源外加一個自訂通道，再透過 A2A 呼叫它們。每次呼叫都會定位到一個資源、產生一個任務，並回報一個它真正實測過的健康值。',
     a2aBody: '下列所有方法共用同一個 JSON-RPC 2.0 端點。任務失敗時 HTTP 狀態碼仍是 200：要看 result.state，而不是狀態行。',
     httpBody: '主控台本身使用的控制面。標為 `public` 的路由無需工作階段；標為 `session` 的路由只需登入、不校驗權限碼；其餘路由需要工作階段 cookie 加權限欄標明的權限。刪除的答覆與讀取一致：讀不到的 id 一律 404——已經沒了與屬於他人的是同一個答案——主控台會把它當作「已經刪掉了」。',
     authBody: '身分來自工作階段 cookie，授權來自每次請求解析一次的權限集合。資源層級授權會在此基礎上進一步收斂。',
@@ -754,7 +754,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Renombra, fija una caducidad o reemplaza los permisos de una clave que puedes gestionar.",
     epApiKeyRevoke: "Revoca una clave. Deja de autenticar al instante, pero se conserva para auditoría.",
     pageTitle: 'Documentación',
-    pageSub: 'Qué hace agenthub y cada endpoint al que responde.',
+    pageSub: 'Qué hace AgentHub y cada endpoint al que responde.',
     versionNote: 'Se publica con esta compilación de la consola',
     indexTitle: 'En esta página',
 
@@ -791,7 +791,7 @@ export const docsCopy = {
       'Lo que el runtime del host llama su conexión por defecto. El contenedor toma el bridge del daemon; bubblewrap comparte la conexión del host.',
 
     conceptsBody:
-      'agenthub registra cinco clases de recurso más un carril personalizado y los ejecuta sobre A2A. Cada llamada se resuelve en un recurso, produce una tarea y reporta un valor de salud que realmente midió.',
+      'AgentHub registra cinco clases de recurso más un carril personalizado y los ejecuta sobre A2A. Cada llamada se resuelve en un recurso, produce una tarea y reporta un valor de salud que realmente midió.',
     a2aBody:
       'Un único endpoint JSON-RPC 2.0 responde a todos los métodos siguientes. El estado HTTP sigue siendo 200 aunque la tarea falle: lee result.state, no la línea de estado.',
     httpBody:
@@ -999,7 +999,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Renomme, définit une expiration ou remplace les permissions d’une clé que vous pouvez gérer.",
     epApiKeyRevoke: "Révoque une clé. Elle cesse aussitôt de s’authentifier, mais la ligne est conservée pour l’audit.",
     pageTitle: 'Centre de documentation',
-    pageSub: 'Ce que fait agenthub, et chaque endpoint auquel il répond.',
+    pageSub: 'Ce que fait AgentHub, et chaque endpoint auquel il répond.',
     versionNote: 'Publié avec cette version de la console',
     indexTitle: 'Sur cette page',
 
@@ -1036,7 +1036,7 @@ export const docsCopy = {
       'Ce que l’exécuteur de l’hôte appelle son réseau par défaut. Le conteneur prend le bridge du démon ; bubblewrap partage le réseau de l’hôte.',
 
     conceptsBody:
-      'agenthub enregistre cinq types de ressource plus une voie personnalisée, puis les exécute via A2A. Chaque appel se résout en une ressource, produit une tâche et rapporte une valeur de santé qu’il a réellement mesurée.',
+      'AgentHub enregistre cinq types de ressource plus une voie personnalisée, puis les exécute via A2A. Chaque appel se résout en une ressource, produit une tâche et rapporte une valeur de santé qu’il a réellement mesurée.',
     a2aBody:
       'Un seul endpoint JSON-RPC 2.0 répond à toutes les méthodes ci-dessous. Le statut HTTP reste 200 même si la tâche échoue : lisez result.state, pas la ligne de statut.',
     httpBody:
@@ -1244,7 +1244,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Benennt um, setzt eine Ablaufzeit oder ersetzt die Berechtigungen eines verwaltbaren Schlüssels.",
     epApiKeyRevoke: "Widerruft einen Schlüssel. Er authentifiziert sofort nicht mehr, der Datensatz bleibt jedoch für die Prüfung.",
     pageTitle: 'Dokumentation',
-    pageSub: 'Was agenthub tut und jeder Endpoint, den es bedient.',
+    pageSub: 'Was AgentHub tut und jeder Endpoint, den es bedient.',
     versionNote: 'Erscheint mit diesem Konsolen-Build',
     indexTitle: 'Auf dieser Seite',
 
@@ -1281,7 +1281,7 @@ export const docsCopy = {
       'Was die Host-Laufzeit ihr Standardnetz nennt. Der Container nimmt die Bridge des Daemons; bubblewrap teilt das Hostnetz.',
 
     conceptsBody:
-      'agenthub registriert fünf Ressourcenarten plus eine eigene Spur und führt sie über A2A aus. Jeder Aufruf löst eine Ressource auf, erzeugt eine Aufgabe und meldet einen Gesundheitswert, den er wirklich gemessen hat.',
+      'AgentHub registriert fünf Ressourcenarten plus eine eigene Spur und führt sie über A2A aus. Jeder Aufruf löst eine Ressource auf, erzeugt eine Aufgabe und meldet einen Gesundheitswert, den er wirklich gemessen hat.',
     a2aBody:
       'Ein einziger JSON-RPC-2.0-Endpoint bedient alle folgenden Methoden. Der HTTP-Status bleibt 200, auch wenn die Aufgabe scheitert: lies result.state, nicht die Statuszeile.',
     httpBody:
@@ -1489,7 +1489,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Rinomina, imposta una scadenza o sostituisce i permessi di una chiave che puoi gestire.",
     epApiKeyRevoke: "Revoca una chiave. Smette subito di autenticare, ma la riga è conservata per l’audit.",
     pageTitle: 'Documentazione',
-    pageSub: 'Cosa fa agenthub e ogni endpoint a cui risponde.',
+    pageSub: 'Cosa fa AgentHub e ogni endpoint a cui risponde.',
     versionNote: 'Pubblicata con questa build della console',
     indexTitle: 'In questa pagina',
 
@@ -1526,7 +1526,7 @@ export const docsCopy = {
       'Quella che il runtime dell’host chiama rete predefinita. Il container prende la bridge del daemon; bubblewrap condivide la rete dell’host.',
 
     conceptsBody:
-      'agenthub registra cinque tipi di risorsa più una categoria personalizzata e li esegue tramite A2A. Ogni chiamata si risolve in una risorsa, produce un task e riporta un valore di salute che ha davvero misurato.',
+      'AgentHub registra cinque tipi di risorsa più una categoria personalizzata e li esegue tramite A2A. Ogni chiamata si risolve in una risorsa, produce un task e riporta un valore di salute che ha davvero misurato.',
     a2aBody:
       'Un solo endpoint JSON-RPC 2.0 risponde a tutti i metodi qui sotto. Lo stato HTTP resta 200 anche se il task fallisce: leggi result.state, non la riga di stato.',
     httpBody:
@@ -1734,7 +1734,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Переименовывает, задаёт срок действия или заменяет права ключа, которым вы управляете.",
     epApiKeyRevoke: "Отзывает ключ. Он сразу перестаёт работать, но запись сохраняется для аудита.",
     pageTitle: 'Документация',
-    pageSub: 'Что делает agenthub и каждый endpoint, на который он отвечает.',
+    pageSub: 'Что делает AgentHub и каждый endpoint, на который он отвечает.',
     versionNote: 'Поставляется вместе с этой сборкой консоли',
     indexTitle: 'На этой странице',
 
@@ -1771,7 +1771,7 @@ export const docsCopy = {
       'То, что среда хоста называет сетью по умолчанию. Контейнер берёт bridge демона; bubblewrap делит сеть хоста.',
 
     conceptsBody:
-      'agenthub регистрирует пять видов ресурсов плюс собственную категорию и запускает их через A2A. Каждый вызов разрешается в один ресурс, создаёт одну задачу и сообщает значение состояния, которое действительно измерил.',
+      'AgentHub регистрирует пять видов ресурсов плюс собственную категорию и запускает их через A2A. Каждый вызов разрешается в один ресурс, создаёт одну задачу и сообщает значение состояния, которое действительно измерил.',
     a2aBody:
       'Одна точка JSON-RPC 2.0 отвечает на все методы ниже. HTTP-статус остаётся 200 даже при сбое задачи: читайте result.state, а не строку статуса.',
     httpBody:
@@ -1979,7 +1979,7 @@ export const docsCopy = {
     epApiKeyUpdate: "管理可能なキーの名前変更、有効期限の設定、または権限の置換を行います。",
     epApiKeyRevoke: "キーを失効させます。即座に認証が無効になりますが、監査のため記録は残ります。",
     pageTitle: 'ドキュメント',
-    pageSub: 'agenthub がすることと、応答するすべてのエンドポイント。',
+    pageSub: 'AgentHub がすることと、応答するすべてのエンドポイント。',
     versionNote: 'このコンソールのビルドと共に提供',
     indexTitle: 'このページの内容',
 
@@ -2016,7 +2016,7 @@ export const docsCopy = {
       'ホストのランタイムが既定ネットワークと呼ぶものです。コンテナはデーモンの bridge を使い、bubblewrap はホストのネットワークを共有します。',
 
     conceptsBody:
-      'agenthub は 5 種類のリソースとカスタム区分を登録し、A2A で実行します。各呼び出しは 1 つのリソースに解決され、1 つのタスクを生成し、実際に測定した 1 つの健全性値を報告します。',
+      'AgentHub は 5 種類のリソースとカスタム区分を登録し、A2A で実行します。各呼び出しは 1 つのリソースに解決され、1 つのタスクを生成し、実際に測定した 1 つの健全性値を報告します。',
     a2aBody:
       '単一の JSON-RPC 2.0 エンドポイントが以下の全メソッドに応答します。タスクが失敗しても HTTP ステータスは 200 のままです。ステータス行ではなく result.state を読んでください。',
     httpBody:
@@ -2224,7 +2224,7 @@ export const docsCopy = {
     epApiKeyUpdate: "관리 가능한 키의 이름 변경, 만료 설정 또는 권한 교체를 수행합니다.",
     epApiKeyRevoke: "키를 취소합니다. 즉시 인증이 중단되지만 감사를 위해 기록은 남습니다.",
     pageTitle: '문서',
-    pageSub: 'agenthub가 하는 일과 응답하는 모든 엔드포인트.',
+    pageSub: 'AgentHub가 하는 일과 응답하는 모든 엔드포인트.',
     versionNote: '이 콘솔 빌드와 함께 제공됨',
     indexTitle: '이 페이지의 목차',
 
@@ -2261,7 +2261,7 @@ export const docsCopy = {
       '호스트 런타임이 기본 네트워크라고 부르는 것입니다. 컨테이너는 데몬의 bridge를 쓰고, bubblewrap은 호스트 네트워크를 공유합니다.',
 
     conceptsBody:
-      'agenthub는 다섯 종류의 리소스와 사용자 정의 구분을 등록한 뒤 A2A로 실행합니다. 모든 호출은 하나의 리소스로 해석되어 하나의 태스크를 만들고, 실제로 측정한 하나의 상태 값을 보고합니다.',
+      'AgentHub는 다섯 종류의 리소스와 사용자 정의 구분을 등록한 뒤 A2A로 실행합니다. 모든 호출은 하나의 리소스로 해석되어 하나의 태스크를 만들고, 실제로 측정한 하나의 상태 값을 보고합니다.',
     a2aBody:
       '하나의 JSON-RPC 2.0 엔드포인트가 아래 모든 메서드에 응답합니다. 태스크가 실패해도 HTTP 상태는 200입니다. 상태 줄이 아니라 result.state를 읽으세요.',
     httpBody:
@@ -2469,7 +2469,7 @@ export const docsCopy = {
     epApiKeyUpdate: "Renomeia, define uma expiração ou substitui as permissões de uma chave que você pode gerenciar.",
     epApiKeyRevoke: "Revoga uma chave. Ela para de autenticar imediatamente, mas a linha é mantida para auditoria.",
     pageTitle: 'Documentação',
-    pageSub: 'O que o agenthub faz e cada endpoint ao qual responde.',
+    pageSub: 'O que o AgentHub faz e cada endpoint ao qual responde.',
     versionNote: 'Publicada com esta compilação do console',
     indexTitle: 'Nesta página',
 
@@ -2506,7 +2506,7 @@ export const docsCopy = {
       'Aquilo a que o runtime do anfitrião chama rede predefinida. O contentor usa a bridge do daemon; o bubblewrap partilha a rede do anfitrião.',
 
     conceptsBody:
-      'O agenthub registra cinco tipos de recurso mais uma categoria personalizada e os executa via A2A. Cada chamada se resolve em um recurso, produz uma tarefa e reporta um valor de saúde que realmente mediu.',
+      'O AgentHub registra cinco tipos de recurso mais uma categoria personalizada e os executa via A2A. Cada chamada se resolve em um recurso, produz uma tarefa e reporta um valor de saúde que realmente mediu.',
     a2aBody:
       'Um único endpoint JSON-RPC 2.0 responde a todos os métodos abaixo. O status HTTP permanece 200 mesmo quando a tarefa falha: leia result.state, não a linha de status.',
     httpBody:
@@ -2714,7 +2714,7 @@ export const docsCopy = {
     epApiKeyUpdate: "تعيد تسمية مفتاح أو تحدد انتهاء صلاحيته أو تستبدل صلاحياته مما يمكنك إدارته.",
     epApiKeyRevoke: "تُبطل مفتاحًا. يتوقف عن المصادقة فورًا، لكن الصف يُبقي للتدقيق.",
     pageTitle: 'الوثائق',
-    pageSub: 'ما يفعله agenthub، وكل نقطة نهاية يستجيب لها.',
+    pageSub: 'ما يفعله AgentHub، وكل نقطة نهاية يستجيب لها.',
     versionNote: 'تُصدَر مع هذه النسخة من وحدة التحكم',
     indexTitle: 'في هذه الصفحة',
 
@@ -2751,7 +2751,7 @@ export const docsCopy = {
       'ما تسمّيه بيئة المضيف شبكتها الافتراضية. تأخذ الحاوية جسر الخدمة، ويشارك bubblewrap شبكة المضيف.',
 
     conceptsBody:
-      'يسجّل agenthub خمسة أنواع من الموارد إضافةً إلى فئة مخصّصة، ثم يشغّلها عبر A2A. تُحَل كل استدعاءة إلى مورد واحد، وتنتج مهمة واحدة، وتُبلّغ عن قيمة حالة قاسها فعلياً.',
+      'يسجّل AgentHub خمسة أنواع من الموارد إضافةً إلى فئة مخصّصة، ثم يشغّلها عبر A2A. تُحَل كل استدعاءة إلى مورد واحد، وتنتج مهمة واحدة، وتُبلّغ عن قيمة حالة قاسها فعلياً.',
     a2aBody:
       'تستجيب نقطة JSON-RPC 2.0 واحدة لكل الطرق أدناه. يبقى status HTTP مساوياً 200 حتى عند فشل المهمة: اقرأ result.state لا سطر الحالة.',
     httpBody:
@@ -2959,7 +2959,7 @@ export const docsCopy = {
     epApiKeyUpdate: "उन कुंजियों का नाम बदलें, समाप्ति निर्धारित करें या अनुमतियाँ बदलें जिन्हें आप प्रबंधित कर सकें।",
     epApiKeyRevoke: "कुंजी रद्द करता है। यह तुरंत प्रमाणीकरण बंद कर देती है, लेकिन लेखा-जोखा हेतु पंक्ति रखी जाती है।",
     pageTitle: 'दस्तावेज़',
-    pageSub: 'agenthub क्या करता है, और हर एंडपॉइंट जिस पर वह उत्तर देता है।',
+    pageSub: 'AgentHub क्या करता है, और हर एंडपॉइंट जिस पर वह उत्तर देता है।',
     versionNote: 'इस कंसोल बिल्ड के साथ जारी',
     indexTitle: 'इस पृष्ठ पर',
 
@@ -2996,7 +2996,7 @@ export const docsCopy = {
       'जिसे होस्ट रनटाइम अपना डिफ़ॉल्ट नेटवर्क कहता है। कंटेनर डेमॉन का bridge लेता है; bubblewrap होस्ट का नेटवर्क साझा करता है।',
 
     conceptsBody:
-      'agenthub पाँच प्रकार के संसाधन और एक कस्टम श्रेणी पंजीकृत करता है, फिर उन्हें A2A पर चलाता है। हर कॉल एक संसाधन पर सुलझती है, एक टास्क बनाती है, और एक स्वास्थ्य मान बताती है जिसे उसने वास्तव में मापा है।',
+      'AgentHub पाँच प्रकार के संसाधन और एक कस्टम श्रेणी पंजीकृत करता है, फिर उन्हें A2A पर चलाता है। हर कॉल एक संसाधन पर सुलझती है, एक टास्क बनाती है, और एक स्वास्थ्य मान बताती है जिसे उसने वास्तव में मापा है।',
     a2aBody:
       'एक ही JSON-RPC 2.0 एंडपॉइंट नीचे दी सभी विधियों को उत्तर देता है। टास्क विफल होने पर भी HTTP स्थिति 200 रहती है: status पंक्ति नहीं, result.state पढ़ें।',
     httpBody:
