@@ -1206,3 +1206,42 @@ postgres 只挂在 `internal: true` 的 `data` 网络上，Docker 不给只连 i
   `make` 以非 0 退出；撤掉 override 重建后 `make db-up` 恢复为 ready。
 - 未跑 `make up` 的镜像全量构建（本次无 Dockerfile / Go / 前端改动），容器化 DSN 由
   `docker compose config` 与 `internal/store` 的宿主连库用例间接覆盖。
+
+## M20 — 会话删除端点（2026-11-09，配合 agentbuddy F3.6）
+
+桌面端 `Threads` 屏支持单选 / 多选删除后会发 `DELETE /api/threads/{id}`，而服务端只有
+`GET/POST`，请求会被 mux 回 405。本轮只补这一个端点，不新增迁移、权限码或机器码；
+行为契约见 `requirements.md` §13。
+
+### 1. 收口
+
+- `internal/threads/types.go`：`Store` 加 `DeleteThread(ctx, id, ownerID) error`，
+  与 `GetThread` 同一归属口径——不存在 / 非本人同为 `ErrNotFound`。
+- `internal/store/threads_store.go`：`withIdentity` + `ownedWhere(...).Delete(&threadRow{})`，
+  `RowsAffected == 0` → `threads.ErrNotFound`；消息历史由 `012_threads.sql` 已有的
+  `ON DELETE CASCADE` 连带删除，强制 RLS 下无需逐条清理，也不新增迁移文件。
+- `internal/handlers/threads.go`：`handleDeleteThread` 用 `PrincipalFrom(r).UserID`，
+  成功 `w.WriteHeader(204)`、`threadError` 把 `ErrNotFound` 映射为 404 `not_found`；
+  `d.Threads == nil` 时回 503 `feature_unavailable`，避免无库实例 panic。
+- `internal/handlers/handlers.go`：`DELETE /api/threads/{id}` 挂 `tasks:write`。
+- 四处 `threads.Store` 实现同步：`memThreads`（真空删 + 消息清空）、`failingThreads`
+  （注入 `errStoreDown`）、`cmd/agenthub-server` 的 `fakeThreads`（未使用即报错）。
+
+### 2. 文档与路由守恒
+
+- `web/src/lib/docs-content.js` 新增 1 行（collaboration 23 → 24、全表 141 → 142），
+  `web/src/lib/copy/docs-copy.js` 13 语各补 `epThreadDelete`；
+  `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md` / `docs/docs_cn.md`。
+- `web/tests/docs-content.spec.js` 的总数 / 分组断言，`AGENTS.md`、中英 `README.md`、
+  `requirements.md` §4.2 的"141 条"全部同步为 142。
+- `internal/handlers/listen.go` 的 `Listeners()` 与 `listen_test.go` 的 `probes`
+  成对登记（无库时探针回 503，非 404），`compose-ports.sh` 的摘要表无须改动。
+
+### 3. 验证
+
+- 新增 `TestDeleteThread`（204 空体 / 他人与不存在的 404 `not_found` / 消息清空 / 重试）、
+  `TestAStoreFailureIsReportedNotSwallowed` 与 `TestDeletingAnInvisibleRowIsANotFound`
+  各补一条 threads 用例；`internal/store/threads_store_test.go` 新增 `DATABASE_URL` 门控的
+  级联与重复删除用例。
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿（含 `tests/docs_endpoints_test.go`
+  双向差集）；`cd web && bun run test` 全绿；`DATABASE_URL` 门控用例本机跳过，留 CI/连库环境实跑。

@@ -425,7 +425,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | 上游源 | 5 | `/api/registry-sources`（GET/POST）、`{id}`（PUT/DELETE）、`{id}/sync` | `sources:manage` |
 | 任务 | 6 | `/api/tasks`、`{id}`、`{id}/spans`、`{id}/events`、`{id}/cancel`、`{id}/resume` | `tasks:read` / `tasks:write` |
 | 导出 | 2 | `/api/export/mcp`、`/api/export/agent-card` | `resources:read` |
-| 工作台与线程 | 7 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`、`{id}/messages`、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
+| 工作台与线程 | 8 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`（GET/DELETE）、`{id}/messages`、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
 | 通道 | 9 | `/api/channels`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/deliveries`、`{id}/deliveries/{did}/retry`、`{id}/webhook`（**公开，签名校验**）、`{id}/deliver` | `tasks:read` / `tasks:write`；webhook 无会话 |
 | 连接器 | 7 | `/api/connectors`、`{id}/policy`（PUT）、`{id}/actions`（GET/POST）、`approvals`（GET）、`approvals/{id}/approve|reject`（POST） | `resources:read` / `resources:write`；审批队列用 `tasks:read` / `tasks:write` |
 | 计算机 | 4 | `/api/computers`（GET/POST）、`{id}`（GET/DELETE） | `resources:read` / `resources:write` |
@@ -440,9 +440,9 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | API Key | 5 | `/api/api-keys`（GET/POST）、`{id}`（GET/PUT/DELETE） | `requireAuth`（各自持有者的 key） |
 | 共享文件 | 5 | `/api/files`（GET/POST）、`{id}`（GET/DELETE）、`{id}/content` | `tasks:read` / `tasks:write`；下载支持 `Range` |
 
-上表分组条数合计 **136** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
+上表分组条数合计 **137** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
 另有 5 条协议面路由（`POST /a2a`、`GET /a2a/stream`、`GET /a2a/agent-card`、
-`GET /.well-known/agent.json`、`GET /healthz`），合计 **141** 条 `mux.HandleFunc`。
+`GET /.well-known/agent.json`、`GET /healthz`），合计 **142** 条 `mux.HandleFunc`。
 `/docs` 屏与 `docs/*.md` 的分组口径略有不同（把 `/api/schedules/{id}/run` 归入调度器组，
 故该组为 14 条），但端点集合一致。
 
@@ -839,3 +839,33 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
 - 宿主 DSN 的库门控用例 `go test ./internal/store/` 全绿；`docker compose config` 中
   agenthub 的 DSN 为 `postgres:5434` 而非 `localhost`。
 - `docker compose config -q`、`sh -n scripts/compose-ports.sh` 通过。
+
+## 13. 会话删除端点（2026-11-09，配合 agentbuddy F3.6）
+
+### 13.1 边界
+
+- 新增唯一控制面路由 `DELETE /api/threads/{id}`，复用 `tasks:write`；不新增迁移、错误码或权限码。
+- `threads.Store` 扩展 `DeleteThread(ctx, id, ownerID) error`；GORM 实现、内存假实现、失败注入假实现
+  与启动期假实现都满足同一归属语义。
+- 不做批量端点：桌面端多选时逐 id 调用，因此服务端状态机与既有事务边界不变。
+
+### 13.2 行为契约
+
+- `id` 不存在或不属于调用者一律 404 `not_found`，两者不可区分；删除不能被用来探测他人 id。
+- 成功回 204 空体。`thread_messages` 由 `012_threads.sql` 已有的 `ON DELETE CASCADE` 连带删除，
+  强制 RLS（`030_threads_rls.sql`）下同样生效，不额外做逐条删除或先读后删。
+- `d.Threads == nil` → 503 `feature_unavailable`；存储报错 → 带机器码的 5xx，不得静默成功。
+- 幂等性在客户端：404 读作「已经没了」，其余拒绝码经 `errors.js` 本地化；服务端对同一个 id
+  重复删除仍回 404，不引入 `already_deleted` 之类新状态。
+
+### 13.3 验收标准
+
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`tests/docs_endpoints_test.go` 对
+  `handlers.go` 与两份 md 的双向差集通过。
+- `web/src/lib/docs-content.js` 登记该端点（collaboration 组 24 条、全表 142 条），
+  `docs-copy.js` 13 语 `epThreadDelete` 齐全且均不同于英文；
+  `bun scripts/gen-docs-md.mjs` 重生成 `docs/docs.md` 与 `docs/docs_cn.md` 后无未提交漂移。
+- `web/tests/docs-content.spec.js` 的总数与分组断言、`AGENTS.md` / 中英 README / §4.2 的
+  路由总数同步到 142。
+- 用例覆盖：204 空体与消息级联、他人 / 不存在 / 重试的 404 `not_found`、存储故障 5xx、
+  无存储 503、路由存活探针；`internal/store` 的 `DATABASE_URL` 门控用例验证级联与重复删除。

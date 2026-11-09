@@ -1002,6 +1002,15 @@ export const httpEndpoints = [
   },
   {
     group: 'collaboration',
+    method: 'DELETE',
+    path: '/api/threads/{id}',
+    permission: 'tasks:write',
+    descKey: 'epThreadDelete',
+    request: '',
+    response: '204 | 404 not_found',
+  },
+  {
+    group: 'collaboration',
     method: 'POST',
     path: '/api/threads/{id}/messages',
     permission: 'tasks:write',

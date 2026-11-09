@@ -80,6 +80,8 @@ func TestListenersCoverRoutes(t *testing.T) {
 		"POST /api/connectors/approvals/{id}/approve": {http.MethodPost, "/api/connectors/approvals/task-1/approve", ""},
 		"POST /api/connectors/approvals/{id}/reject":  {http.MethodPost, "/api/connectors/approvals/task-1/reject", ""},
 		"POST /api/threads/{id}/audio":                {http.MethodPost, "/api/threads/" + finished + "/audio", ""},
+		// No thread store is wired in here, so the delete answers 503, not 404.
+		"DELETE /api/threads/{id}": {http.MethodDelete, "/api/threads/th-1", ""},
 		// Computers / schedules / knowledge answer 503 without a store wired in, not 404.
 		"GET /api/computers":         {http.MethodGet, "/api/computers", ""},
 		"POST /api/computers":        {http.MethodPost, "/api/computers", `{"kind":"browser"}`},

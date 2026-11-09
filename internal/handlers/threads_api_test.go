@@ -88,6 +88,19 @@ func (m *memThreads) ListThreads(_ context.Context, ownerID string) ([]*threads.
 	return out, nil
 }
 
+func (m *memThreads) DeleteThread(_ context.Context, id, ownerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.threads[id]
+	if !ok || t.OwnerID != ownerID {
+		return threads.ErrNotFound
+	}
+	delete(m.threads, id)
+	// The GORM store relies on ON DELETE CASCADE; the fake drops the same rows.
+	delete(m.messages, id)
+	return nil
+}
+
 func (m *memThreads) SetParticipants(_ context.Context, threadID string, resourceIDs []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -280,6 +293,50 @@ func TestGetThread(t *testing.T) {
 	}
 	if w := do(t, h, http.MethodGet, "/api/threads/nope", "", nil); w.Code != http.StatusNotFound {
 		t.Fatalf("missing status = %d, want 404", w.Code)
+	}
+}
+
+func TestDeleteThread(t *testing.T) {
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""))
+	d.Threads = mt
+	mine, _ := mt.CreateThread(context.Background(), &threads.Thread{Title: "mine", OwnerID: "dev"})
+	mt.AddMessage(context.Background(), &threads.Message{ThreadID: mine.ID, AuthorType: "user", AuthorID: "dev", Body: "hi"})
+	theirs, _ := mt.CreateThread(context.Background(), &threads.Thread{Title: "theirs", OwnerID: "someone-else"})
+	h := Register(d)
+
+	// Not-owned and missing ids must answer the same 404 and leave the row alone.
+	for _, id := range []string{theirs.ID, "nope"} {
+		w := do(t, h, http.MethodDelete, "/api/threads/"+id, "", nil)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("delete %s: status = %d, want 404", id, w.Code)
+		}
+		if code := errCode(t, w); code != "not_found" {
+			t.Fatalf("delete %s: code = %q, want not_found", id, code)
+		}
+	}
+	if _, err := mt.GetThread(context.Background(), theirs.ID, "someone-else"); err != nil {
+		t.Fatalf("somebody else's thread was touched: %v", err)
+	}
+
+	// The owner's delete is a bodyless 204 and takes the message history with it.
+	w := do(t, h, http.MethodDelete, "/api/threads/"+mine.ID, "", nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (%s)", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("204 carried a body: %q", w.Body.String())
+	}
+	if _, err := mt.GetThread(context.Background(), mine.ID, "dev"); !errors.Is(err, threads.ErrNotFound) {
+		t.Fatalf("thread survived: %v", err)
+	}
+	if msgs, err := mt.ListMessages(context.Background(), mine.ID, 0); err != nil || len(msgs) != 0 {
+		t.Fatalf("message history survived: %v %+v", err, msgs)
+	}
+
+	// A retry is still "already gone", which is what makes a batch delete safe.
+	if w := do(t, h, http.MethodDelete, "/api/threads/"+mine.ID, "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("retry status = %d, want 404", w.Code)
 	}
 }
 

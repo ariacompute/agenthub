@@ -172,6 +172,7 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/threads", d.requirePermission(authz.PermTasksRead, d.handleListThreads))
 	mux.HandleFunc("POST /api/threads", d.requirePermission(authz.PermTasksWrite, d.handleCreateThread))
 	mux.HandleFunc("GET /api/threads/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetThread))
+	mux.HandleFunc("DELETE /api/threads/{id}", d.requirePermission(authz.PermTasksWrite, d.handleDeleteThread))
 	mux.HandleFunc("POST /api/threads/{id}/messages", d.requirePermission(authz.PermTasksWrite, d.handlePostThreadMessage))
 	mux.HandleFunc("GET /api/threads/{id}/events", d.requirePermission(authz.PermTasksRead, d.handleThreadEventStream))
 

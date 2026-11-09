@@ -73,6 +73,23 @@ func (d Deps) handleGetThread(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"thread": t, "messages": msgs})
 }
 
+// handleDeleteThread removes one of the caller's threads together with its
+// message history (the FOREIGN KEY cascades). The store reports a missing id as
+// threads.ErrNotFound, which the console reads as "already gone" — that is what
+// makes a multi-select delete safe to retry.
+func (d Deps) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
+	if d.Threads == nil {
+		httputil.WriteError(w, http.StatusServiceUnavailable, httputil.CodeFeatureUnavailable)
+		return
+	}
+	p := PrincipalFrom(r)
+	if err := d.Threads.DeleteThread(r.Context(), r.PathValue("id"), p.UserID); err != nil {
+		threadError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handlePostThreadMessage appends a human message and, for every @mention,
 // delegates the message to that agent through the hub (message/send over A2A).
 // Each delegation is recorded as an (initially empty) agent message keyed by the

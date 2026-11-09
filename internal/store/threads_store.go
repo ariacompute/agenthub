@@ -145,6 +145,24 @@ func (s *threadsStore) ListThreads(ctx context.Context, ownerID string) ([]*thre
 	})
 }
 
+// DeleteThread removes a thread by (id, owner) in one statement. RowsAffected is
+// the ownership gate: a thread that is gone or belongs to somebody else is the
+// same ErrNotFound, so a delete cannot be used to probe for hidden ids. The
+// message history follows the ON DELETE CASCADE in migrations/012_threads.sql,
+// including under the forced RLS policy from 030.
+func (s *threadsStore) DeleteThread(ctx context.Context, id, ownerID string) error {
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		res := ownedWhere(db, id, ownerID).Delete(&threadRow{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return threads.ErrNotFound
+		}
+		return nil
+	})
+}
+
 func (s *threadsStore) SetParticipants(ctx context.Context, threadID string, resourceIDs []string) error {
 	parts, err := model.NewJSONField(resourceIDs)
 	if err != nil {

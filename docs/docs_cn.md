@@ -248,6 +248,7 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `GET` | `/api/threads` | `tasks:read` — 查看任务 | 列出调用者拥有的线程。 | — | `{ threads: [Thread] }` |
 | `POST` | `/api/threads` | `tasks:write` — 取消与恢复任务 | 创建调用者拥有的线程。 | `{ title?, participants?: [resourceId] }` | `Thread — 201` |
 | `GET` | `/api/threads/{id}` | `tasks:read` — 查看任务 | 读取线程及其消息历史。 | — | `{ thread, messages: [Message] }` |
+| `DELETE` | `/api/threads/{id}` | `tasks:write` — 取消与恢复任务 | 删除调用者拥有的线程；消息历史随外键级联一并删除。 | — | `204 \| 404 not_found` |
 | `POST` | `/api/threads/{id}/messages` | `tasks:write` — 取消与恢复任务 | 追加一条消息；每个 @mention 经 A2A 委派给对应 agent（Hub.Send），以任务 id 关联。 | `{ body, mentions?: [resourceId] }` | `{ message, delegated: [taskId], failed: [resourceId] } — 201` |
 | `GET` | `/api/threads/{id}/events` | `tasks:read` — 查看任务 | SSE：先回访历史，再跟随被委派任务并落库 agent 回复。 | — | `text/event-stream of { thread.message, thread.agent }` |
 | `GET` | `/api/channels` | `tasks:read` — 查看任务 | 列出全部通道 | — | `Channel[]` |

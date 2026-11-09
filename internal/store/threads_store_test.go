@@ -115,6 +115,48 @@ func TestThreadsStore(t *testing.T) {
 	}
 }
 
+// TestThreadsStoreDelete checks the ON DELETE CASCADE and the owner gate against
+// a real PostgreSQL; it skips without DATABASE_URL like every DB-backed case here.
+func TestThreadsStoreDelete(t *testing.T) {
+	db := openGovernanceDB(t)
+	s := NewThreadsStore(db)
+	ctx := context.Background()
+
+	th, err := s.CreateThread(ctx, &threads.Thread{Title: "to delete", OwnerID: "dev"})
+	if err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	if _, err := s.AddMessage(ctx, &threads.Message{ThreadID: th.ID, AuthorType: "user", AuthorID: "dev", Body: "hi"}); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	// Somebody else's delete is a not-found and leaves the thread (and history) put.
+	if err := s.DeleteThread(ctx, th.ID, "other"); !errors.Is(err, threads.ErrNotFound) {
+		t.Fatalf("other owner: err=%v, want ErrNotFound", err)
+	}
+	if _, err := s.GetThread(ctx, th.ID, "dev"); err != nil {
+		t.Fatalf("other owner's delete touched the thread: %v", err)
+	}
+
+	// The owner's delete takes the message history with it through the FK.
+	if err := s.DeleteThread(ctx, th.ID, "dev"); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+	if _, err := s.GetThread(ctx, th.ID, "dev"); !errors.Is(err, threads.ErrNotFound) {
+		t.Fatalf("thread survived: err=%v, want ErrNotFound", err)
+	}
+	if msgs, err := s.ListMessages(ctx, th.ID, 0); err != nil || len(msgs) != 0 {
+		t.Fatalf("cascade failed: err=%v messages=%+v", err, msgs)
+	}
+
+	// Retrying, or deleting an id that never existed, stays "already gone".
+	for _, id := range []string{th.ID, "missing"} {
+		if err := s.DeleteThread(ctx, id, "dev"); !errors.Is(err, threads.ErrNotFound) {
+			t.Fatalf("delete %s: err=%v, want ErrNotFound", id, err)
+		}
+	}
+}
+
 // parseSeq converts the string message id (a decimal integer) into the numeric
 // cursor ListMessages expects.
 func parseSeq(s string) int64 {

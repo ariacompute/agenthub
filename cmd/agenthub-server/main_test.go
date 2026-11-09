@@ -289,6 +289,10 @@ func (f *fakeThreads) ListThreads(context.Context, string) ([]*threads.Thread, e
 	return nil, errors.New("not used")
 }
 
+func (f *fakeThreads) DeleteThread(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
 func (f *fakeThreads) SetParticipants(context.Context, string, []string) error {
 	return errors.New("not used")
 }

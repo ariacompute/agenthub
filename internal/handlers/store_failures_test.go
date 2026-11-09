@@ -46,6 +46,7 @@ func (failingThreads) CreateThread(context.Context, *threads.Thread) (*threads.T
 func (failingThreads) GetThread(context.Context, string, string) (*threads.Thread, error) {
 	return nil, errStoreDown
 }
+func (failingThreads) DeleteThread(context.Context, string, string) error      { return errStoreDown }
 func (failingThreads) SetParticipants(context.Context, string, []string) error { return errStoreDown }
 func (failingThreads) AddMessage(context.Context, *threads.Message) (*threads.Message, error) {
 	return nil, errStoreDown
@@ -155,6 +156,7 @@ func TestAStoreFailureIsReportedNotSwallowed(t *testing.T) {
 		{"threads create", http.MethodPost, "/api/threads", `{"title":"t"}`, func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
 		{"threads get", http.MethodGet, "/api/threads/thread-1", "", func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
 		{"threads post", http.MethodPost, "/api/threads/thread-1/messages", `{"body":"hi"}`, func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
+		{"threads delete", http.MethodDelete, "/api/threads/thread-1", "", func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
 
 		{"channels list", http.MethodGet, "/api/channels", "", wireBrokenChannels},
 		{"channels get", http.MethodGet, "/api/channels/ch-1", "", wireBrokenChannels},
@@ -216,6 +218,7 @@ func TestDeletingAnInvisibleRowIsANotFound(t *testing.T) {
 		code string
 		wire func(d *Deps)
 	}{
+		{"thread", "/api/threads/nope", "not_found", func(d *Deps) { d.Threads = newMemThreads() }},
 		{"schedule", "/api/schedules/nope", "schedule_not_found", func(d *Deps) { d.Schedules = &memSchedules{} }},
 		{"channel", "/api/channels/nope", "channel_not_found", func(d *Deps) {
 			d.Cfg.ChannelsEnabled = true

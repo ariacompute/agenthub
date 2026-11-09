@@ -62,6 +62,11 @@ type Store interface {
 	// path that answers a signed in user.
 	GetThreadUnscoped(ctx context.Context, id string) (*Thread, error)
 	ListThreads(ctx context.Context, ownerID string) ([]*Thread, error)
+	// DeleteThread removes an owned thread; its messages go with it through the
+	// ON DELETE CASCADE foreign key. A thread that is missing or belongs to
+	// somebody else comes back as ErrNotFound, so a delete cannot be used to
+	// probe for ids the caller is not allowed to see.
+	DeleteThread(ctx context.Context, id, ownerID string) error
 	SetParticipants(ctx context.Context, threadID string, resourceIDs []string) error
 	AddMessage(ctx context.Context, m *Message) (*Message, error)
 	ListMessages(ctx context.Context, threadID string, sinceSeq int64) ([]*Message, error)
