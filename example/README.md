@@ -259,14 +259,18 @@ WSL2 / Ubuntu and takes the agent as its first argument:
   Card (default 60s, `--wait`). Host, port and the card path are read out of the matching
   `resources/agent-<name>-ubuntu.json`, so the script cannot drift from the catalogue, and a
   mismatch with what is registered is called out.
-- the default agent is a deterministic `BaseAgent` that calls no LLM, so the deployment can be
-  verified before any credential exists. `--llm` swaps in the gateway-backed agent
-  (`--model-id`, default `ariacompute/ariamodel`; `--api-base`, default
-  `https://gateway.ariacompute.com/v1`).
-- the gateway key comes from `--api-key` or `AGENTHUB_EXAMPLE_API_KEY` and only travels through
-  the server process environment: it is never written to the generated agent, the pid file or the
-  log, and never echoed. Prefer the environment variable — a value on the command line shows up
-  in `ps`.
+- every option defaults to the repository-root `.env`, falling back to `.env.example` for the keys
+  `.env` does not set: `AGENTHUB_EXAMPLE_MODEL_ID` feeds `--model-id`, `AGENTHUB_EXAMPLE_API_BASE`
+  feeds `--api-base`, and `AGENTHUB_EXAMPLE_API_KEY` is the gateway key. An exported variable beats
+  the file and a flag beats both, so the same `.env` that configures the server also brings the
+  agent up without repeating anything.
+- the variant follows the credential: a key anywhere (shell, `.env`, `--api-key`) serves the
+  gateway-backed agent, and a box without one falls back to the deterministic `BaseAgent` that calls
+  no LLM, so the deployment can still be verified before any credential exists. `--offline` forces
+  the stub and `--llm` forces the gateway agent.
+- the gateway key only travels through the server process environment: it is never written to the
+  generated agent, the pid file or the log, and never echoed. Prefer the environment variable or
+  `.env` — a value on the command line shows up in `ps`.
 - `stop` sends TERM (KILL when it is ignored), `status` reports pid + card reachability + log path
   and exits 1 when nothing is running, and `smoke` sends one `message/send` and prints the reply,
   so a real answer is distinguishable from a mock.

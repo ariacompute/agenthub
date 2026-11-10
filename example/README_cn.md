@@ -230,11 +230,15 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
 - `start`：建 venv、写 `a2a_agent.py`、用 `nohup` 起服务并等待 Agent Card（默认 60s，`--wait`）。
   host、端口与卡片路径从对应的 `resources/agent-<name>-ubuntu.json` 读出来，脚本不会跟目录脱节；
   与登记值不一致时会提示。
-- 默认 agent 是不调 LLM 的确定性 `BaseAgent`，所以在没有任何凭据之前就能验证部署；`--llm` 换成走
-  网关的 agent（`--model-id`，默认 `ariacompute/ariamodel`；`--api-base`，默认
-  `https://gateway.ariacompute.com/v1`）。
-- 网关 key 来自 `--api-key` 或 `AGENTHUB_EXAMPLE_API_KEY`，只经服务进程环境传递：不写进生成的
-  agent、pid 文件与日志，也不回显。优先用环境变量——命令行上的值会出现在 `ps` 里。
+- 所有选项默认读仓库根目录的 `.env`，`.env` 没设的键再回落 `.env.example`：
+  `AGENTHUB_EXAMPLE_MODEL_ID` 对应 `--model-id`，`AGENTHUB_EXAMPLE_API_BASE` 对应 `--api-base`，
+  `AGENTHUB_EXAMPLE_API_KEY` 就是网关 key。已导出的变量优先于文件，命令行参数优先于两者——同一份
+  `.env` 既配置服务端，也能把 agent 拉起来，不必到处重复。
+- 变体跟着凭据走：shell、`.env` 或 `--api-key` 里有 key 就起网关版 agent，没有 key 的机器回落
+  不调 LLM 的确定性 `BaseAgent`，所以没有凭据之前也能验证部署。`--offline` 强制离线桩，`--llm`
+  强制网关版。
+- 网关 key 只经服务进程环境传递：不写进生成的 agent、pid 文件与日志，也不回显。优先用环境变量或
+  `.env`——命令行上的值会出现在 `ps` 里。
 - `stop` 发 TERM（不理就 KILL），`status` 报 pid + 卡片可达性 + 日志路径（没在跑时退出码 1），
   `smoke` 发一条 `message/send` 并打印回复，真实回复与 mock 一眼可分。
 - 产物都在 `$HOME/.local/share/agenthub-<agent>`（`--workdir` 可覆盖），venv 与日志都不进仓库。

@@ -20,9 +20,14 @@
 #   smoke    print the card, send one message/send and print the reply
 #
 # Options:
-#   --llm                serve the gateway-backed agent instead of the offline one
-#   --model-id <id>      model id, default ariacompute/ariamodel
+#   --llm                serve the gateway-backed agent (the default whenever a
+#                        gateway key is configured)
+#   --offline            serve the deterministic offline agent instead (the
+#                        default when no key is configured anywhere)
+#   --model-id <id>      model id, default AGENTHUB_EXAMPLE_MODEL_ID, else
+#                        ariacompute/ariamodel
 #   --api-base <url>     OpenAI-compatible base url, default
+#                        AGENTHUB_EXAMPLE_API_BASE, else
 #                        https://gateway.ariacompute.com/v1
 #   --api-key <key>      gateway key, overrides AGENTHUB_EXAMPLE_API_KEY
 #   --host <host>        listen address, default from the example JSON (127.0.0.1)
@@ -33,11 +38,17 @@
 #                        by a reasoning gateway is slow, not missing)
 #   -h | --help          this text
 #
-# Credentials: the gateway key comes from --api-key or AGENTHUB_EXAMPLE_API_KEY
-# and only ever travels through the server process environment — it is not
-# written into the generated agent, the pid file or the log, and is never
-# echoed. Prefer the environment variable: a value on the command line is
-# visible to other users through `ps`.
+# Configuration: every option above defaults to the repository-root .env, falling
+# back to .env.example for the keys .env does not set. A variable already exported
+# by the caller beats both, and the command line beats everything. That way
+# `AGENTHUB_EXAMPLE_MODEL_ID` and `AGENTHUB_EXAMPLE_API_KEY` in .env are enough to
+# bring up the gateway-backed agent with a plain `start`.
+#
+# Credentials: the gateway key comes from --api-key, AGENTHUB_EXAMPLE_API_KEY in
+# the environment, or the same key in .env, and only ever travels through the
+# server process environment — it is not written into the generated agent, the pid
+# file or the log, and is never echoed. Prefer the environment variable or .env: a
+# value on the command line is visible to other users through `ps`.
 #
 # This script never talks to agenthub: it does not log in, does not load the
 # catalogue and does not call /probe. Run example/load.sh separately.
@@ -49,22 +60,24 @@ set -euo pipefail
 SELF="$0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RES_DIR="$SCRIPT_DIR/resources"
+# The one config file the examples share lives at the repository root.
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SUPPORTED_AGENTS="google-adk"
 COMMANDS="start stop restart status smoke"
 
 AGENT=""
 COMMAND=""
-USE_LLM=0
-MODEL_ID="ariacompute/ariamodel"
-API_BASE="https://gateway.ariacompute.com/v1"
-API_KEY=""
-API_KEY_FROM_CLI=0
+# What the command line asked for. The effective value is resolved once .env has
+# been read, so a flag, an exported variable and the file still layer in order.
+USE_LLM_ARG=""
+MODEL_ID_ARG=""
+API_BASE_ARG=""
+API_KEY_ARG=""
 HOST_ARG=""
 PORT_ARG=""
 WORKDIR=""
 WAIT="60"
-SMOKE_TEXT="${AGENTHUB_AGENT_SMOKE_TEXT:-ping from deploy-agent.sh}"
 
 print_help() {
   sed -n '2,/^# --- end of usage ---$/p' "$SELF" |
@@ -78,6 +91,46 @@ usage_error() {
   exit 2
 }
 
+# Reads KEY=VALUE pairs from one dotenv file into the environment without touching
+# anything the caller already exported, so a shell-level value keeps winning over
+# the file. A missing file is fine: .env is optional and .env.example is only the
+# template that fills whatever .env left out. The file is parsed, not sourced: a
+# .env is data, and this script runs with `set -euo pipefail`.
+load_env_file() {
+  local file="$1" line key value
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      '' | '#'*) continue ;;
+    esac
+    case "$line" in
+      export\ *) line="${line#export }" ;;
+    esac
+    case "$line" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    # Trim the padding around the key; the value keeps its inner spaces.
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    case "$key" in
+      [A-Za-z_][A-Za-z0-9_]*) ;;
+      *) continue ;;
+    esac
+    # Drop one layer of matching quotes, the way a dotenv reader does.
+    case "$value" in
+      \"*\") value="${value#\"}" && value="${value%\"}" ;;
+      \'*\') value="${value#\'}" && value="${value%\'}" ;;
+    esac
+    if ! declare -p "$key" >/dev/null 2>&1; then
+      export "$key=$value"
+    fi
+  done <"$file"
+}
+
 # ---- arguments ---------------------------------------------------------------
 
 while [ $# -gt 0 ]; do
@@ -86,18 +139,18 @@ while [ $# -gt 0 ]; do
       print_help
       exit 0
       ;;
-    --llm) USE_LLM=1 ;;
+    --llm) USE_LLM_ARG=1 ;;
+    --offline) USE_LLM_ARG=0 ;;
     --model-id)
-      MODEL_ID="${2:-}"
+      MODEL_ID_ARG="${2:-}"
       shift
       ;;
     --api-base)
-      API_BASE="${2:-}"
+      API_BASE_ARG="${2:-}"
       shift
       ;;
     --api-key)
-      API_KEY="${2:-}"
-      API_KEY_FROM_CLI=1
+      API_KEY_ARG="${2:-}"
       shift
       ;;
     --host)
@@ -149,6 +202,37 @@ case " $COMMANDS " in
   *" $COMMAND "*) ;;
   *) usage_error "unsupported command: $COMMAND" ;;
 esac
+
+# ---- configuration -----------------------------------------------------------
+# Layering, weakest first: built-in default, .env.example, .env, an exported
+# variable, then the flag. load_env_file only fills unset keys, so loading .env
+# before .env.example and both before the flags reproduces that order without
+# tracking where each value came from.
+load_env_file "$ROOT_DIR/.env"
+load_env_file "$ROOT_DIR/.env.example"
+
+MODEL_ID="${MODEL_ID_ARG:-${AGENTHUB_EXAMPLE_MODEL_ID:-ariacompute/ariamodel}}"
+API_BASE="${API_BASE_ARG:-${AGENTHUB_EXAMPLE_API_BASE:-https://gateway.ariacompute.com/v1}}"
+if [ -n "$API_KEY_ARG" ]; then
+  API_KEY="$API_KEY_ARG"
+  API_KEY_FROM_CLI=1
+else
+  API_KEY="${AGENTHUB_EXAMPLE_API_KEY:-}"
+  API_KEY_FROM_CLI=0
+fi
+# The variant follows the credential: a key anywhere (shell, .env, --api-key)
+# means the caller wants the real agent, and only a box without one gets the
+# deterministic stub. --llm / --offline still decide when they are passed.
+USE_LLM_AUTO=0
+if [ -n "$USE_LLM_ARG" ]; then
+  USE_LLM="$USE_LLM_ARG"
+elif [ -n "$API_KEY" ]; then
+  USE_LLM=1
+  USE_LLM_AUTO=1
+else
+  USE_LLM=0
+fi
+SMOKE_TEXT="${AGENTHUB_AGENT_SMOKE_TEXT:-ping from deploy-agent.sh}"
 
 if [ -z "$MODEL_ID" ] || [ -z "$API_BASE" ]; then
   echo "--model-id and --api-base cannot be empty" >&2
@@ -343,12 +427,16 @@ resolve_api_key() {
     API_KEY="${AGENTHUB_EXAMPLE_API_KEY:-}"
   fi
   if [ -z "$API_KEY" ]; then
-    echo "--llm needs a gateway key: pass --api-key or export AGENTHUB_EXAMPLE_API_KEY" >&2
+    echo "--llm needs a gateway key: pass --api-key, export AGENTHUB_EXAMPLE_API_KEY," >&2
+    echo "or set AGENTHUB_EXAMPLE_API_KEY in $ROOT_DIR/.env" >&2
     echo "the value only reaches the server process environment; it is never written to a file" >&2
     exit 2
   fi
   if [ "$API_KEY_FROM_CLI" = "1" ]; then
     echo "note: a key given on the command line is visible in 'ps'; prefer the environment variable" >&2
+  fi
+  if [ "$USE_LLM_AUTO" = "1" ]; then
+    echo "note: a gateway key is configured, so this serves the gateway agent (pass --offline for the stub)" >&2
   fi
 }
 
