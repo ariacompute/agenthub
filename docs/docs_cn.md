@@ -135,13 +135,15 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/resources` | `resources:read` — 查看资源 | 列出全部资源 | `?kind=&q=&namespace=&status=` | `{ resources: [Entry], counts: { kind }, health: { state } }` |
-| `POST` | `/api/resources` | `resources:write` — 变更资源 | 在资源中新建一条 | `{ kind, name, endpoint?, transport?, namespace?, kindConfig? }` | `Entry — 201` |
+| `POST` | `/api/resources` | `resources:write` — 变更资源 | 在资源中新建一条 | `{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }` | `Entry — 201` |
 | `GET` | `/api/resources/{id}` | `resources:read` — 查看资源 | 按 id 读取其中一条资源 | — | `Entry` |
 | `PUT` | `/api/resources/{id}` | `resources:write` — 变更资源 | 整体替换其中一条资源 | `Entry — the path id wins over the body` | `Entry` |
 | `DELETE` | `/api/resources/{id}` | `resources:write` — 变更资源 | 删除其中一条资源 | — | `204, no body` |
 | `POST` | `/api/resources/{id}/health` | `resources:write` — 变更资源 | 手工写入一个健康值。 | `{ health }` | `{ health }` |
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — 变更资源 | 立即实测该资源并保存测到的结果。 | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — 批准、拒绝与弃用记录 | 让一条记录沿审批状态机前进一步。 | `{ status, reason? }` | `Entry` |
+
+每个资源只有一个显示名 `display_name`，`name` 是注册标识。persona 不再含 displayName，严格的 PUT 会拒绝该旧键；迁移 032 回填旧记录。
 
 ### 命名空间
 

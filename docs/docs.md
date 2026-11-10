@@ -135,13 +135,15 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/resources` | `resources:read` — Read resources | List all resources | `?kind=&q=&namespace=&status=` | `{ resources: [Entry], counts: { kind }, health: { state } }` |
-| `POST` | `/api/resources` | `resources:write` — Change resources | Create a new entry among the resources | `{ kind, name, endpoint?, transport?, namespace?, kindConfig? }` | `Entry — 201` |
+| `POST` | `/api/resources` | `resources:write` — Change resources | Create a new entry among the resources | `{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }` | `Entry — 201` |
 | `GET` | `/api/resources/{id}` | `resources:read` — Read resources | Read one of the resources by id | — | `Entry` |
 | `PUT` | `/api/resources/{id}` | `resources:write` — Change resources | Replace one of the resources outright | `Entry — the path id wins over the body` | `Entry` |
 | `DELETE` | `/api/resources/{id}` | `resources:write` — Change resources | Delete one of the resources | — | `204, no body` |
 | `POST` | `/api/resources/{id}/health` | `resources:write` — Change resources | Write a health value by hand. | `{ health }` | `{ health }` |
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — Change resources | Measure the resource now and store whatever was found. | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — Approve, reject and deprecate records | Move a record along the curation state machine. | `{ status, reason? }` | `Entry` |
+
+One display label per resource: `display_name`; `name` is the registry id. Persona has no displayName, and a strict PUT rejects that legacy key. Migration 032 backfills older records.
 
 ### Namespaces
 

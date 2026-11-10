@@ -194,13 +194,14 @@ export const a2aShapes = [
  * Endpoint groups, in the order the route table registers them.
  *
  * `noteKey` is optional and carries the one thing a route table cannot show:
- * what a call does *not* touch. Only the backups group needs it — the archive's
- * scope is the point of the feature and invisible from a path.
+ * what a call does *not* touch, or a contract no column can express. Backups
+ * uses it for the archive's scope; resources uses it for the single display
+ * label and the strict Entry decoder.
  */
 export const endpointGroups = [
   { id: 'protocol', groupKey: 'groupProtocol' },
   { id: 'auth', groupKey: 'groupAuth' },
-  { id: 'resources', groupKey: 'groupResources' },
+  { id: 'resources', groupKey: 'groupResources', noteKey: 'groupResourcesNote' },
   { id: 'registries', groupKey: 'groupRegistries' },
   { id: 'sources', groupKey: 'groupSources' },
   { id: 'tasks', groupKey: 'groupTasks' },
@@ -405,7 +406,7 @@ export const httpEndpoints = [
     permission: 'resources:write',
     descKey: 'verbCreate',
     nounKey: 'nounResources',
-    request: '{ kind, name, endpoint?, transport?, namespace?, kindConfig? }',
+    request: '{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }',
     response: 'Entry — 201',
   },
   {
@@ -1017,6 +1018,15 @@ export const httpEndpoints = [
     descKey: 'epThreadMessage',
     request: '{ body, mentions?: [resourceId] }',
     response: '{ message, delegated: [taskId], failed: [resourceId] } — 201',
+  },
+  {
+    group: 'collaboration',
+    method: 'DELETE',
+    path: '/api/threads/{id}/messages',
+    permission: 'tasks:write',
+    descKey: 'epThreadClear',
+    request: '',
+    response: '204 | 404 not_found',
   },
   {
     group: 'collaboration',
