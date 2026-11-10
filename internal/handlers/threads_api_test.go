@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -666,5 +667,146 @@ func TestSubscribeMerged(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no event delivered through the merged channel")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// threads: the prompt a mention delegates, and replies persisted on read
+// ---------------------------------------------------------------------------
+
+// The run gets the instruction, not the addressing: the console writes the
+// "@handle" token into the body, and passing it through changed the prompt the
+// agent saw ("@google-adk hi" instead of "hi").
+func TestPostThreadMessageStripsTheMentionToken(t *testing.T) {
+	agent := &registry.Entry{Kind: registry.KindAgent, Name: "google-adk"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), agent)
+	d.Threads = mt
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
+		`{"body":"@google-adk hi","mentions":["`+agent.ID+`"]}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+	}
+	decodeJSON(t, w, &body)
+	if len(body.Delegated) != 1 {
+		t.Fatalf("delegated = %+v, want one task", body.Delegated)
+	}
+	task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
+	if task == nil || len(task.History) == 0 {
+		t.Fatalf("task %q carries no history", body.Delegated[0])
+	}
+	if got := task.History[0].Text(); got != "hi" {
+		t.Fatalf("prompt = %q, want the handle stripped", got)
+	}
+}
+
+// Stripping must not eat text it cannot attribute: a body that is only the
+// mention, a handle naming nobody, and an address inside a word all survive.
+func TestPostThreadMessageKeepsHandlesItCannotAttribute(t *testing.T) {
+	agent := &registry.Entry{Kind: registry.KindAgent, Name: "planner"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), agent)
+	d.Threads = mt
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	for _, tc := range []struct{ body, want string }{
+		{"@planner", "@planner"},
+		{"ask @nobody here", "ask @nobody here"},
+		{"mail@planner", "mail@planner"},
+	} {
+		raw, _ := json.Marshal(map[string]any{"body": tc.body, "mentions": []string{agent.ID}})
+		w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages", string(raw), nil)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("%q: status = %d (%s)", tc.body, w.Code, w.Body.String())
+		}
+		var body struct {
+			Delegated []string `json:"delegated"`
+		}
+		decodeJSON(t, w, &body)
+		if len(body.Delegated) != 1 {
+			t.Fatalf("%q: delegated = %+v", tc.body, body.Delegated)
+		}
+		task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
+		if task == nil || len(task.History) == 0 {
+			t.Fatalf("%q: task carries no history", tc.body)
+		}
+		if got := task.History[0].Text(); got != tc.want {
+			t.Fatalf("%q: prompt = %q, want %q", tc.body, got, tc.want)
+		}
+	}
+}
+
+// A reply that landed while nobody was streaming must still be there on a read:
+// the SSE stream is the live path, not the only writer.
+func TestGetThreadFillsTheReplyOfAFinishedTask(t *testing.T) {
+	agent := &registry.Entry{Kind: registry.KindAgent, Name: "a1"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), agent)
+	d.Threads = mt
+	ctx := context.Background()
+	th, _ := mt.CreateThread(ctx, &threads.Thread{OwnerID: "dev", Title: "t"})
+
+	task, err := d.Hub.Send(ctx, a2a.MessageSendParams{
+		Message:  a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")),
+		Metadata: map[string]any{"resourceId": agent.ID},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if len(task.History) < 2 {
+		t.Fatalf("history = %+v, want a reply", task.History)
+	}
+	// The placeholder the post handler writes while the task is still running.
+	if _, err := mt.UpsertAgentMessage(ctx, th.ID, task.ID, agent.ID, ""); err != nil {
+		t.Fatalf("placeholder: %v", err)
+	}
+
+	h := Register(d)
+	w := do(t, h, http.MethodGet, "/api/threads/"+th.ID, "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Messages []threads.Message `json:"messages"`
+	}
+	decodeJSON(t, w, &body)
+	want := task.History[len(task.History)-1].Text()
+	got := ""
+	for _, m := range body.Messages {
+		if m.TaskID == task.ID {
+			got = m.Body
+		}
+	}
+	if got != want {
+		t.Fatalf("reply = %q, want %q", got, want)
+	}
+}
+
+// Only a finished task has a reply to persist: a task still in flight, and a
+// missing one, leave the placeholder alone.
+func TestTaskReplyIgnoresUnfinishedTasks(t *testing.T) {
+	if got := taskReply(nil); got != "" {
+		t.Fatalf("nil task = %q, want empty", got)
+	}
+	running := &a2a.Task{
+		Status:  a2a.TaskStatus{State: a2a.TaskStateWorking},
+		History: []a2a.Message{{Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("partial")}}},
+	}
+	if got := taskReply(running); got != "" {
+		t.Fatalf("working task = %q, want empty", got)
+	}
+	userOnly := &a2a.Task{
+		Status:  a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		History: []a2a.Message{{Role: a2a.RoleUser, Parts: []a2a.Part{a2a.NewTextPart("hi")}}},
+	}
+	if got := taskReply(userOnly); got != "" {
+		t.Fatalf("user-only task = %q, want empty", got)
 	}
 }

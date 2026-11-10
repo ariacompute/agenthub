@@ -70,6 +70,9 @@ func (d Deps) handleGetThread(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteErr(w, err)
 		return
 	}
+	// A reply that landed while no stream was attached is persisted here, on the
+	// read path, so the page still shows it after a reload or a reconnect.
+	d.fillPendingReplies(r.Context(), id, msgs)
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"thread": t, "messages": msgs})
 }
 
@@ -139,6 +142,12 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The thread body carries "@handle" tokens because that is how a human
+	// addresses an agent, but the run itself must receive the instruction: strip
+	// the handles that name a mentioned resource. The stored message keeps the
+	// text as typed, so the transcript still shows who was addressed.
+	prompt := stripMentionTokens(body.Body, d.mentionTokens(body.Mentions))
+
 	// With the scheduler on, the message becomes a trigger instead of a direct
 	// send. The router decides: an @mention is an explicit request, so it opens a
 	// ticket bound to this thread; a follow-up on a thread a ticket already owns
@@ -152,7 +161,7 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 			ActorName: p.Name,
 			ActorKind: router.ActorHuman,
 			Kind:      "message",
-			Body:      body.Body,
+			Body:      prompt,
 			Explicit:  len(body.Mentions) > 0,
 			At:        time.Now().UTC(),
 			DueAt:     time.Now().UTC(),
@@ -177,7 +186,7 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	delegated := make([]string, 0, len(body.Mentions))
 	failed := make([]string, 0)
 	for _, rid := range body.Mentions {
-		params := a2a.MessageSendParams{Message: a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart(body.Body))}
+		params := a2a.MessageSendParams{Message: a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart(prompt))}
 		// The hub resolves the run target from the params metadata; the message
 		// metadata is kept too so the history records which agent was addressed.
 		params.Metadata = map[string]any{"resourceId": rid}
@@ -335,6 +344,106 @@ func subscribeMerged(b *hub.Broker, taskIDs []string) (<-chan hub.Event, func())
 		close(out)
 	}
 	return out, done
+}
+
+// mentionTokens collects every spelling a thread body may use for the resources it
+// addresses: the id the console sends, the registry name, and the display label.
+// Matching is case-insensitive because a hand-typed mention is.
+func (d Deps) mentionTokens(ids []string) map[string]struct{} {
+	tokens := make(map[string]struct{}, len(ids)*3)
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		tokens[strings.ToLower(id)] = struct{}{}
+		if d.Reg == nil {
+			continue
+		}
+		if e, ok := d.Reg.Get(id); ok && e != nil {
+			if e.Name != "" {
+				tokens[strings.ToLower(e.Name)] = struct{}{}
+			}
+			if e.DisplayName != "" {
+				tokens[strings.ToLower(e.DisplayName)] = struct{}{}
+			}
+		}
+	}
+	return tokens
+}
+
+// stripMentionTokens removes the @handles that name a mentioned resource, so a
+// delegated run receives the instruction rather than the addressing. Only a
+// handle at the start of the body or after whitespace counts, which leaves an
+// address written inside a word alone. A body made of nothing but mentions keeps
+// its text: an empty prompt would be worse than the token itself.
+func stripMentionTokens(body string, tokens map[string]struct{}) string {
+	if len(tokens) == 0 {
+		return body
+	}
+	var b strings.Builder
+	b.Grow(len(body))
+	for i := 0; i < len(body); {
+		if (i == 0 || isTokenSpace(body[i-1])) && body[i] == '@' {
+			j := i + 1
+			for j < len(body) && !isTokenSpace(body[j]) {
+				j++
+			}
+			if _, ok := tokens[strings.ToLower(body[i+1:j])]; ok && j > i+1 {
+				i = j
+				continue
+			}
+		}
+		b.WriteByte(body[i])
+		i++
+	}
+	if stripped := strings.TrimSpace(b.String()); stripped != "" {
+		return stripped
+	}
+	return body
+}
+
+func isTokenSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// fillPendingReplies persists the reply body of every agent placeholder whose task
+// has already answered, replacing the placeholder in place. The SSE stream is the
+// live path; a read must not depend on somebody having been subscribed at the
+// moment the agent finished, or the reply stays blank for good.
+func (d Deps) fillPendingReplies(ctx context.Context, threadID string, msgs []*threads.Message) {
+	if d.Hub == nil || d.Hub.Store() == nil || d.Threads == nil {
+		return
+	}
+	for i, m := range msgs {
+		if m == nil || m.TaskID == "" || m.Body != "" || m.AuthorType == "user" {
+			continue
+		}
+		body := taskReply(d.Hub.Store().Get(ctx, m.TaskID))
+		if body == "" {
+			continue
+		}
+		updated, err := d.Threads.UpsertAgentMessage(ctx, threadID, m.TaskID, m.ResourceID, body)
+		if err == nil && updated != nil {
+			msgs[i] = updated
+		}
+	}
+}
+
+// taskReply is the agent's answer for a finished task: the last non-empty text
+// message the agent wrote. A task still in flight has no reply to persist yet.
+func taskReply(task *a2a.Task) string {
+	if task == nil || !task.Status.State.IsTerminal() {
+		return ""
+	}
+	for i := len(task.History) - 1; i >= 0; i-- {
+		if task.History[i].Role == a2a.RoleUser {
+			continue
+		}
+		if text := strings.TrimSpace(task.History[i].Text()); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 // threadError turns a threads store error into a response: a missing or
