@@ -173,6 +173,7 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `GET` | `/api/tasks/{id}/events` | `tasks:read` — 查看任务 | 回访一个任务的事件流。 | `?since=<seq>` | `text/event-stream of { seq, taskId, kind, at, status? }` |
 | `POST` | `/api/tasks/{id}/cancel` | `tasks:write` — 取消与恢复任务 | 取消仍在运行的任务。 | — | `Task` |
 | `POST` | `/api/tasks/{id}/resume` | `tasks:write` — 取消与恢复任务 | 回答正在等待输入的任务。 | `{ id, message, metadata? }` | `Task` |
+| `DELETE` | `/api/tasks` | `tasks:write` — 取消与恢复任务 | 删除已结束的任务记录，仍在进行的运行会保留。 | — | `{ deleted, kept }` |
 
 ### 导出
 

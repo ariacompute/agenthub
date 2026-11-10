@@ -142,10 +142,11 @@ func (s *stubPushRepo) Prune(ctx context.Context, keepPerTask int) error {
 }
 
 type stubTaskRepo struct {
-	mu    sync.Mutex
-	tasks map[string]*a2a.Task
-	spans []Span
-	fail  bool
+	mu      sync.Mutex
+	tasks   map[string]*a2a.Task
+	spans   []Span
+	fail    bool
+	cleared bool
 }
 
 func newStubTaskRepo() *stubTaskRepo {
@@ -272,6 +273,25 @@ func (s *stubTaskRepo) SetPush(ctx context.Context, id string, cfg *a2a.PushNoti
 
 func (s *stubTaskRepo) Push(ctx context.Context, id string) (*a2a.PushNotificationConfig, error) {
 	return nil, nil
+}
+
+func (s *stubTaskRepo) ClearTerminal(ctx context.Context) (int, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail {
+		return 0, 0, errors.New("stub: clear failed")
+	}
+	deleted, kept := 0, 0
+	for id, t := range s.tasks {
+		if t.Status.State.IsTerminal() {
+			delete(s.tasks, id)
+			deleted++
+			continue
+		}
+		kept++
+	}
+	s.cleared = true
+	return deleted, kept, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +529,45 @@ func TestTaskStoreSurvivesPersistenceFailures(t *testing.T) {
 	// A span that cannot be stored must not panic the run.
 	span := store.StartSpan(task.ID, "res-1", "", "invoke:res-1")
 	store.FinishSpan(span, SpanStatusOK, "")
+}
+
+// Clearing history through a repository keeps the same contract as the
+// in-memory store: finished runs go, live ones stay, and a broken store is an
+// internal error rather than a silent no-op.
+func TestTaskStoreClearTerminalDelegates(t *testing.T) {
+	repo := newStubTaskRepo()
+	store := NewTaskStoreWithRepository(repo)
+
+	finished := store.Create(context.Background(), "res-1", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("done")))
+	if _, err := store.SetState(finished.ID, a2a.TaskStateWorking, nil); err != nil {
+		t.Fatalf("submitted -> working: %v", err)
+	}
+	if _, err := store.SetState(finished.ID, a2a.TaskStateCompleted, nil); err != nil {
+		t.Fatalf("working -> completed: %v", err)
+	}
+	live := store.Create(context.Background(), "res-1", a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("running")))
+
+	deleted, kept, err := store.ClearTerminal(context.Background())
+	if err != nil {
+		t.Fatalf("ClearTerminal: %v", err)
+	}
+	if deleted != 1 || kept != 1 {
+		t.Fatalf("cleared deleted=%d kept=%d, want 1 and 1", deleted, kept)
+	}
+	if !repo.cleared {
+		t.Fatal("the repository never saw the clear: the store answered from memory")
+	}
+	if got := store.Get(context.Background(), finished.ID); got != nil {
+		t.Fatalf("finished task after the clear = %+v, want nil", got)
+	}
+	if got := store.Get(context.Background(), live.ID); got == nil {
+		t.Fatal("a live run must survive the clear")
+	}
+
+	repo.fail = true
+	if _, _, err := store.ClearTerminal(context.Background()); httputil.AsError(err).Code != httputil.CodeInternal {
+		t.Fatalf("clear on a broken store = %v, want internal_error", err)
+	}
 }
 
 func TestHubEventsDelegatesToRepository(t *testing.T) {

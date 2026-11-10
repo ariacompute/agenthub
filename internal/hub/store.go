@@ -48,6 +48,14 @@ type TaskRepository interface {
 	SetPush(ctx context.Context, id string, cfg *a2a.PushNotificationConfig) error
 	// Push returns the callback config, or nil when none is registered.
 	Push(ctx context.Context, id string) (*a2a.PushNotificationConfig, error)
+	// ClearTerminal deletes every finished task the caller may see and reports
+	// how many rows went and how many stayed because their run is still live.
+	//
+	// One method rather than "list then delete each" on purpose: the console's
+	// "clear all" must not race a task that finishes between the read and the
+	// write, and a run in flight is not history — deleting it would strand the
+	// work and the parked question behind it.
+	ClearTerminal(ctx context.Context) (deleted int, kept int, err error)
 }
 
 // EventRepository persists the frames broadcast for a task so a client that

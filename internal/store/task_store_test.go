@@ -392,3 +392,87 @@ func TestTaskRepositoryPushConfigIsOptional(t *testing.T) {
 		t.Fatalf("Push after clearing = %v, %v", cfg, err)
 	}
 }
+
+// ClearTerminal is the console's "clear all": it deletes this owner's finished
+// runs — child rows included, through the FOREIGN KEY cascades — and leaves the
+// live ones and every other account's history alone.
+func TestTaskRepositoryClearTerminal(t *testing.T) {
+	db := openGovernanceDB(t)
+	repo := NewTaskRepository(db)
+	owner := uniqueName("task-clear-owner")
+	ctx := taskOwnerCtx(owner)
+	otherOwner := uniqueName("task-clear-other")
+	otherCtx := taskOwnerCtx(otherOwner)
+
+	finished := uniqueName("task-clear-done")
+	live := uniqueName("task-clear-live")
+	stranger := uniqueName("task-clear-stranger")
+
+	if err := repo.Create(ctx, newTestTask(finished, owner, "demo-agent")); err != nil {
+		t.Fatalf("Create finished: %v", err)
+	}
+	if err := repo.Create(ctx, newTestTask(live, owner, "demo-agent")); err != nil {
+		t.Fatalf("Create live: %v", err)
+	}
+	if err := repo.Create(otherCtx, newTestTask(stranger, otherOwner, "demo-agent")); err != nil {
+		t.Fatalf("Create stranger: %v", err)
+	}
+	for _, id := range []string{finished, live, stranger} {
+		t.Cleanup(func() { _ = db.Exec(`DELETE FROM tasks WHERE id = ?`, id).Error })
+	}
+
+	// The finished run carries children, so the cascade is what gets pinned here.
+	if _, err := repo.AddArtifact(ctx, finished, a2a.Artifact{
+		ArtifactID: "agent.a2a",
+		Parts:      []a2a.Part{a2a.NewTextPart("done")},
+	}); err != nil {
+		t.Fatalf("AddArtifact: %v", err)
+	}
+	if _, err := repo.SetState(ctx, finished, a2a.TaskStateSubmitted, a2a.TaskStateWorking, nil); err != nil {
+		t.Fatalf("submitted -> working: %v", err)
+	}
+	if _, err := repo.SetState(ctx, finished, a2a.TaskStateWorking, a2a.TaskStateCompleted, nil); err != nil {
+		t.Fatalf("working -> completed: %v", err)
+	}
+	if _, err := repo.SetState(ctx, live, a2a.TaskStateSubmitted, a2a.TaskStateWorking, nil); err != nil {
+		t.Fatalf("live submitted -> working: %v", err)
+	}
+	if _, err := repo.SetState(otherCtx, stranger, a2a.TaskStateSubmitted, a2a.TaskStateWorking, nil); err != nil {
+		t.Fatalf("stranger submitted -> working: %v", err)
+	}
+	if _, err := repo.SetState(otherCtx, stranger, a2a.TaskStateWorking, a2a.TaskStateCompleted, nil); err != nil {
+		t.Fatalf("stranger working -> completed: %v", err)
+	}
+
+	deleted, kept, err := repo.ClearTerminal(ctx)
+	if err != nil {
+		t.Fatalf("ClearTerminal: %v", err)
+	}
+	if deleted != 1 || kept != 1 {
+		t.Fatalf("cleared deleted=%d kept=%d, want 1 and 1", deleted, kept)
+	}
+	if _, err := repo.Get(ctx, finished); !errors.Is(err, hub.ErrTaskNotFound) {
+		t.Fatalf("Get after the clear = %v, want ErrTaskNotFound", err)
+	}
+	if _, err := repo.Get(ctx, live); err != nil {
+		t.Fatalf("a live run must survive: %v", err)
+	}
+	if _, err := repo.Get(otherCtx, stranger); err != nil {
+		t.Fatalf("another account's history must survive: %v", err)
+	}
+
+	// The artifact went with its task: a cleared run leaves no orphan rows.
+	var artifacts int64
+	if err := db.Raw(`SELECT count(*) FROM task_artifacts WHERE task_id = ?`, finished).Scan(&artifacts).Error; err != nil {
+		t.Fatalf("count artifacts: %v", err)
+	}
+	if artifacts != 0 {
+		t.Fatalf("artifacts left behind = %d, want 0", artifacts)
+	}
+
+	// A second clear is a no-op that still reports the live run.
+	deleted, kept, err = repo.ClearTerminal(ctx)
+	if err != nil || deleted != 0 || kept != 1 {
+		t.Fatalf("second clear = %d/%d, %v", deleted, kept, err)
+	}
+}

@@ -263,6 +263,18 @@ func (d Deps) handleTaskEventStream(w http.ResponseWriter, r *http.Request) {
 	d.streamTaskEvents(w, r)
 }
 
+// handleClearTasks deletes the caller's finished task records: the console's
+// "clear all". Runs that are still live are kept and counted in the answer, so
+// the screen can say why rows remain instead of pretending the list is empty.
+func (d Deps) handleClearTasks(w http.ResponseWriter, r *http.Request) {
+	deleted, kept, err := d.Hub.Store().ClearTerminal(r.Context())
+	if err != nil {
+		writeDomainErr(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "kept": kept})
+}
+
 func (d Deps) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	task, err := d.Hub.Cancel(r.Context(), r.PathValue("id"))
 	if err != nil {

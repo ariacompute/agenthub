@@ -173,6 +173,7 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `GET` | `/api/tasks/{id}/events` | `tasks:read` — Read tasks | Replay the event stream of one task. | `?since=<seq>` | `text/event-stream of { seq, taskId, kind, at, status? }` |
 | `POST` | `/api/tasks/{id}/cancel` | `tasks:write` — Cancel and resume tasks | Cancel a task that is still running. | — | `Task` |
 | `POST` | `/api/tasks/{id}/resume` | `tasks:write` — Cancel and resume tasks | Answer a task that is waiting for input. | `{ id, message, metadata? }` | `Task` |
+| `DELETE` | `/api/tasks` | `tasks:write` — Cancel and resume tasks | Delete the finished task records; runs still in progress are kept. | — | `{ deleted, kept }` |
 
 ### Export
 

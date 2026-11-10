@@ -361,6 +361,43 @@ func (s *TaskStore) Spans(ctx context.Context, id string) []Span {
 	return out
 }
 
+// ClearTerminal removes the caller's finished task records — what the console
+// shows as history — and reports how many live runs it left alone.
+//
+// A task that is submitted, working or parked in input-required is not history
+// yet: deleting it would strand the adapter goroutine that is still writing to
+// it and the approval somebody is expected to answer, so "clear all" keeps it.
+// The owner scope comes from ctx, so this can never reach another account's
+// runs; rows with no owner (an anonymous A2A peer, a scheduler run) stay put for
+// a signed in caller as well. For that reason ctx here is the *request's*, not
+// the system identity the state machine writes with: a system identity would see
+// every account's rows and delete them.
+func (s *TaskStore) ClearTerminal(ctx context.Context) (int, int, error) {
+	if s.repo != nil {
+		deleted, kept, err := s.repo.ClearTerminal(ctx)
+		if err != nil {
+			return 0, 0, taskErr("clear_terminal", err)
+		}
+		return deleted, kept, nil
+	}
+	owner := identity.Owner(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	deleted, kept := 0, 0
+	for id, rec := range s.tasks {
+		if !ownedBy(rec.ownerID, owner) {
+			continue
+		}
+		if rec.task.Status.State.IsTerminal() {
+			delete(s.tasks, id)
+			deleted++
+			continue
+		}
+		kept++
+	}
+	return deleted, kept, nil
+}
+
 // CanTransition reports whether the A2A lifecycle allows from -> to.
 func CanTransition(from, to a2a.TaskState) bool {
 	if from == to {

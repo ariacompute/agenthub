@@ -146,7 +146,7 @@ Console: `make web-dev` (development) or `make web-build && make run` (the bundl
 by the Go process).
 
 Documentation: the console documents itself on a **`/docs`** screen — concepts, the seven A2A
-methods and all 143 HTTP routes. The same content is rendered to
+methods and all 144 HTTP routes. The same content is rendered to
 [`docs/docs.md`](docs/docs.md) by `make docs-md`; that file is **generated** from the two modules
 the screen reads (`web/src/lib/docs-content.js` and `web/src/lib/copy/docs-copy.js`), so edit those
 and re-run rather than editing the markdown.

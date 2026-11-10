@@ -629,6 +629,50 @@ func TestTaskAPI(t *testing.T) {
 	}
 }
 
+// Deleting the finished task records is what agentbuddy's "clear all" calls. A
+// run that is still live is kept and counted, so the screen can explain why rows
+// remain instead of pretending the list is empty.
+func TestClearTasksAPI(t *testing.T) {
+	entry := &registry.Entry{Kind: registry.KindSkill, Name: "s1"}
+	d := testDeps(t, openConfig(""), entry)
+	h := Register(d)
+	done := runOnce(t, h, entry.ID)
+	live := d.Hub.Store().Create(context.Background(), entry.ID, a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart("hello")))
+
+	w := do(t, h, http.MethodDelete, "/api/tasks", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear: status = %d (%s)", w.Code, w.Body.String())
+	}
+	var cleared struct {
+		Deleted int `json:"deleted"`
+		Kept    int `json:"kept"`
+	}
+	decodeJSON(t, w, &cleared)
+	if cleared.Deleted != 1 || cleared.Kept != 1 {
+		t.Fatalf("cleared = %+v, want 1 deleted and 1 kept", cleared)
+	}
+
+	w = do(t, h, http.MethodGet, "/api/tasks", "", nil)
+	var list struct {
+		Tasks []a2a.Task `json:"tasks"`
+	}
+	decodeJSON(t, w, &list)
+	if len(list.Tasks) != 1 || list.Tasks[0].ID != live.ID {
+		t.Fatalf("tasks after the clear = %+v, want only the live run", list.Tasks)
+	}
+	// The trace of a cleared task is gone with it, not just hidden from the list.
+	if w = do(t, h, http.MethodGet, "/api/tasks/"+done, "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("cleared task: status = %d, want 404", w.Code)
+	}
+
+	// A second click is harmless: it reports the run it kept and deletes nothing.
+	w = do(t, h, http.MethodDelete, "/api/tasks", "", nil)
+	decodeJSON(t, w, &cleared)
+	if cleared.Deleted != 0 || cleared.Kept != 1 {
+		t.Fatalf("second clear = %+v, want 0 deleted and 1 kept", cleared)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // static console
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import (
 	"agenthub/internal/adapter"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
+	"agenthub/internal/identity"
 	"agenthub/internal/registry"
 )
 
@@ -226,6 +227,87 @@ func TestTaskStoreLifecycleAndErrors(t *testing.T) {
 	}
 	if len(store.List(context.Background())) != 1 {
 		t.Fatalf("list = %d tasks, want 1", len(store.List(context.Background())))
+	}
+}
+
+// ClearTerminal is the console's "clear all": finished runs go, live ones stay.
+func TestTaskStoreClearTerminal(t *testing.T) {
+	store := NewTaskStore()
+
+	finished := store.Create(context.Background(), "res-1", userMessage("done"))
+	if _, err := store.SetState(finished.ID, a2a.TaskStateWorking, nil); err != nil {
+		t.Fatalf("submitted -> working: %v", err)
+	}
+	if _, err := store.SetState(finished.ID, a2a.TaskStateCompleted, nil); err != nil {
+		t.Fatalf("working -> completed: %v", err)
+	}
+	live := store.Create(context.Background(), "res-1", userMessage("running"))
+	parked := store.Create(context.Background(), "res-1", userMessage("waiting"))
+	if _, err := store.SetState(parked.ID, a2a.TaskStateWorking, nil); err != nil {
+		t.Fatalf("submitted -> working: %v", err)
+	}
+	if _, err := store.SetState(parked.ID, a2a.TaskStateInputRequired, nil); err != nil {
+		t.Fatalf("working -> input-required: %v", err)
+	}
+
+	deleted, kept, err := store.ClearTerminal(context.Background())
+	if err != nil {
+		t.Fatalf("ClearTerminal: %v", err)
+	}
+	if deleted != 1 || kept != 2 {
+		t.Fatalf("cleared deleted=%d kept=%d, want 1 and 2", deleted, kept)
+	}
+	if store.Get(context.Background(), finished.ID) != nil {
+		t.Fatal("a finished task must be gone after the clear")
+	}
+	if store.Get(context.Background(), live.ID) == nil || store.Get(context.Background(), parked.ID) == nil {
+		t.Fatal("live runs must survive the clear")
+	}
+
+	// Repeating it is a no-op that reports the same live runs, so a client can
+	// retry without special casing.
+	deleted, kept, err = store.ClearTerminal(context.Background())
+	if err != nil || deleted != 0 || kept != 2 {
+		t.Fatalf("second clear = %d/%d, %v", deleted, kept, err)
+	}
+}
+
+// A signed in caller clears its own history only: another account's terminal
+// task and an unowned (anonymous A2A or scheduler) run are never touched.
+func TestTaskStoreClearTerminalRespectsOwnership(t *testing.T) {
+	store := NewTaskStore()
+	mine := identity.With(context.Background(), identity.Identity{OwnerID: "u-1"})
+	theirs := identity.With(context.Background(), identity.Identity{OwnerID: "u-2"})
+
+	finish := func(ctx context.Context) *a2a.Task {
+		task := store.Create(ctx, "res-1", userMessage("hello"))
+		if _, err := store.SetState(task.ID, a2a.TaskStateWorking, nil); err != nil {
+			t.Fatalf("submitted -> working: %v", err)
+		}
+		if _, err := store.SetState(task.ID, a2a.TaskStateCompleted, nil); err != nil {
+			t.Fatalf("working -> completed: %v", err)
+		}
+		return task
+	}
+	mineDone := finish(mine)
+	theirDone := finish(theirs)
+	anonymousDone := finish(context.Background())
+
+	deleted, kept, err := store.ClearTerminal(mine)
+	if err != nil {
+		t.Fatalf("ClearTerminal: %v", err)
+	}
+	if deleted != 1 || kept != 0 {
+		t.Fatalf("cleared deleted=%d kept=%d, want 1 and 0", deleted, kept)
+	}
+	if store.Get(mine, mineDone.ID) != nil {
+		t.Fatal("the caller's own finished task must be gone")
+	}
+	if store.Get(theirs, theirDone.ID) == nil {
+		t.Fatal("another account's task must survive")
+	}
+	if store.Get(context.Background(), anonymousDone.ID) == nil {
+		t.Fatal("an unowned task must survive a user's clear")
 	}
 }
 

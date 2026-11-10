@@ -1270,3 +1270,37 @@ postgres 只挂在 `internal: true` 的 `data` 网络上，Docker 不给只连 i
 - `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`cd web && bun run test` 全绿。
 - 文档同步：`requirements.md`（§4.2 / §4.2.1 / 新增 §14）、`task.md`、
   `AGENTS.md` / 中英 README 的路由总数。
+
+## M22 — 任务记录清理端点（2026-11-10，配合 agentbuddy F4.5）
+
+agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐藏，重启就回来，因为服务端
+没有任何删除任务的通道。这一轮补上真正的删除，并把「在途任务不是历史」定成契约。
+
+### 1. 实施
+
+- 端口 `hub.TaskRepository.ClearTerminal(ctx) (deleted, kept int, err error)`：一次调用既删又
+  计数，避免「先读再逐个删」与刚结束的任务赛跑。`TaskStore.ClearTerminal` 分两条路：
+  有仓库走 `repo`，没有仓库在内存 map 上过滤（同一套语义，单测零外部依赖）。
+- **只删已结束**：`state.IsTerminal()`（`completed` / `failed` / `canceled`）。`submitted` /
+  `working` / `input-required` / `unknown` 保留并计入 `kept` —— 在途任务还有编排协程在写，
+  删掉会连挂起的审批一起丢。
+- `internal/store/task_store.go`：`withIdentity` 事务里先 `DELETE ... WHERE state IN (...)` 拿
+  `RowsAffected`，再 `COUNT` 剩余在途行。归属靠 `owned()`（ctx 身份）+ RLS 双保险；子表
+  （artifacts / spans / pending / push / events / push_records）由既有 `ON DELETE CASCADE` 带走。
+  **这里传请求 ctx 而不是状态机用的系统身份**：系统身份会看见所有账号的行。
+- `handlers.go` 注册 `DELETE /api/tasks`（`tasks:write`），`api.go` 的 `handleClearTasks` 回
+  **200 `{deleted, kept}`**；未新增权限码 / 错误码 / 迁移。
+- `docs-content.js` + `docs-copy.js`（13 语 `epTasksClear`）+ `bun scripts/gen-docs-md.mjs`，
+  端点表 143 → 144；`docs-content.spec.js` 的计数断言同步。
+
+### 2. 验证
+
+- `internal/hub`：`TestTaskStoreClearTerminal`（删已结束 / 留在途 / 重复调用 0 与 kept 不变）、
+  `TestTaskStoreClearTerminalRespectsOwnership`（他人与无主记录不动）、
+  `TestTaskStoreClearTerminalDelegates`（仓库委托 + 故障 → `internal_error`）。
+- `internal/handlers`：`TestClearTasksAPI`（200 + 计数、列表只剩在途、被清任务详情 404、二次调用幂等）。
+- `internal/store`：`TestTaskRepositoryClearTerminal`（`DATABASE_URL` 门控：计数、级联删 artifact、
+  他人历史保留、幂等）。
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`cd web && bun run test`（459 条）全绿。
+- 文档同步：`requirements.md`（§4.1 端点表 + 新增 §15）、`task.md`、`AGENTS.md` / 中英 README
+  的路由总数 144。

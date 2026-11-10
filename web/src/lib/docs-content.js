@@ -625,6 +625,15 @@ export const httpEndpoints = [
     request: '{ id, message, metadata? }',
     response: 'Task',
   },
+  {
+    group: 'tasks',
+    method: 'DELETE',
+    path: '/api/tasks',
+    permission: 'tasks:write',
+    descKey: 'epTasksClear',
+    request: '',
+    response: '{ deleted, kept }',
+  },
 
   // ---- export ----
   {

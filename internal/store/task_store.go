@@ -338,6 +338,43 @@ func (s *taskRepository) Push(ctx context.Context, id string) (*a2a.PushNotifica
 	})
 }
 
+// ClearTerminal deletes the caller's finished tasks in one statement and counts
+// the live ones it keeps, so the console's "clear all" is one round trip that
+// cannot race a run finishing in between.
+//
+// The delete cascades to artifacts, spans, the parked question, the push config,
+// the event frames and the push records — every child table references tasks(id)
+// ON DELETE CASCADE — so a cleared task leaves nothing behind. Live runs
+// (submitted / working / input-required, and the odd unknown) are counted, not
+// touched: they are still being written by the orchestrator.
+func (s *taskRepository) ClearTerminal(ctx context.Context) (int, int, error) {
+	states := terminalStates()
+	var deleted, kept int64
+	err := withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		res := owned(db, ctx, "owner_id").Where("state IN ?", states).Delete(&model.Task{})
+		if res.Error != nil {
+			return res.Error
+		}
+		deleted = res.RowsAffected
+		return owned(db, ctx, "owner_id").Model(&model.Task{}).
+			Where("state NOT IN ?", states).Count(&kept).Error
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(deleted), int(kept), nil
+}
+
+// terminalStates renders the lifecycle's terminal states once, as the strings
+// the tasks.state column stores.
+func terminalStates() []string {
+	out := make([]string, 0, len(a2a.TerminalStates))
+	for _, state := range a2a.TerminalStates {
+		out = append(out, string(state))
+	}
+	return out
+}
+
 func (s *taskRepository) exists(db *gorm.DB, ctx context.Context, id string) (bool, error) {
 	var row model.Task
 	err := owned(db, ctx, "owner_id").Select("id").Where("id = ?", id).Take(&row).Error

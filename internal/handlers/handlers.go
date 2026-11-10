@@ -161,6 +161,9 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}/events", d.requirePermission(authz.PermTasksRead, d.handleTaskEventStream))
 	mux.HandleFunc("POST /api/tasks/{id}/cancel", d.requirePermission(authz.PermTasksWrite, d.handleCancelTask))
 	mux.HandleFunc("POST /api/tasks/{id}/resume", d.requirePermission(authz.PermTasksWrite, d.handleResumeTask))
+	// Clearing history, not running anything: it deletes the finished records of
+	// the caller and keeps the live runs (see handleClearTasks).
+	mux.HandleFunc("DELETE /api/tasks", d.requirePermission(authz.PermTasksWrite, d.handleClearTasks))
 
 	mux.HandleFunc("GET /api/export/mcp", d.requirePermission(authz.PermResourcesRead, d.handleExportMCP))
 	mux.HandleFunc("GET /api/export/agent-card", d.requirePermission(authz.PermResourcesRead, d.handleExportAgentCard))

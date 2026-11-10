@@ -376,6 +376,10 @@ GET    /api/tasks/{id}/events[?since=<seq>]    → SSE（since>0 时先回放该
                                                  无 since 时回放 span/artifact/status，再订阅直播）
 POST   /api/tasks/{id}/cancel                  → Task
 POST   /api/tasks/{id}/resume                  → Task
+DELETE /api/tasks                              → {deleted, kept}（tasks:write；删除调用者已结束的任务记录，
+                                                 级联 artifacts/spans/pending/push/events/push_records；
+                                                 仍在进行（submitted/working/input-required/unknown）的不动，
+                                                 只计入 kept）
 GET    /api/export/mcp                         → {servers}
 GET    /api/export/agent-card                  → AgentCard
 GET    /api/workspace                         → {agents, activity}（resources:read；agentbuddy 聚合视图：可见 agent + 近期任务）
@@ -443,7 +447,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 
 上表分组条数合计 **138** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
 另有 5 条协议面路由（`POST /a2a`、`GET /a2a/stream`、`GET /a2a/agent-card`、
-`GET /.well-known/agent.json`、`GET /healthz`），合计 **143** 条 `mux.HandleFunc`。
+`GET /.well-known/agent.json`、`GET /healthz`），合计 **144** 条 `mux.HandleFunc`。
 `/docs` 屏与 `docs/*.md` 的分组口径略有不同（把 `/api/schedules/{id}/run` 归入调度器组，
 故该组为 14 条），但端点集合一致。
 
@@ -896,3 +900,32 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
 - 用例覆盖：204 空体、线程保留 / 他人线程不受影响、他人 / 不存在 / 重试的 404、
   存储故障 5xx、无存储 503、路由存活探针；`internal/store` 的 `DATABASE_URL` 门控用例
   验证归属门禁与幂等。
+
+## 15. 任务记录清理端点（2026-11-10，配合 agentbuddy F4.5）
+
+### 15.1 功能边界
+
+- 新增唯一控制面路由 `DELETE /api/tasks`，复用 `tasks:write`；不新建权限码、错误码或迁移
+  （`tasks` 的子表全部按 `ON DELETE CASCADE` 建）。
+- 端口 `hub.TaskRepository.ClearTerminal(ctx) (deleted, kept int, err error)`，由
+  `TaskStore.ClearTerminal` 消费：**只删已结束**（`completed` / `failed` / `canceled`），
+  `submitted` / `working` / `input-required` / `unknown` 一律保留并计入 `kept` —— 在途任务
+  还有编排协程在写状态，删掉会把这次运行和挂起的审批一起丢掉。
+- 归属由 ctx 决定，且这里用**请求身份**而非状态机写的系统身份：`owned()` + RLS 双保险，
+  他人记录、无主的匿名 A2A / 调度任务都不会被删；系统身份调用才能清全库已结束记录。
+- 成功回 **200 `{deleted, kept}`**；存储报错 → 带机器码的 5xx。幂等：重复调用 `deleted=0`、
+  `kept` 不变。级联覆盖 `task_artifacts` / `task_spans` / `task_pending` / `task_push` /
+  `events` / `push_records`，清完不留孤儿行。
+- 不推 SSE 帧：被删的都是已结束任务，其事件流早已关闭；agentbuddy 在成功后重读 `/api/tasks`
+  取值，而不是自认列表已空。
+
+### 15.2 验收标准
+
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`tests/docs_endpoints_test.go` 的
+  双向差集通过。
+- `web/src/lib/docs-content.js` 登记该端点（tasks 组，全表 **144** 条），`docs-copy.js` 13 语
+  `epTasksClear` 齐全且均不同于英文；重新生成两份 md 后无漂移。
+- `AGENTS.md` / 中英 README / §4.2 的路由总数同步到 **144**。
+- 用例覆盖：内存模式的删除与保留、重复调用、归属隔离（他人 / 无主记录不动）、仓库模式委托与
+  故障 5xx、处理器层 200 + `{deleted,kept}` + 清理后详情 404；`DATABASE_URL` 门控用例验证
+  级联删除子表与归属隔离。

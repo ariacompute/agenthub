@@ -144,7 +144,8 @@ persistence ← internal/store（GORM 实现）
   保存即算出下次到期、触发后再算一次）
 - `internal/handlers`：`handlers.go`（路由注册中心 + 静态回退 + `/healthz` 的 `database` 字段）、
   `principal.go`（`identify`/`requireAuth`/`requirePermission` + 可见性过滤 + 计数重算）、
-  `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放）、
+  `a2a.go`、`api.go`（含 `/api/tasks/{id}/events?since=<seq>` 回放、
+  `DELETE /api/tasks` 清理已结束任务记录）、
   `api_auth.go`（注册/登录/登出/me/会话/OAuth 回调）、
   `api_admin.go`（users/groups/roles/permissions/grants 管理）、
   `api_backups.go`（检查点列表/打点/下载/删除/恢复 + 定时读写，全部 `backups:manage`）、
@@ -195,7 +196,7 @@ persistence ← internal/store（GORM 实现）
   `components/EnvEditor.vue`）；`tests/` vitest）
 - `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js` + `web/src/views/DocsView.vue`：
   **控制台自带文档屏**（侧边栏「管理」之后，无权限门控）。内容与文案分家——`docs-content.js` 是
-  语言中立的机器数据（`/a2a` 七方法 + 别名、143 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
+  语言中立的机器数据（`/a2a` 七方法 + 别名、144 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
   原样渲染不翻译；`docs-copy.js` 只放散文，13 语齐备。二者的分界由 `tests/copy-fallback.spec.js`
   强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
   CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。
