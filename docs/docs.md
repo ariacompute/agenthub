@@ -143,8 +143,6 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — Change resources | Measure the resource now and store whatever was found. | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — Approve, reject and deprecate records | Move a record along the curation state machine. | `{ status, reason? }` | `Entry` |
 
-One display label per resource: `display_name`; `name` is the registry id. Persona has no displayName, and a strict PUT rejects that legacy key. Migration 032 backfills older records.
-
 ### Namespaces
 
 | Method | Path | Permission | What it does | Request | Response |

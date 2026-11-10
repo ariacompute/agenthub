@@ -145,18 +145,6 @@ describe('docs content', () => {
     expect(counts.capabilities).toBe(10)
   })
 
-  it('documents the single display label in every language', () => {
-    const resources = endpointGroups.find((group) => group.id === 'resources')
-    expect(resources?.noteKey).toBe('groupResourcesNote')
-    for (const lang of LANGS) {
-      expect(resolve(lang)[resources.noteKey], `${lang}.${resources.noteKey} missing`).toBeTruthy()
-    }
-    // The note has to state the contract, not just exist in 13 dictionaries.
-    expect(docsCopy.en[resources.noteKey]).toContain('display_name')
-    expect(docsCopy.en[resources.noteKey]).toContain('displayName')
-    expect(docsCopy.en[resources.noteKey]).toContain('Migration 032')
-  })
-
   it('uses the wire field names in the register request sample', () => {
     const create = httpEndpoints.find((e) => e.method === 'POST' && e.path === '/api/resources')
     expect(create.request).toContain('display_name?')

@@ -143,8 +143,6 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — 变更资源 | 立即实测该资源并保存测到的结果。 | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — 批准、拒绝与弃用记录 | 让一条记录沿审批状态机前进一步。 | `{ status, reason? }` | `Entry` |
 
-每个资源只有一个显示名 `display_name`，`name` 是注册标识。persona 不再含 displayName，严格的 PUT 会拒绝该旧键；迁移 032 回填旧记录。
-
 ### 命名空间
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |

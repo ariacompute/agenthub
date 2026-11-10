@@ -195,13 +195,12 @@ export const a2aShapes = [
  *
  * `noteKey` is optional and carries the one thing a route table cannot show:
  * what a call does *not* touch, or a contract no column can express. Backups
- * uses it for the archive's scope; resources uses it for the single display
- * label and the strict Entry decoder.
+ * uses it for the archive's scope.
  */
 export const endpointGroups = [
   { id: 'protocol', groupKey: 'groupProtocol' },
   { id: 'auth', groupKey: 'groupAuth' },
-  { id: 'resources', groupKey: 'groupResources', noteKey: 'groupResourcesNote' },
+  { id: 'resources', groupKey: 'groupResources' },
   { id: 'registries', groupKey: 'groupRegistries' },
   { id: 'sources', groupKey: 'groupSources' },
   { id: 'tasks', groupKey: 'groupTasks' },
