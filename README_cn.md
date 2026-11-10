@@ -1,6 +1,76 @@
+<div align="center">
+<a name="readme-top"></a>
+
 # agenthub
 
-[English](README.md) | [中文](README_cn.md)
+**注册一次，让每个智能体都能触达它**
+
+model / agent / mcp / skill / cli 五类资产统一注册、发现与编排，<br/>
+对外只暴露一个标准 A2A 端点，任何遵循协议的 Agent 都能调用。
+
+[English](./README.md) · **简体中文** · [发布页][releases] · [文档][docs] · [Issue][issues]
+
+[![][badge-release]][releases] [![][badge-ci]][ci] [![][badge-license]][license]
+<br/>
+[![][badge-go]][go] [![][badge-postgres]][postgres] [![][badge-vue]][vue] [![][badge-stars]][stars] [![][badge-forks]][forks]
+</div>
+
+<details>
+<summary><kbd>Table of contents</kbd></summary>
+
+#### TOC
+
+**上手**
+
+- [🧠 概念地图](#-概念地图)
+- [📸 快照](#-快照)
+- [🚀 运行](#-运行)
+  - [🏷 版本打标](#-版本打标)
+- [📚 示例](#-示例)
+
+**部署**
+
+- [🛳 部署](#-部署)
+  - [🔨 Make](#-make)
+  - [🐳 Docker compose](#-docker-compose)
+  - [☸️ Kubernetes operator（k8s 控制器部署）](#-kubernetes-operatork8s-控制器部署)
+
+**运行面**
+
+- [🔒 安全加固](#-安全加固)
+- [🧪 测试](#-测试)
+- [🔗 A2A 端点](#-a2a-端点)
+- [🧩 编排原语](#-编排原语)
+- [⏰ 调度器（router）](#-调度器router)
+  - [🆚 与 dsh superagent router 的能力对照](#-与-dsh-superagent-router-的能力对照)
+- [🧱 执行沙盒](#-执行沙盒)
+  - [🔍 哪些执行面进了沙盒](#-哪些执行面进了沙盒)
+  - [🐋 默认 Docker，缺 Docker 也是一种答案](#-默认-docker缺-docker-也是一种答案)
+  - [🆚 与托管运行时对比](#-与托管运行时对比)
+- [🚨 错误约定](#-错误约定)
+- [🔑 API 密钥](#-api-密钥)
+
+**数据面**
+
+- [🗄 持久化](#-持久化)
+- [💾 数据库检查点](#-数据库检查点)
+- [📁 共享文件](#-共享文件)
+
+**对比与治理**
+
+- [🏛 AWS Agent Registry 特性对比](#-aws-agent-registry-特性对比)
+  - [🧾 记录类型与校验](#-记录类型与校验)
+  - [♻️ 生命周期与治理](#-生命周期与治理)
+  - [🔎 发现](#-发现)
+  - [🔐 授权与同步](#-授权与同步)
+  - [📊 运维与可观测](#-运维与可观测)
+  - [📋 三张清单](#-三张清单)
+  - [🔁 字段级映射（recordType ↔ Kind）](#-字段级映射recordtype--kind)
+  - [🧭 剩余差距](#-剩余差距)
+- [📝 许可证](#-许可证)
+- [🤝 工程约定](#-工程约定)
+
+</details>
 
 基于 **A2A（Agent2Agent）协议**的互连平台：把 **model / agent / mcp / skill / CLI** 五类异构资产统一注册、发现、路由与编排，对外以标准 A2A 端点被任何遵循协议的 Agent 调用。
 
@@ -10,7 +80,7 @@
 - 五类适配器**默认离线可跑**：无网络、无子进程、无凭据即可启动——model 条目可选接入真实的
   OpenAI 兼容网关
 
-## 概念地图
+## 🧠 概念地图
 
 | 概念 | 角色 | 在 agenthub 中 |
 | --- | --- | --- |
@@ -22,14 +92,26 @@
 
 一次调用：用户 → Agent → Model 规划 → 加载 Skill → 经 MCP 调用老系统 → 结果沿原路返回。
 
-## 快照
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📸 快照
 
 ![agenthub 控制台 —— 注册中心](registry_cn.png)
 
 注册中心屏：一个控制台十种屏（注册中心、命名空间、上游源、任务追踪、拓扑视图、试跑台、登录注册、
 管理、审计，文档）。
 
-## 运行
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🚀 运行
 
 ```bash
 cp .env.example .env                        # 本地开发：复制环境变量模板，按需修改取值
@@ -51,7 +133,7 @@ curl localhost:3500/.well-known/agent.json
   报错并打印诊断，不会再拖到 `go run` 才抛 `connection refused`。
 
 若是加固的生产部署而非本地开发，从加固模板起步更省事：`cp .env.sec.example .env`（见
-[安全加固](#安全加固)）。它已预先套用下面全部生产防护项，并仅带占位密钥，需你先替换才能启动。
+[安全加固](#-安全加固)）。它已预先套用下面全部生产防护项，并仅带占位密钥，需你先替换才能启动。
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
@@ -63,7 +145,7 @@ curl localhost:3500/.well-known/agent.json
 registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=true` 才会得到下面示例所依赖的
 五条 `demo-*` 资源，也可以直接灌 [`example/`](example/README.md) 里那份真实目录。
 
-### 版本打标
+### 🏷 版本打标
 
 `make build` 与 `make run` 通过 `-ldflags -X` 把 `config.Version`（git tag，如 `v0.2.0`）、
 `config.Commit`（7 位 commit）、`config.Distance`（tag 之后的提交数）与 `config.Dirty`
@@ -72,7 +154,13 @@ registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=t
 之类的偏离说明。未打标的构建上报哨兵值 `dev`，不冒充发布号；镜像经 `VERSION` / `COMMIT` /
 `DISTANCE` / `DIRTY` 构建参数传入同一取值（`make docker-build`）。
 
-## 示例
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📚 示例
 
 [`example/`](example/README.md) 提供一份可直接灌进运行实例的真实目录：**41 份完整
 `registry.Entry` 载荷**加一个可重复执行的装载脚本，五类资产各有 Windows 与 Ubuntu 两套形态；
@@ -108,12 +196,18 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 `deploy-agent.sh` 刻意与装载脚本分开：它不登录、不碰数据库、也不调 `/probe`，只负责安装、启动与
 校验某一个 agent——而这正是 `Try run` 与健康探测要报出「实测值」的前提。
 
-## 部署
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🛳 部署
 
 下面两条路径都能起**数据库 + 服务**——控制台已烘焙进镜像、由 Go 进程托管于 `/`。
 想要起完之后的那份端口表，就用 `make`；只要 Docker 本身，用原生 compose 即可。
 
-### Make
+### 🔨 Make
 
 ```bash
 cp .env.example .env  # 本地开发：复制环境变量模板，按需修改取值
@@ -152,7 +246,7 @@ agenthub listening ports
 缺了它 `ports: 5434:5434` 就是空配置，`make run` 必然连不上。`hostpg` 只有 postgres 一个成员，
 且关闭了 masquerade，因此控制台侧仍碰不到数据库，数据库也没多出一条出网路径。
 
-### Docker compose
+### 🐳 Docker compose
 
 ```bash
 docker compose up -d --build                # 从源码重建镜像后，再起 postgres + agenthub，:3500 / :5434
@@ -214,7 +308,7 @@ AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支�
 因此在控制台改过的密码能跨重启保留。配置通过 compose 的 `.env` 或环境变量传入，
 `AGENTHUB_HTTP_PORT` 可改宿主端口。
 
-### Kubernetes operator（k8s 控制器部署）
+### ☸️ Kubernetes operator（k8s 控制器部署）
 
 要在 Kubernetes 上以声明式、GitOps 友好的方式部署，可用 `operator/` 下的 controller-runtime
 控制器。用 Helm 装好控制器与 `AgentHub` CRD，再 apply 一份声明式 `AgentHub` 自定义资源，控制器即把它
@@ -231,7 +325,13 @@ helm install agenthub-operator ./operator/deploy/agenthub-operator --namespace a
 kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 ```
 
-## 安全加固
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🔒 安全加固
 
 **传输 / 边缘**：agenthub 是单 Go 二进制，安全响应头改由中间件发出（`internal/middleware`）：
 `X-Content-Type-Options`、`Referrer-Policy`、`COOP`/`CORP`，以及灰度期的
@@ -319,7 +419,13 @@ agent 计算机，以及线程与其消息、通道投递明细、共享文件�
 **备份**：配置 `AGENTHUB_ENCRYPTION_KEY` 时检查点归档以 AES-256-GCM 静态加密为 `<file>.tar.gz.enc` 并写
 `<file>.enc.sha256` 清单，明文绝不落盘。定期用 `scripts/backup-restore-drill.sh` 验证可恢复性。
 
-## 测试
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧪 测试
 
 单元与集成套件：
 
@@ -364,7 +470,13 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 脚本面向种子资源（`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` / `demo-cli`），除
 `curl` 与 `python3` 外无依赖，跑完会删掉自己创建的资源；若服务始终不应答 `/healthz` 则以 2 退出。
 
-## A2A 端点
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🔗 A2A 端点
 
 | 端点 | 说明 |
 | --- | --- |
@@ -377,7 +489,13 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 流式**没有 `[DONE]` 哨兵**：运行以 `completed / failed / canceled / input-required` 状态事件结束。
 
-## 编排原语
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧩 编排原语
 
 `metadata.flow` 接受三种原语，用于多资源接力：
 
@@ -392,7 +510,13 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 分支条件：`""`（默认臂）/ `always` / `contains:<text>` / `kind:<kind>` / `has:<key>`。
 
-## 调度器（router）
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## ⏰ 调度器（router）
 
 `internal/router` 把平台从「注册即被调用」的被动目录升级为双层调度：**Router 层**判断一个事件
 值不值得开工，**Worker 层**把这件事交给既有的任务状态机执行。`hub` 的公开语义零改动——一张工单会变成
@@ -422,7 +546,7 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 `503 feature_unavailable`，线程消息保持原有直发 `Hub.Send` 的路径。`AGENTHUB_ROUTER_RESOURCE` 指定兜底
 执行者；cron 表达式复用检查点调度器已有的五段解析器，因此「下次到期」在保存时算出、每次触发后再算一次。
 
-### 与 dsh superagent router 的能力对照
+### 🆚 与 dsh superagent router 的能力对照
 
 | 能力 | agenthub |
 | --- | --- |
@@ -437,7 +561,13 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | 持久 Effects 队列 / 事务 Outbox | **明确不做**——提交后同步驱动意图，靠「单写者 + 幂等重放」覆盖失败窗口 |
 | 人格化回复 / 长期记忆 | **不在范围**——执行者通过既有任务与会话表面发声 |
 
-## 执行沙盒
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧱 执行沙盒
 
 平台不再以宿主进程身份执行任何东西。`internal/sandbox` 是控制面：按 `(归属人, 资源, 作用域)`
 租用执行环境、在其中执行、把每次执行落审计、空闲后回收。`hub`、`router` 与各适配器都不认识
@@ -472,7 +602,7 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 
 `off` 拒绝一切执行；`mock` 是确定性的离线实现，且必须显式选择，离线演示不会变成默认姿态。
 
-### 哪些执行面进了沙盒
+### 🔍 哪些执行面进了沙盒
 
 四个执行面共用同一个 `Manager`：
 
@@ -482,7 +612,7 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 - **计算机**——`shell / browser / screen` 会话引用真实租约，可在控制台一次性试跑（审计标 `dry_run`）。
 - **远端 Agent**——出网经服务端代理，密钥从 `credential_env` 注入，永不进入模型上下文或任务产物。
 
-### 默认 Docker，缺 Docker 也是一种答案
+### 🐋 默认 Docker，缺 Docker 也是一种答案
 
 `AGENTHUB_SANDBOX_PROVIDER` 默认 `docker`。套接字不可达时——没有守护进程、容器内没有
 `/var/run/docker.sock`、socket 代理未运行——目录端点如实报告 `available: false` 与原因，
@@ -492,7 +622,7 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 `CONTAINERS`、`IMAGES`、`POST` 的 socket-proxy sidecar。直接挂 `/var/run/docker.sock`
 等价于把宿主 root 交给容器，`docker-compose.yml` 因此把该代理做成可选 profile。
 
-### 与托管运行时对比
+### 🆚 与托管运行时对比
 
 完整对比（含许可证）：[`docs/sandbox-landscape_cn.md`](docs/sandbox-landscape_cn.md)。
 
@@ -505,14 +635,26 @@ MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时�
 | 审计 | `sandbox_execs` 里只有摘要、退出码与耗时 |
 | 离线模式 | 显式 `mock`，绝不隐藏回落 |
 
-## 错误约定
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🚨 错误约定
 
 后端**只返回机器可读 code**，绝不含自然语言；控制台在前端把 code 映射为本地化文案。
 
 - HTTP：`{"code":"..."}`（`bad_request` / `unauthorized` / `not_found` / ...）
 - JSON-RPC：标准码 + A2A 自定义 `-32001 task_not_found`、`-32002 task_not_cancelable`、`-32003 push_notification_not_supported`、`-32004 unsupported_operation`、`-32005 invalid_state_transition`、`-32006 resource_not_found`、`-32007 resource_unreachable`、`-32008 task_not_resumable`
 
-## API 密钥
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🔑 API 密钥
 
 密钥是面向非交互访问（脚本、其他语言、CI）的长效 bearer 凭证。它以**所属用户**身份鉴权，但只拥有**创建时选定的权限**，且明文令牌仅返回一次——库内仅存其 `sha256`（`token_hash`），绝不存明文。
 
@@ -529,7 +671,13 @@ TOKEN=$(curl -s -X POST localhost:3500/api/api-keys \
 curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
-## 持久化
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🗄 持久化
 
 | 表 | 内容 |
 | --- | --- |
@@ -556,7 +704,13 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
 去重启用键冲突、源 CRUD 与同步留痕、内存 facade 与 store facade 行为一致）。
 **无 DB 时自动 skip，不伪造结果**。
 
-## 数据库检查点
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 💾 数据库检查点
 
 控制台的**备份**标签页（`backups:manage`）把整个 agenthub schema 导出为一个 `tar.gz` 归档，
 并能把数据库回退到其中任意一个检查点。
@@ -586,7 +740,13 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
   写出并附带 `<file>.enc.sha256` 清单，完整性校验覆盖密文。用 `scripts/backup-restore-drill.sh` 定期演练
   （解密进空库并报告关键表行数）。
 
-## 共享文件
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📁 共享文件
 
 工作台可以上传一份文档、一张截图或一段录音，并在会话里把它交给 agent。字节存在数据库之外，
 库里只有元数据。
@@ -607,7 +767,13 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
 - **归属**：行带 `owner_id`，表在 `FORCE` 行级安全之下，因此第二个账号即使猜到 id 也无法列出、
   读取或删除别人的文件。
 
-## AWS Agent Registry 特性对比
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🏛 AWS Agent Registry 特性对比
 
 对照 [AWS Agent Registry（Amazon Bedrock AgentCore）](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html)
 与 [Concepts and terminology](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry-concepts.html)
@@ -622,7 +788,7 @@ push 回调留痕与保留上限、完整 A2A run 的落库回读，以及治理
 agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（五类适配器）；缺的是目录那一半：
 审批、命名空间、以及从外部注册中心同步。
 
-### 记录类型与校验
+### 🧾 记录类型与校验
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -636,7 +802,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | 去重键 `name + recordVersion`（registry 内唯一），同名可跨版本 | 去重键 `(namespace, name, version)`（唯一索引保证），同名可跨版本 |
 | —（无 Model 与 CLI 两类） | `model`（provider 回退链，可指向真实 OpenAI 兼容 router）与 `cli`（白名单 → 超时 → 截断）为 agenthub 特有 |
 
-### 生命周期与治理
+### ♻️ 生命周期与治理
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -645,7 +811,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | 四角色：Administrator / Publisher / Curator / Consumer | RBAC（owner / 组 / 角色 / 权限）+ 资源级 grant，目录侧另增 `registries:manage` / `registry:curate` / `sources:manage` |
 | 命名空间可按类型 / 环境 / 团队拆分 | 多命名空间，各带审批策略与可见性边界 |
 
-### 发现
+### 🔎 发现
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -654,7 +820,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | **原生 MCP endpoint**（`InvokeRegistryMcp`，任意 MCP 客户端直连） | `GET /api/export/mcp` 只**导出** MCP server 描述，不自建 MCP 服务端 |
 | Agent Card | `GET /api/export/agent-card` 与 `/.well-known/agent.json`——每个 approved 记录渲染为一个 advertised skill |
 
-### 授权与同步
+### 🔐 授权与同步
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -662,7 +828,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | Outbound：**credential provider**（OAuth 凭据或 IAM role），供同步时调用远端端点 | `AuthScheme`（none / bearer）+ `auth_token_env`，**只存环境变量名** |
 | **URL-based synchronization**：记录与远端 MCP / A2A 端点保持同步 | 源（mcp / skill）按手动或定时拉取，按 `(name, version)` 合并并记录同步结果；fixture 客户端默认离线，运维显式关闭后才出网 |
 
-### 运维与可观测
+### 📊 运维与可观测
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -673,7 +839,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | Tags（key-value，成本归属 / 访问控制） | `tags []string` + `metadata map`，够用 |
 | — | 数据库检查点与定时备份（`internal/backup`）：AWS 侧无对应能力，agenthub **更强** |
 
-### 三张清单
+### 📋 三张清单
 
 **已有**——注册即可执行的五类适配器（确定性、离线可跑）；A2A 端点与完整任务状态机（含可无限期
 挂起并经 `tasks/resume` 恢复的 `input-required`）；事件扇出（SSE + `since` 回放）；push 回调留痕；
@@ -695,7 +861,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | IAM / JWT 之外的 inbound 授权形态 | 现有会话 + RBAC 已满足自部署场景。 |
 | 记录级 outbound OAuth 完整授权码流程 | 本次同步只需 bearer token（存环境变量名）；完整 OAuth 留给「真实适配器」里程碑。 |
 
-### 字段级映射（recordType ↔ Kind）
+### 🔁 字段级映射（recordType ↔ Kind）
 
 | AWS recordType | 校验 schema | agenthub kind | per-kind 配置 |
 | --- | --- | --- | --- |
@@ -706,7 +872,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | — | — | `model` | provider 模式、endpoint、model_id、api_key_env、回退链 + 权重、超时 |
 | — | — | `cli` | 可执行命令、命令白名单、超时、输出截断字节、工作目录、env |
 
-### 剩余差距
+### 🧭 剩余差距
 
 1. **中**：语义检索缺失 —— 目录规模上千后关键词检索召回不足；建议以「外部检索源」形态接入，
    而非内嵌嵌入模型。
@@ -714,14 +880,64 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 3. **低**：审计面 —— 缺全量 API 调用留痕，合规场景需要。
 4. **低**：定时同步的调度表达式目前手写 5 段 cron，与 EventBridge 规则表达力不对等，但自部署够用。
 
-## 许可证
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📝 许可证
 
 MIT.
 
-## 工程约定
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🤝 工程约定
 
 本仓库遵循 Harness Engineering：
 
 - [`AGENTS.md`](AGENTS.md)：Agent 工程上下文入口与目录索引
 - [`requirements.md`](requirements.md)：需求规格（功能边界 / 异常 / 验收，人审后编码）
 - [`task.md`](task.md)：实施清单
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+---
+
+<div align="center">
+
+Copyright © 2026 [ariacompute][org]. <br/>
+This project is [MIT](./LICENSE) licensed.
+
+</div>
+
+<!-- LINK GROUP -->
+
+[org]: https://github.com/ariacompute
+[releases]: https://github.com/ariacompute/agenthub/releases
+[issues]: https://github.com/ariacompute/agenthub/issues
+[ci]: https://github.com/ariacompute/agenthub/actions/workflows/ci.yml
+[stars]: https://github.com/ariacompute/agenthub/stargazers
+[forks]: https://github.com/ariacompute/agenthub/network/members
+[license]: ./LICENSE
+[docs]: ./docs/docs_cn.md
+[go]: https://go.dev
+[postgres]: https://www.postgresql.org
+[vue]: https://vuejs.org
+[badge-go]: https://img.shields.io/badge/Go-1.27-151515?labelColor=black&style=flat-square&logo=go
+[badge-postgres]: https://img.shields.io/badge/PostgreSQL-persistence-151515?labelColor=black&style=flat-square&logo=postgresql
+[badge-vue]: https://img.shields.io/badge/Vue-3-151515?labelColor=black&style=flat-square&logo=vuedotjs
+[badge-release]: https://img.shields.io/github/v/release/ariacompute/agenthub?labelColor=black&style=flat-square
+[badge-ci]: https://img.shields.io/github/actions/workflow/status/ariacompute/agenthub/ci.yml?labelColor=black&style=flat-square
+[badge-license]: https://img.shields.io/github/license/ariacompute/agenthub?labelColor=black&style=flat-square
+[badge-stars]: https://img.shields.io/github/stars/ariacompute/agenthub?labelColor=black&style=flat-square
+[badge-forks]: https://img.shields.io/github/forks/ariacompute/agenthub?labelColor=black&style=flat-square
+[back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square

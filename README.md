@@ -1,6 +1,76 @@
+<div align="center">
+<a name="readme-top"></a>
+
 # agenthub
 
-[English](README.md) | [中文](README_cn.md)
+**Register an asset once, and every agent can reach it**
+
+model / agent / mcp / skill / cli are registered, discovered and orchestrated<br/>
+behind one standard A2A endpoint that any conforming agent can call.
+
+**English** · [简体中文](./README_cn.md) · [Releases][releases] · [Docs][docs] · [Issues][issues]
+
+[![][badge-release]][releases] [![][badge-ci]][ci] [![][badge-license]][license]
+<br/>
+[![][badge-go]][go] [![][badge-postgres]][postgres] [![][badge-vue]][vue] [![][badge-stars]][stars] [![][badge-forks]][forks]
+</div>
+
+<details>
+<summary><kbd>Table of contents</kbd></summary>
+
+#### TOC
+
+**Get started**
+
+- [🧠 Concept map](#-concept-map)
+- [📸 Snapshot](#-snapshot)
+- [🚀 Run](#-run)
+  - [🏷 Version stamping](#-version-stamping)
+- [📚 Examples](#-examples)
+
+**Deploy**
+
+- [🛳 Deployment](#-deployment)
+  - [🔨 Make](#-make)
+  - [🐳 Docker compose](#-docker-compose)
+  - [☸️ Kubernetes operator](#-kubernetes-operator)
+
+**Runtime surface**
+
+- [🔒 Security hardening](#-security-hardening)
+- [🧪 Tests](#-tests)
+- [🔗 A2A endpoints](#-a2a-endpoints)
+- [🧩 Flow primitives](#-flow-primitives)
+- [⏰ Scheduler (router)](#-scheduler-router)
+  - [🆚 Compared with the dsh superagent router](#-compared-with-the-dsh-superagent-router)
+- [🧱 Execution sandboxes](#-execution-sandboxes)
+  - [🔍 What runs inside a sandbox](#-what-runs-inside-a-sandbox)
+  - [🐋 Default is Docker, and a missing Docker is an answer](#-default-is-docker-and-a-missing-docker-is-an-answer)
+  - [🆚 Compared with the hosted runtimes](#-compared-with-the-hosted-runtimes)
+- [🚨 Error contract](#-error-contract)
+- [🔑 API keys](#-api-keys)
+
+**Data surface**
+
+- [🗄 Persistence](#-persistence)
+- [💾 Database checkpoints](#-database-checkpoints)
+- [📁 Shared files](#-shared-files)
+
+**Compare & governance**
+
+- [🏛 AWS Agent Registry comparison](#-aws-agent-registry-comparison)
+  - [🧾 Record types and validation](#-record-types-and-validation)
+  - [♻️ Lifecycle and governance](#-lifecycle-and-governance)
+  - [🔎 Discovery](#-discovery)
+  - [🔐 Authorization and synchronisation](#-authorization-and-synchronisation)
+  - [📊 Operations and observability](#-operations-and-observability)
+  - [📋 What agenthub had, what it added, what it refuses](#-what-agenthub-had-what-it-added-what-it-refuses)
+  - [🔁 recordType ↔ Kind](#-recordtype--kind)
+  - [🧭 Remaining gaps](#-remaining-gaps)
+- [📝 License](#-license)
+- [🤝 Engineering conventions](#-engineering-conventions)
+
+</details>
 
 An interconnection platform built on the **A2A (Agent2Agent) protocol**: it registers, discovers,
 routes and orchestrates five heterogeneous asset classes — **model / agent / mcp / skill / cli** —
@@ -13,7 +83,7 @@ and exposes them as standard A2A endpoints that any protocol-conforming agent ca
 - All five adapters run **offline by default**: no network, no subprocess, fully runnable
   without credentials — a model entry can opt into a real OpenAI-compatible gateway
 
-## Concept map
+## 🧠 Concept map
 
 | Concept | Role | In agenthub |
 | --- | --- | --- |
@@ -26,14 +96,26 @@ and exposes them as standard A2A endpoints that any protocol-conforming agent ca
 One call: user → Agent → Model plans → Skill loaded → MCP reaches the legacy system → the result
 travels back the same path.
 
-## Snapshot
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📸 Snapshot
 
 ![agenthub console — Registry screen](registry.png)
 
 The Registry screen: ten screens in one console (registry, registries, sources, task trace,
 topology, playground, sign-in, administration, audit and a built-in documentation page).
 
-## Run
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🚀 Run
 
 ```bash
 cp .env.example .env                        # local development: copy the env template, then edit values as needed
@@ -57,7 +139,7 @@ database-less fallback). Two different hosts are involved:
 
 For a hardened production deployment rather than local development, start from the
 security-hardened template instead: `cp .env.sec.example .env` (see
-[Security hardening](#security-hardening)). It pre-applies every production safeguard below and
+[Security hardening](#-security-hardening)). It pre-applies every production safeguard below and
 ships with placeholder secrets you must replace before the instance can boot.
 
 Console: `make web-dev` (development) or `make web-build && make run` (the bundle is hosted at `/`
@@ -73,7 +155,7 @@ The registry starts **empty** — nothing is seeded. Set `AGENTHUB_SEED_DEMO=tru
 `demo-*` resources the examples below talk to, or load [`example/`](example/README.md) to fill it
 with a realistic catalogue.
 
-### Version stamping
+### 🏷 Version stamping
 
 `make build` and `make run` stamp `config.Version` (the git tag, e.g. `v0.2.0`),
 `config.Commit` (the seven character revision), `config.Distance` (commits since the tag)
@@ -84,7 +166,13 @@ build is not exactly a clean tag. An unstamped build reports the `dev` sentinel 
 of pretending to be a release. Images take the same values through the `VERSION` /
 `COMMIT` / `DISTANCE` / `DIRTY` build args (`make docker-build`).
 
-## Examples
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📚 Examples
 
 [`example/`](example/README.md) registers a realistic catalogue straight from the repository: 41
 complete `registry.Entry` payloads plus a re-runnable loader, covering all five kinds in both a
@@ -122,13 +210,19 @@ per platform, and the two settings people trip over: `AGENTHUB_EXAMPLE_API_KEY` 
 database and never calls `/probe` — it only installs, serves and verifies one agent, which is what
 `Try run` and a health probe need before they can report anything measured.
 
-## Deployment
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🛳 Deployment
 
 Both flows below bring **database + service** up — the console is baked into the image and served
 at `/` by the Go process. Use `make` when you want the port map afterwards; plain compose needs
 nothing but Docker and Compose.
 
-### Make
+### 🔨 Make
 
 ```bash
 cp .env.example .env  # local development: copy the env template, then edit values as needed
@@ -169,7 +263,7 @@ nothing and `make run` cannot connect. Only postgres joins `hostpg` and masquera
 there, so the console side still cannot reach the database and the database gains no outbound
 route.
 
-### Docker compose
+### 🐳 Docker compose
 
 ```bash
 docker compose up -d --build                # rebuild from source, then start postgres + agenthub, :3500 / :5434
@@ -243,7 +337,7 @@ every boot and never has its password overwritten, so a password changed in the 
 restart. Configuration is passed through the compose `.env` file or environment variables;
 `AGENTHUB_HTTP_PORT` changes the published host port.
 
-### Kubernetes operator
+### ☸️ Kubernetes operator
 
 For a declarative, GitOps-friendly deployment on Kubernetes, `operator/` ships a
 controller-runtime based operator. Install the operator + the `AgentHub` CRD via Helm,
@@ -263,7 +357,13 @@ helm install agenthub-operator ./operator/deploy/agenthub-operator --namespace a
 kubectl apply -f operator/examples/agenthub-sample.yaml -n agenthub-operator
 ```
 
-## Security hardening
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🔒 Security hardening
 
 **Transport / edge.** agenthub is a single Go binary, so the security response headers live in a
 middleware (`internal/middleware`): `X-Content-Type-Options`, `Referrer-Policy`, `COOP`/`CORP`, and a
@@ -370,7 +470,13 @@ Reading the trail needs the dedicated `audit:read` permission: `GET /api/audit` 
 (AES-256-GCM) into `<file>.tar.gz.enc` with a `<file>.enc.sha256` manifest — plaintext never touches
 disk. Verify recoverability periodically with `scripts/backup-restore-drill.sh`.
 
-## Tests
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧪 Tests
 
 Unit and integration suites:
 
@@ -424,7 +530,13 @@ It targets the seeded resources (`demo-model` / `demo-agent` / `demo-mcp` / `dem
 `demo-cli`), needs nothing beyond `curl` and `python3`, deletes the resource it creates, and exits
 2 when the service never answers `/healthz`.
 
-## A2A endpoints
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🔗 A2A endpoints
 
 | Endpoint | Description |
 | --- | --- |
@@ -440,7 +552,13 @@ the v0.1 aliases `tasks/send` and `tasks/sendSubscribe` are accepted as well.
 Streaming has **no `[DONE]` sentinel**: a run ends with the
 `completed / failed / canceled / input-required` status event.
 
-## Flow primitives
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧩 Flow primitives
 
 `metadata.flow` accepts three primitives for relaying a task across resources:
 
@@ -455,7 +573,13 @@ Streaming has **no `[DONE]` sentinel**: a run ends with the
 
 Branch conditions: `""` (default arm) / `always` / `contains:<text>` / `kind:<kind>` / `has:<key>`.
 
-## Scheduler (router)
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## ⏰ Scheduler (router)
 
 `internal/router` turns the platform from a directory that answers when called into a two-layer
 scheduler: a **router** layer decides *whether* an event deserves work, a **worker** layer runs the
@@ -497,7 +621,7 @@ itself. While it is off, `/api/router/*` and `/api/schedules/{id}/run` answer
 the checkpoint scheduler already ships, so "next run" is computed on save and again after every
 fire.
 
-### Compared with the dsh superagent router
+### 🆚 Compared with the dsh superagent router
 
 | Capability | agenthub |
 | --- | --- |
@@ -512,7 +636,13 @@ fire.
 | Durable effects queue / transactional outbox | **not built, by choice** — a committed intent is driven synchronously after the transaction, and single writer + idempotent replay cover the failure window |
 | Persona voice, reply composition, long-term memory | **not in scope** — a worker answers through the ordinary task and thread surface |
 
-## Execution sandboxes
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧱 Execution sandboxes
 
 The platform does not execute anything as the host process. `internal/sandbox` is a control plane:
 it leases an environment per `(owner, resource, scope)`, runs work inside it, audits every run and
@@ -554,7 +684,7 @@ plane:
 `off` refuses everything; `mock` is deterministic and offline, and stays an explicit choice so an
 offline demo can never become the default posture.
 
-### What runs inside a sandbox
+### 🔍 What runs inside a sandbox
 
 Four execution surfaces go through the same `Manager`:
 
@@ -568,7 +698,7 @@ Four execution surfaces go through the same `Manager`:
 - **Remote agents** — egress goes through the server; credentials are injected from
   `credential_env` and never enter the model context or an artifact.
 
-### Default is Docker, and a missing Docker is an answer
+### 🐋 Default is Docker, and a missing Docker is an answer
 
 `AGENTHUB_SANDBOX_PROVIDER` defaults to `docker`. When the socket is unreachable — no daemon, no
 `/var/run/docker.sock` inside the container, a socket proxy that is not running — the catalogue
@@ -581,7 +711,7 @@ a socket-proxy sidecar with only `CONTAINERS`, `IMAGES` and `POST` enabled. Moun
 `/var/run/docker.sock` directly is equivalent to host root; `docker-compose.yml` ships the proxy as
 an optional profile for exactly that reason.
 
-### Compared with the hosted runtimes
+### 🆚 Compared with the hosted runtimes
 
 Full comparison, licences included: [`docs/sandbox-landscape.md`](docs/sandbox-landscape.md).
 
@@ -594,7 +724,13 @@ Full comparison, licences included: [`docs/sandbox-landscape.md`](docs/sandbox-l
 | Audit | digests, exit codes and durations in `sandbox_execs` |
 | Offline mode | explicit `mock`, never a hidden fallback |
 
-## Error contract
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🚨 Error contract
 
 The backend returns **machine readable codes only**, never prose; the console maps each code to
 localised copy on the client.
@@ -605,7 +741,13 @@ localised copy on the client.
   `-32004 unsupported_operation`, `-32005 invalid_state_transition`,
   `-32006 resource_not_found`, `-32007 resource_unreachable`, `-32008 task_not_resumable`
 
-## API keys
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🔑 API keys
 
 A key is a long-lived bearer credential for non-interactive access — scripts, other
 languages, CI. It authenticates as its **owner** but only with the **permissions
@@ -632,7 +774,13 @@ TOKEN=$(curl -s -X POST localhost:3500/api/api-keys \
 curl -s localhost:3500/api/resources -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
-## Persistence
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🗄 Persistence
 
 | Table | Content |
 | --- | --- |
@@ -665,7 +813,13 @@ reading a complete A2A run back from the database, and the governance cases (nam
 governance column round trips, the dedup key, source CRUD and sync bookkeeping, the in-memory and
 store-backed facades agreeing). **They skip without a database and never fabricate results.**
 
-## Database checkpoints
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 💾 Database checkpoints
 
 The console's **Backups** tab (`/admin`, `backups:manage`) takes a complete dump of the agenthub
 schema into one `tar.gz` on disk and can rewind the database to any of them.
@@ -708,7 +862,13 @@ schema into one `tar.gz` on disk and can rewind the database to any of them.
   integrity check then covers the ciphertext. Validate recoverability with
   `scripts/backup-restore-drill.sh` (decrypts into a throwaway database and reports key-table row counts).
 
-## Shared files
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📁 Shared files
 
 The workbench can upload a document, a screenshot or a recording and hand it to an agent from a
 thread. The bytes live outside the database; only their metadata does.
@@ -732,7 +892,13 @@ thread. The bytes live outside the database; only their metadata does.
 - **Ownership**: rows carry `owner_id` and the table is under `FORCE` row level security, so a
   second account cannot list, read or delete somebody else's file even by guessing the id.
 
-## AWS Agent Registry comparison
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🏛 AWS Agent Registry comparison
 
 An item-by-item capability comparison against
 [AWS Agent Registry](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html)
@@ -748,7 +914,7 @@ agenthub has always had the half AWS leaves to another service — register a re
 through one of five adapters. What it lacked was the catalogue half: curation, namespaces and
 synchronisation from an external registry.
 
-### Record types and validation
+### 🧾 Record types and validation
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -762,7 +928,7 @@ synchronisation from an external registry.
 | Dedup key `name + recordVersion` inside a registry; the same name may be republished at a new version | Dedup key `(namespace, name, version)` behind a unique index; the same name may be republished at a new version |
 | — (no model or CLI type) | `model` (provider fallback chain, optionally a real OpenAI-compatible router) and `cli` (allowlist → timeout → truncation) are agenthub's own |
 
-### Lifecycle and governance
+### ♻️ Lifecycle and governance
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -771,7 +937,7 @@ synchronisation from an external registry.
 | Four roles: Administrator / Publisher / Curator / Consumer | RBAC (owner / groups / roles / permissions) plus resource grants, with `registries:manage`, `registry:curate` and `sources:manage` for the catalogue |
 | Namespaces split by type, environment or team | Namespaces, each with its own approval policy and visibility boundary |
 
-### Discovery
+### 🔎 Discovery
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -780,7 +946,7 @@ synchronisation from an external registry.
 | **Native MCP endpoint** (`InvokeRegistryMcp`) any MCP client can call | `GET /api/export/mcp` **exports** MCP server descriptions; agenthub does not run an MCP server |
 | Agent Card | `GET /api/export/agent-card` and `/.well-known/agent.json`, one advertised skill per approved record |
 
-### Authorization and synchronisation
+### 🔐 Authorization and synchronisation
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -788,7 +954,7 @@ synchronisation from an external registry.
 | Outbound: a **credential provider** (OAuth credential or IAM role) for reaching remote endpoints | `AuthScheme` (none / bearer) plus `auth_token_env`, which stores the environment variable **name** only |
 | **URL-based synchronisation**, keeping records in step with remote MCP / A2A endpoints | A source (mcp or skill) pulls on demand or on an interval, merges on `(name, version)` and records the outcome; the fixture client keeps it offline until an operator opts out |
 
-### Operations and observability
+### 📊 Operations and observability
 
 | AWS Agent Registry | agenthub |
 | --- | --- |
@@ -799,7 +965,7 @@ synchronisation from an external registry.
 | Key-value tags (cost attribution, access control) | `tags []string` plus a `metadata` map — enough for the use |
 | — | Database checkpoints with scheduled dumps and in-place restore (`internal/backup`): no AWS counterpart, agenthub is ahead here |
 
-### What agenthub had, what it added, what it refuses
+### 📋 What agenthub had, what it added, what it refuses
 
 **Already had** — register-and-run adapters for all five kinds (deterministic, offline); the A2A
 endpoint with the full task state machine, including `input-required` parked indefinitely and
@@ -824,7 +990,7 @@ namespaces; the `(namespace, name, version)` dedup key; and the `custom` record 
 | Inbound authorization beyond sessions and RBAC | Session + RBAC already covers a self-hosted deployment. |
 | A full OAuth authorization-code flow per record | Synchronisation only needs a bearer token held in an environment variable; the full flow belongs to the "real adapters" milestone. |
 
-### recordType ↔ Kind
+### 🔁 recordType ↔ Kind
 
 | AWS recordType | Validated against | agenthub kind | Per-kind configuration |
 | --- | --- | --- | --- |
@@ -835,7 +1001,7 @@ namespaces; the `(namespace, name, version)` dedup key; and the `custom` record 
 | — | — | `model` | provider mode, endpoint, model id, api key env, fallback chain with weights, timeout |
 | — | — | `cli` | command, allowlist, timeout, output truncation, working directory, env |
 
-### Remaining gaps
+### 🧭 Remaining gaps
 
 1. **Semantic retrieval** (medium): keyword search recalls poorly once a catalogue runs to thousands
    of records; the fix would be an external search source rather than an embedded model.
@@ -845,11 +1011,23 @@ namespaces; the `(namespace, name, version)` dedup key; and the `custom` record 
 4. **Schedule expressiveness** (low): a sync schedule is a hand-rolled five-field cron, less
    expressive than EventBridge rules but enough for a self-hosted instance.
 
-## License
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📝 License
 
 MIT.
 
-## Engineering conventions
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🤝 Engineering conventions
 
 This repository follows Harness Engineering:
 
@@ -857,3 +1035,41 @@ This repository follows Harness Engineering:
 - [`requirements.md`](requirements.md): requirement spec (scope / errors / acceptance, reviewed by
   a human before coding)
 - [`task.md`](task.md): implementation checklist
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+---
+
+<div align="center">
+
+Copyright © 2026 [ariacompute][org]. <br/>
+This project is [MIT](./LICENSE) licensed.
+
+</div>
+
+<!-- LINK GROUP -->
+
+[org]: https://github.com/ariacompute
+[releases]: https://github.com/ariacompute/agenthub/releases
+[issues]: https://github.com/ariacompute/agenthub/issues
+[ci]: https://github.com/ariacompute/agenthub/actions/workflows/ci.yml
+[stars]: https://github.com/ariacompute/agenthub/stargazers
+[forks]: https://github.com/ariacompute/agenthub/network/members
+[license]: ./LICENSE
+[docs]: ./docs/docs.md
+[go]: https://go.dev
+[postgres]: https://www.postgresql.org
+[vue]: https://vuejs.org
+[badge-go]: https://img.shields.io/badge/Go-1.27-151515?labelColor=black&style=flat-square&logo=go
+[badge-postgres]: https://img.shields.io/badge/PostgreSQL-persistence-151515?labelColor=black&style=flat-square&logo=postgresql
+[badge-vue]: https://img.shields.io/badge/Vue-3-151515?labelColor=black&style=flat-square&logo=vuedotjs
+[badge-release]: https://img.shields.io/github/v/release/ariacompute/agenthub?labelColor=black&style=flat-square
+[badge-ci]: https://img.shields.io/github/actions/workflow/status/ariacompute/agenthub/ci.yml?labelColor=black&style=flat-square
+[badge-license]: https://img.shields.io/github/license/ariacompute/agenthub?labelColor=black&style=flat-square
+[badge-stars]: https://img.shields.io/github/stars/ariacompute/agenthub?labelColor=black&style=flat-square
+[badge-forks]: https://img.shields.io/github/forks/ariacompute/agenthub?labelColor=black&style=flat-square
+[back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square
