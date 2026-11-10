@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -157,8 +158,8 @@ func TestNormalizePersona(t *testing.T) {
 	}
 
 	// Whitespace is trimmed and a valid http(s) avatar is kept.
-	p := normalizePersona(&Persona{DisplayName: "  Bob  ", Title: "Dr", AvatarURL: "https://cdn.example.com/bob.png"})
-	if p == nil || p.DisplayName != "Bob" || p.Title != "Dr" || p.AvatarURL != "https://cdn.example.com/bob.png" {
+	p := normalizePersona(&Persona{Title: "  Dr  ", AvatarURL: "https://cdn.example.com/bob.png"})
+	if p == nil || p.Title != "Dr" || p.AvatarURL != "https://cdn.example.com/bob.png" {
 		t.Fatalf("trim/keep = %+v", p)
 	}
 
@@ -168,11 +169,31 @@ func TestNormalizePersona(t *testing.T) {
 		t.Fatalf("bad avatar should invalidate the persona, got %+v", p)
 	}
 
-	// Overlong fields are capped at 256 runes.
+	// Overlong labels are capped at 256 runes.
 	long := strings.Repeat("x", 300)
-	p = normalizePersona(&Persona{DisplayName: long})
-	if p == nil || len(p.DisplayName) != 256 {
-		t.Fatalf("display name length = %d, want 256", len(p.DisplayName))
+	p = normalizePersona(&Persona{Title: long})
+	if p == nil || len(p.Title) != 256 {
+		t.Fatalf("title length = %d, want 256", len(p.Title))
+	}
+}
+
+// The persona display name was folded into Entry.display_name. The handler
+// decodes PUT bodies with DisallowUnknownFields, so a client that re-sends a
+// legacy persona.displayName is refused rather than silently splitting the
+// label across two places again.
+func TestPersonaRejectsLegacyDisplayName(t *testing.T) {
+	dec := json.NewDecoder(strings.NewReader(`{"displayName":"Ada","title":"Dr"}`))
+	dec.DisallowUnknownFields()
+	var p Persona
+	if err := dec.Decode(&p); err == nil {
+		t.Fatal("legacy persona.displayName must be rejected by a strict decoder")
+	}
+	data, err := json.Marshal(&Persona{Title: "Dr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "displayName") {
+		t.Fatalf("persona must not carry a display name: %s", data)
 	}
 }
 

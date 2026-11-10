@@ -176,7 +176,9 @@ type Entry struct {
 	// restricted, so a record is private until somebody publishes it: that is
 	// the fail-closed replacement for the old "no grant means public" rule.
 	Visibility Visibility `json:"visibility,omitempty"`
-	// DisplayName is the optional human facing label AWS calls displayName.
+	// DisplayName is the single source of truth for the human-facing label (AWS
+	// calls it displayName). Persona deliberately carries no second copy: a
+	// resource has exactly one display name, and every writer uses this field.
 	DisplayName string `json:"display_name,omitempty"`
 	// SourceID is set when the record arrived from an upstream registry.
 	SourceID string `json:"source_id,omitempty"`
@@ -191,16 +193,16 @@ type Entry struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// Persona is the human-facing presentation of a resource (display label, role,
-// tagline and avatar). It is descriptive only: nothing here changes routing or
-// auth, and the instruction is context for the console, not a system prompt the
-// server injects anywhere.
+// Persona is the human-facing presentation of a resource (role, tagline and
+// avatar). It is descriptive only: nothing here changes routing or auth, and
+// the instruction is context for the console, not a system prompt the server
+// injects anywhere.
 //
-// Role, Instruction, MBTI and AvatarRef use the snake_case names the desktop
-// console sends (F10.2 in its requirements); the four original fields keep their
-// camelCase spelling so existing records and clients are untouched.
+// The display label is NOT here: it lives on Entry.display_name, which is the
+// single source of truth. Role, Instruction, MBTI and AvatarRef use the
+// snake_case names the desktop console sends (F10.2 in its requirements); the
+// original fields keep their wire spelling so existing records are untouched.
 type Persona struct {
-	DisplayName string `json:"displayName,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Tagline     string `json:"tagline,omitempty"`
 	AvatarURL   string `json:"avatarUrl,omitempty"`
@@ -260,7 +262,6 @@ func normalizePersona(p *Persona) *Persona {
 		}
 		return s
 	}
-	p.DisplayName = trim(p.DisplayName, maxLen)
 	p.Title = trim(p.Title, maxLen)
 	p.Tagline = trim(p.Tagline, maxLen)
 	p.Role = trim(p.Role, maxLen)
@@ -273,7 +274,7 @@ func normalizePersona(p *Persona) *Persona {
 			p.AvatarURL = ""
 		}
 	}
-	if p.DisplayName == "" && p.Title == "" && p.Tagline == "" && p.AvatarURL == "" &&
+	if p.Title == "" && p.Tagline == "" && p.AvatarURL == "" &&
 		p.Role == "" && p.Instruction == "" && p.MBTI == "" && p.AvatarRef == "" {
 		return nil
 	}
