@@ -101,6 +101,18 @@ func (m *memThreads) DeleteThread(_ context.Context, id, ownerID string) error {
 	return nil
 }
 
+func (m *memThreads) ClearMessages(_ context.Context, threadID, ownerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.threads[threadID]
+	if !ok || t.OwnerID != ownerID {
+		return threads.ErrNotFound
+	}
+	// The thread row survives; only the conversation goes away.
+	m.messages[threadID] = nil
+	return nil
+}
+
 func (m *memThreads) SetParticipants(_ context.Context, threadID string, resourceIDs []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -337,6 +349,59 @@ func TestDeleteThread(t *testing.T) {
 	// A retry is still "already gone", which is what makes a batch delete safe.
 	if w := do(t, h, http.MethodDelete, "/api/threads/"+mine.ID, "", nil); w.Code != http.StatusNotFound {
 		t.Fatalf("retry status = %d, want 404", w.Code)
+	}
+}
+
+func TestClearThreadMessages(t *testing.T) {
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""))
+	d.Threads = mt
+	mine, _ := mt.CreateThread(context.Background(), &threads.Thread{Title: "mine", OwnerID: "dev"})
+	mt.AddMessage(context.Background(), &threads.Message{ThreadID: mine.ID, AuthorType: "user", AuthorID: "dev", Body: "hi"})
+	mt.AddMessage(context.Background(), &threads.Message{ThreadID: mine.ID, AuthorType: "agent", AuthorID: "a1", Body: "reply"})
+	theirs, _ := mt.CreateThread(context.Background(), &threads.Thread{Title: "theirs", OwnerID: "someone-else"})
+	mt.AddMessage(context.Background(), &threads.Message{ThreadID: theirs.ID, AuthorType: "user", AuthorID: "someone-else", Body: "keep"})
+	h := Register(d)
+
+	// Not-owned and missing ids must answer the same 404 and change no history.
+	for _, id := range []string{theirs.ID, "nope"} {
+		w := do(t, h, http.MethodDelete, "/api/threads/"+id+"/messages", "", nil)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("clear %s: status = %d, want 404", id, w.Code)
+		}
+		if code := errCode(t, w); code != "not_found" {
+			t.Fatalf("clear %s: code = %q, want not_found", id, code)
+		}
+	}
+	if msgs, err := mt.ListMessages(context.Background(), theirs.ID, 0); err != nil || len(msgs) != 1 {
+		t.Fatalf("somebody else's messages were touched: %v %+v", err, msgs)
+	}
+	if msgs, err := mt.ListMessages(context.Background(), mine.ID, 0); err != nil || len(msgs) != 2 {
+		t.Fatalf("owner's messages were touched: %v %+v", err, msgs)
+	}
+
+	// The owner's clear is a bodyless 204, keeps the thread and empties only its
+	// own conversation.
+	w := do(t, h, http.MethodDelete, "/api/threads/"+mine.ID+"/messages", "", nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (%s)", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("204 carried a body: %q", w.Body.String())
+	}
+	if _, err := mt.GetThread(context.Background(), mine.ID, "dev"); err != nil {
+		t.Fatalf("thread did not survive: %v", err)
+	}
+	if msgs, err := mt.ListMessages(context.Background(), mine.ID, 0); err != nil || len(msgs) != 0 {
+		t.Fatalf("message history survived: %v %+v", err, msgs)
+	}
+	if msgs, err := mt.ListMessages(context.Background(), theirs.ID, 0); err != nil || len(msgs) != 1 {
+		t.Fatalf("another thread's history was cleared: %v %+v", err, msgs)
+	}
+
+	// An already empty conversation is a successful no-op, not a 404.
+	if w := do(t, h, http.MethodDelete, "/api/threads/"+mine.ID+"/messages", "", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("retry status = %d, want 204", w.Code)
 	}
 }
 

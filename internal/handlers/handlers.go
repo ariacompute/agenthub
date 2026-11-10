@@ -174,6 +174,7 @@ func Register(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/threads/{id}", d.requirePermission(authz.PermTasksRead, d.handleGetThread))
 	mux.HandleFunc("DELETE /api/threads/{id}", d.requirePermission(authz.PermTasksWrite, d.handleDeleteThread))
 	mux.HandleFunc("POST /api/threads/{id}/messages", d.requirePermission(authz.PermTasksWrite, d.handlePostThreadMessage))
+	mux.HandleFunc("DELETE /api/threads/{id}/messages", d.requirePermission(authz.PermTasksWrite, d.handleClearThreadMessages))
 	mux.HandleFunc("GET /api/threads/{id}/events", d.requirePermission(authz.PermTasksRead, d.handleThreadEventStream))
 
 	// Channels: external messaging surfaces (Slack / Teams / Telegram / SMS) bound

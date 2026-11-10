@@ -195,7 +195,7 @@ persistence ← internal/store（GORM 实现）
   `components/EnvEditor.vue`）；`tests/` vitest）
 - `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js` + `web/src/views/DocsView.vue`：
   **控制台自带文档屏**（侧边栏「管理」之后，无权限门控）。内容与文案分家——`docs-content.js` 是
-  语言中立的机器数据（`/a2a` 七方法 + 别名、142 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
+  语言中立的机器数据（`/a2a` 七方法 + 别名、143 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
   原样渲染不翻译；`docs-copy.js` 只放散文，13 语齐备。二者的分界由 `tests/copy-fallback.spec.js`
   强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
   CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。

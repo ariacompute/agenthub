@@ -252,6 +252,7 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | `GET` | `/api/threads/{id}` | `tasks:read` — Read tasks | Read a thread and its message history. | — | `{ thread, messages: [Message] }` |
 | `DELETE` | `/api/threads/{id}` | `tasks:write` — Cancel and resume tasks | Delete a thread owned by the caller; its message history goes with it through the ON DELETE CASCADE foreign key. | — | `204 \| 404 not_found` |
 | `POST` | `/api/threads/{id}/messages` | `tasks:write` — Cancel and resume tasks | Append a message; each @mention delegates to that agent over A2A (Hub.Send), keyed by task id. | `{ body, mentions?: [resourceId] }` | `{ message, delegated: [taskId], failed: [resourceId] } — 201` |
+| `DELETE` | `/api/threads/{id}/messages` | `tasks:write` — Cancel and resume tasks | Delete every message in one owned thread; the thread, its participants and its tasks stay. | — | `204 \| 404 not_found` |
 | `GET` | `/api/threads/{id}/events` | `tasks:read` — Read tasks | SSE: replay history, then follow delegated tasks and persist agent replies. | — | `text/event-stream of { thread.message, thread.agent }` |
 | `GET` | `/api/channels` | `tasks:read` — Read tasks | List all channels | — | `Channel[]` |
 | `POST` | `/api/channels` | `tasks:write` — Cancel and resume tasks | Create a new entry among the channels | `{ kind, name, enabled, config, signingKeyEnv, threadId }` | `Channel — 201` |

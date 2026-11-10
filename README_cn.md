@@ -55,7 +55,7 @@ curl localhost:3500/.well-known/agent.json
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
-文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 142 条 HTTP 路由。同一份内容
+文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 143 条 HTTP 路由。同一份内容
 由 `make docs-md` 渲染到 [`docs/docs_cn.md`](docs/docs_cn.md)；该文件是**生成的**——来源是文档屏
 所读的两个模块（`web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`），要改就改这两处
 再重跑，不要直接编辑 markdown。

@@ -259,6 +259,8 @@ export const docsCopy = {
     epThreadCreate: "Create a thread owned by the caller.",
     epThreadGet: "Read a thread and its message history.",
     epThreadDelete: "Delete a thread owned by the caller; its message history goes with it through the ON DELETE CASCADE foreign key.",
+
+    epThreadClear: "Delete every message in one owned thread; the thread, its participants and its tasks stay.",
     epThreadMessage: "Append a message; each @mention delegates to that agent over A2A (Hub.Send), keyed by task id.",
     epThreadEvents: "SSE: replay history, then follow delegated tasks and persist agent replies.",
 },
@@ -498,6 +500,8 @@ export const docsCopy = {
     epThreadCreate: "创建调用者拥有的线程。",
     epThreadGet: "读取线程及其消息历史。",
     epThreadDelete: "删除调用者拥有的线程；消息历史随外键级联一并删除。",
+
+    epThreadClear: "清空某个自有线程的全部消息；线程、参与者与任务保留。",
     epThreadMessage: "追加一条消息；每个 @mention 经 A2A 委派给对应 agent（Hub.Send），以任务 id 关联。",
     epThreadEvents: "SSE：先回访历史，再跟随被委派任务并落库 agent 回复。",
 },
@@ -737,6 +741,8 @@ export const docsCopy = {
     epThreadCreate: "建立呼叫者擁有的執行緒。",
     epThreadGet: "讀取執行緒及其訊息歷史。",
     epThreadDelete: "刪除呼叫者擁有的執行緒；訊息記錄會隨外鍵串聯一併刪除。",
+
+    epThreadClear: "清空某個自有執行緒的全部訊息；執行緒、參與者與工作保留。",
     epThreadMessage: "附加一則訊息；每個 @mention 經 A2A 委派給對應 agent（Hub.Send），以任務 id 關聯。",
     epThreadEvents: "SSE：先回訪歷史，再跟隨被委派任務並寫入 agent 回覆。",
 },
@@ -984,6 +990,8 @@ export const docsCopy = {
     epThreadCreate: "Crea un hilo propiedad de quien hace la llamada.",
     epThreadGet: "Lee un hilo y su historial de mensajes.",
     epThreadDelete: "Elimina un hilo propiedad del llamador; su historial de mensajes se borra en cascada.",
+
+    epThreadClear: "Borra todos los mensajes de un hilo propio; el hilo, sus participantes y sus tareas permanecen.",
     epThreadMessage: "Añade un mensaje; cada @mention delega a ese agente vía A2A (Hub.Send), indexado por el id de tarea.",
     epThreadEvents: "SSE: reproduce el historial y luego sigue las tareas delegadas y persiste las respuestas del agente.",
 },
@@ -1231,6 +1239,8 @@ export const docsCopy = {
     epThreadCreate: "Crée un fil appartenant à l'appelant.",
     epThreadGet: "Lit un fil et son historique de messages.",
     epThreadDelete: "Supprime un fil appartenant au demandeur ; son historique de messages part en cascade.",
+
+    epThreadClear: "Supprime tous les messages d'une conversation possédée ; la conversation, ses participants et ses tâches restent.",
     epThreadMessage: "Ajoute un message ; chaque @mention délègue à cet agent via A2A (Hub.Send), indexé par l'id de tâche.",
     epThreadEvents: "SSE : rejoue l'historique, puis suit les tâches déléguées et persiste les réponses de l'agent.",
 },
@@ -1478,6 +1488,8 @@ export const docsCopy = {
     epThreadCreate: "Erstellt einen Thread, der dem Aufrufer gehört.",
     epThreadGet: "Liest einen Thread und dessen Nachrichtenverlauf.",
     epThreadDelete: "Löscht einen Thread des Aufrufers; der Nachrichtenverlauf wird per Fremdschlüssel mitgelöscht.",
+
+    epThreadClear: "Löscht alle Nachrichten einer eigenen Unterhaltung; die Unterhaltung, ihre Teilnehmenden und Aufgaben bleiben erhalten.",
     epThreadMessage: "Hängt eine Nachricht an; jeder @mention delegiert an diesen Agent über A2A (Hub.Send), referenziert über die Task-ID.",
     epThreadEvents: "SSE: spielt den Verlauf erneut ab und verfolgt dann delegierte Tasks und speichert Agent-Antworten.",
 },
@@ -1725,6 +1737,8 @@ export const docsCopy = {
     epThreadCreate: "Crea un thread di proprietà del chiamante.",
     epThreadGet: "Legge un thread e la sua cronologia di messaggi.",
     epThreadDelete: "Elimina un thread di proprietà del chiamante; la cronologia dei messaggi viene rimossa a cascata.",
+
+    epThreadClear: "Elimina tutti i messaggi di una conversazione di proprietà del chiamante; la conversazione, i partecipanti e le attività restano.",
     epThreadMessage: "Aggiunge un messaggio; ogni @mention delega a quell'agente tramite A2A (Hub.Send), indicizzato per id attività.",
     epThreadEvents: "SSE: riproduce la cronologia, poi segue le attività delegate e persiste le risposte dell'agente.",
 },
@@ -1972,6 +1986,8 @@ export const docsCopy = {
     epThreadCreate: "Создаёт тред, принадлежащий вызывающему.",
     epThreadGet: "Читает тред и его историю сообщений.",
     epThreadDelete: "Удаляет тред, принадлежащий вызывающему; история сообщений удаляется каскадно.",
+
+    epThreadClear: "Удаляет все сообщения в принадлежащей вызывающему беседе; сама беседа, участники и задачи остаются.",
     epThreadMessage: "Добавляет сообщение; каждое упоминание (@mention) делегирует этому агенту через A2A (Hub.Send), привязываясь к id задачи.",
     epThreadEvents: "SSE: воспроизводит историю, затем отслеживает делегированные задачи и сохраняет ответы агента.",
 },
@@ -2219,6 +2235,8 @@ export const docsCopy = {
     epThreadCreate: "呼び出し元が所有するスレッドを作成します。",
     epThreadGet: "スレッドとそのメッセージ履歴を読み取ります。",
     epThreadDelete: "呼び出し元が所有するスレッドを削除します。メッセージ履歴も外部キーによって連鎖削除されます。",
+
+    epThreadClear: "呼び出し元が所有するスレッドの全メッセージを削除します。スレッド、参加者、タスクは残ります。",
     epThreadMessage: "メッセージを追加します。各 @mention は A2A（Hub.Send）経由でそのエージェントに委任され、タスク ID で紐付けられます。",
     epThreadEvents: "SSE: 履歴を再生した後、委任されたタスクを追跡し、エージェントの応答を保存します。",
 },
@@ -2466,6 +2484,8 @@ export const docsCopy = {
     epThreadCreate: "호출자가 소유한 스레드를 생성합니다.",
     epThreadGet: "스레드와 그 메시지 기록을 읽습니다.",
     epThreadDelete: "호출자가 소유한 스레드를 삭제합니다. 메시지 기록도 외래 키에 따라 함께 삭제됩니다.",
+
+    epThreadClear: "호출자가 소유한 스레드의 모든 메시지를 삭제합니다. 스레드, 참여자, 작업은 유지됩니다.",
     epThreadMessage: "메시지를 추가합니다. 각 @mention은 A2A(Hub.Send)를 통해 해당 에이전트에 위임되며 작업 ID로 연결됩니다.",
     epThreadEvents: "SSE: 기록을 재생한 후 위임된 작업을 추적하고 에이전트 응답을 저장합니다.",
 },
@@ -2713,6 +2733,8 @@ export const docsCopy = {
     epThreadCreate: "Cria um thread pertencente a quem fez a chamada.",
     epThreadGet: "Lê um thread e seu histórico de mensagens.",
     epThreadDelete: "Exclui um thread pertencente ao chamador; o histórico de mensagens é removido em cascata.",
+
+    epThreadClear: "Exclui todas as mensagens de uma conversa própria; a conversa, os participantes e as tarefas permanecem.",
     epThreadMessage: "Anexa uma mensagem; cada @mention delega àquele agente via A2A (Hub.Send), indexado pelo id da tarefa.",
     epThreadEvents: "SSE: reproduz o histórico e então acompanha as tarefas delegadas e persiste as respostas do agente.",
 },
@@ -2960,6 +2982,8 @@ export const docsCopy = {
     epThreadCreate: "ينشئ محادثة يملكها المتصل.",
     epThreadGet: "يقرأ محادثة وتاريخ رسائلها.",
     epThreadDelete: "يحذف محادثة يملكها المستدعي؛ يُحذف سجل رسائلها تتابعيًا عبر المفتاح الخارجي.",
+
+    epThreadClear: "يحذف جميع رسائل محادثة يملكها المستدعي؛ تبقى المحادثة والمشاركون والمهام.",
     epThreadMessage: "يُلحق رسالة؛ كل @mention يفوّض إلى ذلك الوكيل عبر A2A (Hub.Send)، مرتبط بمعرّف المهمة.",
     epThreadEvents: "SSE: يعيد تشغيل السجل، ثم يتابع المهام المفوّضة ويحفظ ردود الوكيل.",
 },
@@ -3207,6 +3231,8 @@ export const docsCopy = {
     epThreadCreate: "कॉलर के स्वामित्व वाला थ्रेड बनाएँ।",
     epThreadGet: "थ्रेड और उसका संदेश इतिहास पढ़ें।",
     epThreadDelete: "कॉलर के स्वामित्व वाला थ्रेड हटाएँ; संदेश इतिहास विदेशी कुंजी के माध्यम से कैस्केड में हटता है।",
+
+    epThreadClear: "कॉलर के स्वामित्व वाली बातचीत के सभी संदेश हटाएँ; बातचीत, प्रतिभागी और कार्य बने रहते हैं।",
     epThreadMessage: "एक संदेश जोड़ें; प्रत्येक @mention उस एजेंट को A2A (Hub.Send) के माध्यम से सौंपता है, जिसे कार्य ID से जोड़ा जाता है।",
     epThreadEvents: "SSE: इतिहास को पुन: चलाएँ, फिर सौंपे गए कार्यों का अनुसरण करें और एजेंट के उत्तर सहेजें।",
 },

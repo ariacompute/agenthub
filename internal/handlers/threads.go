@@ -90,6 +90,23 @@ func (d Deps) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleClearThreadMessages empties one owned thread's conversation while
+// keeping the thread, its participants and the tasks already started from it.
+// A missing or not-owned thread is the same 404 as handleDeleteThread, so the
+// endpoint cannot be used to probe for ids the caller is not allowed to see.
+func (d Deps) handleClearThreadMessages(w http.ResponseWriter, r *http.Request) {
+	if d.Threads == nil {
+		httputil.WriteError(w, http.StatusServiceUnavailable, httputil.CodeFeatureUnavailable)
+		return
+	}
+	p := PrincipalFrom(r)
+	if err := d.Threads.ClearMessages(r.Context(), r.PathValue("id"), p.UserID); err != nil {
+		threadError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handlePostThreadMessage appends a human message and, for every @mention,
 // delegates the message to that agent through the hub (message/send over A2A).
 // Each delegation is recorded as an (initially empty) agent message keyed by the

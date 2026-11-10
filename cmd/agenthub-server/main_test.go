@@ -293,6 +293,10 @@ func (f *fakeThreads) DeleteThread(context.Context, string, string) error {
 	return errors.New("not used")
 }
 
+func (f *fakeThreads) ClearMessages(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
 func (f *fakeThreads) SetParticipants(context.Context, string, []string) error {
 	return errors.New("not used")
 }

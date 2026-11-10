@@ -157,6 +157,61 @@ func TestThreadsStoreDelete(t *testing.T) {
 	}
 }
 
+// TestThreadsStoreClearMessages checks the owner gate and the "thread survives"
+// contract against a real PostgreSQL; it skips without DATABASE_URL like every
+// DB-backed case here.
+func TestThreadsStoreClearMessages(t *testing.T) {
+	db := openGovernanceDB(t)
+	s := NewThreadsStore(db)
+	ctx := context.Background()
+
+	th, err := s.CreateThread(ctx, &threads.Thread{Title: "to clear", OwnerID: "dev"})
+	if err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	other, err := s.CreateThread(ctx, &threads.Thread{Title: "other", OwnerID: "dev"})
+	if err != nil {
+		t.Fatalf("CreateThread other: %v", err)
+	}
+	for _, body := range []string{"hi", "again"} {
+		if _, err := s.AddMessage(ctx, &threads.Message{ThreadID: th.ID, AuthorType: "user", AuthorID: "dev", Body: body}); err != nil {
+			t.Fatalf("AddMessage %q: %v", body, err)
+		}
+	}
+	if _, err := s.AddMessage(ctx, &threads.Message{ThreadID: other.ID, AuthorType: "user", AuthorID: "dev", Body: "keep"}); err != nil {
+		t.Fatalf("AddMessage other: %v", err)
+	}
+
+	// A thread the caller cannot see is a not-found, not a silent success on
+	// zero deleted rows.
+	for _, tc := range []struct{ id, owner string }{{th.ID, "someone-else"}, {"missing", "dev"}} {
+		if err := s.ClearMessages(ctx, tc.id, tc.owner); !errors.Is(err, threads.ErrNotFound) {
+			t.Fatalf("ClearMessages(%q, %q): err=%v, want ErrNotFound", tc.id, tc.owner, err)
+		}
+	}
+	if msgs, err := s.ListMessages(ctx, th.ID, 0); err != nil || len(msgs) != 2 {
+		t.Fatalf("refused clear touched the history: %v %+v", err, msgs)
+	}
+
+	if err := s.ClearMessages(ctx, th.ID, "dev"); err != nil {
+		t.Fatalf("ClearMessages: %v", err)
+	}
+	if _, err := s.GetThread(ctx, th.ID, "dev"); err != nil {
+		t.Fatalf("thread did not survive: %v", err)
+	}
+	if msgs, err := s.ListMessages(ctx, th.ID, 0); err != nil || len(msgs) != 0 {
+		t.Fatalf("clear failed: err=%v messages=%+v", err, msgs)
+	}
+	if msgs, err := s.ListMessages(ctx, other.ID, 0); err != nil || len(msgs) != 1 {
+		t.Fatalf("another thread lost its history: err=%v messages=%+v", err, msgs)
+	}
+
+	// Clearing an already empty conversation is a no-op, not a not-found.
+	if err := s.ClearMessages(ctx, th.ID, "dev"); err != nil {
+		t.Fatalf("idempotent ClearMessages: %v", err)
+	}
+}
+
 // parseSeq converts the string message id (a decimal integer) into the numeric
 // cursor ListMessages expects.
 func parseSeq(s string) int64 {

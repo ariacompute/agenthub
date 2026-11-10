@@ -383,6 +383,7 @@ GET    /api/threads                           → {threads}（tasks:read，调�
 POST   /api/threads                           → 201 Thread（tasks:write；title?、participants?）
 GET    /api/threads/{id}                      → {thread, messages} | 404
 POST   /api/threads/{id}/messages             → 201 {message, delegated, failed}（tasks:write；@mention → Hub.Send 委派，task id 关联）
+DELETE /api/threads/{id}/messages             → 204 | 404 not_found（tasks:write；清空会话，线程 / 参与者 / 任务保留）
 GET    /api/threads/{id}/events               → SSE（tasks:read；回访线程历史 + 跟随被委派任务，agent 回复落库）
 GET    /a2a/stream?task=<id>                   → SSE（控制台用，无 JSON-RPC 封装）
 GET    /healthz                                → 状态与计数（无鉴权）
@@ -411,7 +412,7 @@ POST   /api/router/passes                     → 202 {kicked:true}（tasks:writ
 GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 router_event，先回放再实时）
 ```
 
-#### 4.2.1 路由分组索引（当前 136 条 `/api` 路由）
+#### 4.2.1 路由分组索引（当前 138 条 `/api` 路由）
 
 不逐条罗列，避免与 `handlers.go` 反复漂移；每条路径的请求/响应示例由控制台 `/docs` 屏给出
 （`web/src/lib/docs-content.js`），路由搬动时两处必须同步。
@@ -425,7 +426,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | 上游源 | 5 | `/api/registry-sources`（GET/POST）、`{id}`（PUT/DELETE）、`{id}/sync` | `sources:manage` |
 | 任务 | 6 | `/api/tasks`、`{id}`、`{id}/spans`、`{id}/events`、`{id}/cancel`、`{id}/resume` | `tasks:read` / `tasks:write` |
 | 导出 | 2 | `/api/export/mcp`、`/api/export/agent-card` | `resources:read` |
-| 工作台与线程 | 8 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`（GET/DELETE）、`{id}/messages`、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
+| 工作台与线程 | 9 | `/api/workspace`、`/api/threads`（GET/POST）、`{id}`（GET/DELETE）、`{id}/messages`（POST/DELETE）、`{id}/events`、`{id}/audio` | `resources:read` / `tasks:read` / `tasks:write` |
 | 通道 | 9 | `/api/channels`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/deliveries`、`{id}/deliveries/{did}/retry`、`{id}/webhook`（**公开，签名校验**）、`{id}/deliver` | `tasks:read` / `tasks:write`；webhook 无会话 |
 | 连接器 | 7 | `/api/connectors`、`{id}/policy`（PUT）、`{id}/actions`（GET/POST）、`approvals`（GET）、`approvals/{id}/approve|reject`（POST） | `resources:read` / `resources:write`；审批队列用 `tasks:read` / `tasks:write` |
 | 计算机 | 4 | `/api/computers`（GET/POST）、`{id}`（GET/DELETE） | `resources:read` / `resources:write` |
@@ -440,9 +441,9 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | API Key | 5 | `/api/api-keys`（GET/POST）、`{id}`（GET/PUT/DELETE） | `requireAuth`（各自持有者的 key） |
 | 共享文件 | 5 | `/api/files`（GET/POST）、`{id}`（GET/DELETE）、`{id}/content` | `tasks:read` / `tasks:write`；下载支持 `Range` |
 
-上表分组条数合计 **137** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
+上表分组条数合计 **138** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
 另有 5 条协议面路由（`POST /a2a`、`GET /a2a/stream`、`GET /a2a/agent-card`、
-`GET /.well-known/agent.json`、`GET /healthz`），合计 **142** 条 `mux.HandleFunc`。
+`GET /.well-known/agent.json`、`GET /healthz`），合计 **143** 条 `mux.HandleFunc`。
 `/docs` 屏与 `docs/*.md` 的分组口径略有不同（把 `/api/schedules/{id}/run` 归入调度器组，
 故该组为 14 条），但端点集合一致。
 
@@ -869,3 +870,29 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
   路由总数同步到 142。
 - 用例覆盖：204 空体与消息级联、他人 / 不存在 / 重试的 404 `not_found`、存储故障 5xx、
   无存储 503、路由存活探针；`internal/store` 的 `DATABASE_URL` 门控用例验证级联与重复删除。
+
+## 14. 会话消息清空端点（2026-11-10，配合 agentbuddy F3.8）
+
+### 14.1 功能边界
+
+- 新增唯一控制面路由 `DELETE /api/threads/{id}/messages`，复用 `tasks:write`；
+  **只清空 `thread_messages`**，线程行、参与者与已创建的任务 / 订阅全部保留，不新建迁移、
+  错误码或权限码。
+- 端口 `threads.Store.ClearMessages(ctx, threadID, ownerID)`：先在同一强制 RLS 事务里读取
+  并校验线程归属，再按 `owner_id` 批量删除消息；"消息已为空"仍是 204，但他人 / 不存在的
+  线程必须回 `ErrNotFound` → 404 `not_found`，不能因为删到 0 行就伪装成功。
+- 成功回 **204 空体**；`d.Threads == nil` → 503 `feature_unavailable`；存储报错 → 带机器码
+  的 5xx。幂等：重复清空同一个自有线程继续回 204。
+- 该端点不推送 SSE 帧：agentbuddy 的会话页在成功后清空本地列表并重建事件流，避免旧流把
+  已删除的消息或旧任务的回复重新灌回来。
+
+### 14.2 验收标准
+
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`tests/docs_endpoints_test.go` 对
+  `handlers.go` 与两份 md 的双向差集通过。
+- `web/src/lib/docs-content.js` 登记该端点（collaboration 组 25 条、全表 143 条），
+  `docs-copy.js` 13 语 `epThreadClear` 齐全且均不同于英文；重新生成两份 md 后无漂移。
+- `AGENTS.md` / 中英 README / §4.2 的路由总数同步到 143。
+- 用例覆盖：204 空体、线程保留 / 他人线程不受影响、他人 / 不存在 / 重试的 404、
+  存储故障 5xx、无存储 503、路由存活探针；`internal/store` 的 `DATABASE_URL` 门控用例
+  验证归属门禁与幂等。

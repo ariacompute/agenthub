@@ -1245,3 +1245,28 @@ postgres 只挂在 `internal: true` 的 `data` 网络上，Docker 不给只连 i
   级联与重复删除用例。
 - `go build ./...` / `go vet ./...` / `go test ./...` 全绿（含 `tests/docs_endpoints_test.go`
   双向差集）；`cd web && bun run test` 全绿；`DATABASE_URL` 门控用例本机跳过，留 CI/连库环境实跑。
+
+## M21 — 会话消息清空端点（2026-11-10）
+
+配合 agentbuddy F3.8：会话页要「清空对话框所有消息」但保留线程与任务，M20 的
+`DELETE /api/threads/{id}` 会连线程一起删掉，因此补一个只删消息的控制面路由。
+
+### 1. 实施
+
+- `threads.Store` 新增 `ClearMessages(ctx, threadID, ownerID)`；`internal/store/threads_store.go`
+  在同一强制 RLS 事务里**先读线程校验归属**再按 `owner_id` 批量删 `thread_messages`：
+  空会话删到 0 行仍成功，他人 / 不存在的线程回 `ErrNotFound`，避免「删到 0 行」被伪装成成功。
+- `handlers.go` 注册 `DELETE /api/threads/{id}/messages`（`tasks:write`），`threads.go` 新处理器
+  成功回 204 空体；`d.Threads == nil` 503、存储故障走 `threadError`。
+- `Listeners()` / `listen_test.go` / `docs-content.js` / `docs-copy.js`（13 语 `epThreadClear`）/
+  `bun scripts/gen-docs-md.mjs` 两份 md / `docs-content.spec.js` 同步，端点表 142 → 143、
+  collaboration 24 → 25。
+
+### 2. 验证
+
+- 新增 `TestClearThreadMessages`（204 空体、线程保留、他人线程不受影响、他人 / 不存在 / 重试）；
+  存储故障、隐形 id、未知 id、路由存活探针各补一条；`threads_store_test.go` 新增
+  `DATABASE_URL` 门控的归属门禁 + 幂等用例。
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`cd web && bun run test` 全绿。
+- 文档同步：`requirements.md`（§4.2 / §4.2.1 / 新增 §14）、`task.md`、
+  `AGENTS.md` / 中英 README 的路由总数。

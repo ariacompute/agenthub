@@ -46,6 +46,7 @@ func Listeners() []Listener {
 		{"POST /api/connectors/approvals/{id}/reject", "connectors: reject a parked action, executing nothing"},
 		{"POST /api/threads/{id}/audio", "voice message upload, transcribed server side"},
 		{"DELETE /api/threads/{id}", "delete one owned thread and its message history"},
+		{"DELETE /api/threads/{id}/messages", "clear one owned thread's conversation, keeping the thread"},
 		{"GET /api/computers", "agent computers: browser / shell / screen sandboxes (F11)"},
 		{"POST /api/computers", "agent computers: create a sandbox"},
 		{"GET /api/computers/{id}", "agent computers: sandbox detail"},

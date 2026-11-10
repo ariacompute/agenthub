@@ -47,6 +47,7 @@ func (failingThreads) GetThread(context.Context, string, string) (*threads.Threa
 	return nil, errStoreDown
 }
 func (failingThreads) DeleteThread(context.Context, string, string) error      { return errStoreDown }
+func (failingThreads) ClearMessages(context.Context, string, string) error     { return errStoreDown }
 func (failingThreads) SetParticipants(context.Context, string, []string) error { return errStoreDown }
 func (failingThreads) AddMessage(context.Context, *threads.Message) (*threads.Message, error) {
 	return nil, errStoreDown
@@ -157,6 +158,7 @@ func TestAStoreFailureIsReportedNotSwallowed(t *testing.T) {
 		{"threads get", http.MethodGet, "/api/threads/thread-1", "", func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
 		{"threads post", http.MethodPost, "/api/threads/thread-1/messages", `{"body":"hi"}`, func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
 		{"threads delete", http.MethodDelete, "/api/threads/thread-1", "", func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
+		{"thread messages clear", http.MethodDelete, "/api/threads/thread-1/messages", "", func(d *Deps) { d.Threads = failingThreads{newMemThreads()} }},
 
 		{"channels list", http.MethodGet, "/api/channels", "", wireBrokenChannels},
 		{"channels get", http.MethodGet, "/api/channels/ch-1", "", wireBrokenChannels},
@@ -219,6 +221,7 @@ func TestDeletingAnInvisibleRowIsANotFound(t *testing.T) {
 		wire func(d *Deps)
 	}{
 		{"thread", "/api/threads/nope", "not_found", func(d *Deps) { d.Threads = newMemThreads() }},
+		{"thread messages", "/api/threads/nope/messages", "not_found", func(d *Deps) { d.Threads = newMemThreads() }},
 		{"schedule", "/api/schedules/nope", "schedule_not_found", func(d *Deps) { d.Schedules = &memSchedules{} }},
 		{"channel", "/api/channels/nope", "channel_not_found", func(d *Deps) {
 			d.Cfg.ChannelsEnabled = true
@@ -267,6 +270,8 @@ func TestAnUnknownIdIsANotFoundForEverySurface(t *testing.T) {
 		{"channel deliveries", http.MethodGet, "/api/channels/nope/deliveries", "", "channel_not_found",
 			func(d *Deps) { d.Cfg.ChannelsEnabled = true; d.Channels = newFakeChannels() }},
 		{"thread", http.MethodGet, "/api/threads/nope", "", "not_found",
+			func(d *Deps) { d.Threads = newMemThreads() }},
+		{"thread messages clear", http.MethodDelete, "/api/threads/nope/messages", "", "not_found",
 			func(d *Deps) { d.Threads = newMemThreads() }},
 	}
 

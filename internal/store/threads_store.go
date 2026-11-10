@@ -163,6 +163,25 @@ func (s *threadsStore) DeleteThread(ctx context.Context, id, ownerID string) err
 	})
 }
 
+// ClearMessages empties one owned thread's history without deleting the thread.
+// The ownership read comes first: deleting zero message rows is a successful
+// no-op on an already empty conversation, but a thread the caller cannot see
+// must still answer ErrNotFound rather than a silent 204. Both statements run in
+// one scoped transaction, so the forced RLS policy sees the same identity.
+func (s *threadsStore) ClearMessages(ctx context.Context, threadID, ownerID string) error {
+	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
+		var thread threadRow
+		if err := ownedWhere(db, threadID, ownerID).Take(&thread).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return threads.ErrNotFound
+			}
+			return err
+		}
+		res := ownedChildWhere(db, "thread_id", threadID, ownerID).Delete(&threadMessageRow{})
+		return res.Error
+	})
+}
+
 func (s *threadsStore) SetParticipants(ctx context.Context, threadID string, resourceIDs []string) error {
 	parts, err := model.NewJSONField(resourceIDs)
 	if err != nil {
