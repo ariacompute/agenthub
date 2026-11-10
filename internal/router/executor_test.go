@@ -11,15 +11,17 @@ import (
 
 // stubRunner is the hub as the executor sees it: three methods, no network.
 type stubRunner struct {
-	task    *a2a.Task
-	err     error
-	sent    []a2a.Message
-	resumed []a2a.TaskResumeParams
-	cancel  []string
+	task     *a2a.Task
+	err      error
+	sent     []a2a.Message
+	sentMeta []map[string]any
+	resumed  []a2a.TaskResumeParams
+	cancel   []string
 }
 
 func (r *stubRunner) Send(ctx context.Context, p a2a.MessageSendParams) (*a2a.Task, error) {
 	r.sent = append(r.sent, p.Message)
+	r.sentMeta = append(r.sentMeta, p.Metadata)
 	return r.task, r.err
 }
 
@@ -67,6 +69,21 @@ func TestLaunchMapsTheTaskStateOntoTheAssignment(t *testing.T) {
 				t.Fatalf("sent %d messages, want 1", len(runner.sent))
 			}
 		})
+	}
+}
+
+// A ticket names the worker it should run on. That target has to reach the hub,
+// or every routed ticket runs on whichever agent happens to sort first.
+func TestLaunchTargetsTheTicketResource(t *testing.T) {
+	runner := &stubRunner{task: taskIn(a2a.TaskStateCompleted)}
+	x := NewHubExecutor(runner, NewMemoryStore(), nil, nil)
+	tk := &Ticket{ID: "tkt-1", Goal: "do it", Resource: "res-9", CreatedAt: testInstant()}
+
+	if _, err := x.Launch(context.Background(), tk, &Assignment{ID: "asg-1"}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if got := runner.sentMeta[0]["resourceId"]; got != "res-9" {
+		t.Fatalf("params resourceId = %v, want res-9", got)
 	}
 }
 

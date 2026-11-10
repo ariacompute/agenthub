@@ -81,10 +81,15 @@ func (x *HubExecutor) Launch(ctx context.Context, t *Ticket, a *Assignment) (*As
 	} else {
 		ctx = identity.With(ctx, identity.Identity{System: true})
 	}
+	// The ticket's target is named on the params metadata: that is where the hub
+	// resolves the run resource. Without it the hub falls back to the first agent,
+	// so a ticket routed to a specific worker would run on whatever agent sorted
+	// first instead.
+	params := a2a.MessageSendParams{Message: msg, Metadata: map[string]any{"resourceId": t.Resource}}
 	if owned, ok := x.hub.(ownedRunner); ok && t.OwnerID != "" {
-		task, err = owned.SendAs(ctx, t.OwnerID, a2a.MessageSendParams{Message: msg})
+		task, err = owned.SendAs(ctx, t.OwnerID, params)
 	} else {
-		task, err = x.hub.Send(ctx, a2a.MessageSendParams{Message: msg})
+		task, err = x.hub.Send(ctx, params)
 	}
 	if err == nil && task != nil && x.link != nil && t.Focus != "" {
 		if lerr := x.link(ctx, t.Focus, task.ID, t.Resource); lerr != nil {

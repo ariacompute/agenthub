@@ -640,14 +640,13 @@ func (h *Hub) ResolveResource(params a2a.MessageSendParams) (*registry.Entry, er
 }
 
 func (h *Hub) selectResource(params a2a.MessageSendParams) (*registry.Entry, error) {
-	var selector string
-	if params.Metadata != nil {
-		for _, key := range []string{"resourceId", "resource_id", "resource"} {
-			if v, ok := params.Metadata[key].(string); ok && strings.TrimSpace(v) != "" {
-				selector = v
-				break
-			}
-		}
+	selector := metadataSelector(params.Metadata)
+	if selector == "" {
+		// A2A callers and thread delegation may name the target on the message
+		// itself. The params map is canonical; the message map is the fallback, so
+		// a resourceId written there is honoured instead of silently falling back
+		// to the first agent (which is what made every @mention run the wrong one).
+		selector = metadataSelector(params.Message.Metadata)
 	}
 	entry, err := h.selectBy(selector)
 	if err != nil {
@@ -665,6 +664,17 @@ func (h *Hub) selectResource(params a2a.MessageSendParams) (*registry.Entry, err
 		return nil, err
 	}
 	return entry, nil
+}
+
+// metadataSelector reads the resource selector keys from one metadata map. A nil
+// map is safe to index and yields "", which lets the caller try the next map.
+func metadataSelector(meta map[string]any) string {
+	for _, key := range []string{"resourceId", "resource_id", "resource"} {
+		if v, ok := meta[key].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // selectBy resolves a selector: resource id, exact name, kind name, or empty

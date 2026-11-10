@@ -1023,3 +1023,23 @@ func TestInvocationRecordsTheHealthItProved(t *testing.T) {
 		t.Fatalf("agent health after a failed call = %q, want unhealthy", got)
 	}
 }
+
+// TestHubResolvesTheResourceFromMessageMetadata pins the fallback: thread
+// delegation and A2A clients that follow the message-level convention name the
+// target on the message, and ignoring it silently ran the first agent instead of
+// the one that was addressed.
+func TestHubResolvesTheResourceFromMessageMetadata(t *testing.T) {
+	agent := &registry.Entry{Kind: registry.KindAgent, Name: "addressed", Version: "1.0.0"}
+	h, _, _ := newTestHub(t, agent)
+	defer h.Close()
+
+	msg := userMessage("run it")
+	msg.Metadata = map[string]any{"resourceId": agent.ID}
+	task, err := h.Send(context.Background(), a2a.MessageSendParams{Message: msg})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if task.ResourceID != agent.ID {
+		t.Fatalf("resource = %q, want the addressed agent %q", task.ResourceID, agent.ID)
+	}
+}

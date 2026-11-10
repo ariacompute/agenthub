@@ -178,6 +178,9 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	failed := make([]string, 0)
 	for _, rid := range body.Mentions {
 		params := a2a.MessageSendParams{Message: a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart(body.Body))}
+		// The hub resolves the run target from the params metadata; the message
+		// metadata is kept too so the history records which agent was addressed.
+		params.Metadata = map[string]any{"resourceId": rid}
 		params.Message.Metadata = map[string]any{"resourceId": rid}
 		task, derr := d.Hub.Send(r.Context(), params)
 		if derr != nil {

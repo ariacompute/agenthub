@@ -471,6 +471,39 @@ func TestPostThreadMessageDelegates(t *testing.T) {
 	}
 }
 
+// A mention names the agent that should answer. The run must land on that agent,
+// not on whichever one sorts first: the id used to be written only to the message
+// metadata, which the hub ignored, so every @mention answered on the first agent.
+func TestPostThreadMessageDelegatesToTheMentionedAgent(t *testing.T) {
+	first := &registry.Entry{ID: "agent-1", Kind: registry.KindAgent, Name: "first"}
+	second := &registry.Entry{ID: "agent-2", Kind: registry.KindAgent, Name: "second"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), first, second)
+	d.Threads = mt
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
+		`{"body":"hello second","mentions":["`+second.ID+`"]}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+	}
+	decodeJSON(t, w, &body)
+	if len(body.Delegated) != 1 {
+		t.Fatalf("delegated = %+v, want one task", body.Delegated)
+	}
+	task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
+	if task == nil {
+		t.Fatalf("task %q not found", body.Delegated[0])
+	}
+	if task.ResourceID != second.ID {
+		t.Fatalf("task ran on %q, want the mentioned %q", task.ResourceID, second.ID)
+	}
+}
+
 func TestPostThreadMessageDelegationFailure(t *testing.T) {
 	mt := newMemThreads()
 	d := testDeps(t, openConfig("")) // empty registry: no resource to delegate to
