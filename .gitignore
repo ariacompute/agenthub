@@ -20,3 +20,9 @@ backend/static/
 
 coverage.out
 .codebuddy/
+
+# User-facing E2E artifacts (generated locally, never committed)
+e2e/reports/
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/

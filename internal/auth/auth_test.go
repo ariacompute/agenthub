@@ -436,7 +436,7 @@ func TestBootstrapAdminIsIdempotent(t *testing.T) {
 }
 
 // TestSessionTokenFromRequest accepts the cookie and the header form, which is
-// what curl and scripts/test-api.sh use.
+// what curl and the e2e HTTP client use.
 func TestSessionTokenFromRequest(t *testing.T) {
 	svc, _, _ := newTestService()
 	svc.opts.CookieName = "agenthub_session"

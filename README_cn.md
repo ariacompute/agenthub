@@ -298,7 +298,7 @@ AGENTHUB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD=<强随机串>
 AGENTHUB_COOKIE_SECURE=true                       # 走 HTTPS 时开启
 AGENTHUB_PUBLIC_BASE_URL=https://hub.example.com
-AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>          # 生产必填；支撑静态加密与备份静态加密
+AGENTHUB_ENCRYPTION_KEY=<32+ 字节随机密钥>         # 生产必填；支撑静态加密与备份静态加密
 # AGENTHUB_PUSH_SECRET=<16+ 字节随机密钥>          # 可选：签名 + SSRF 护航的 A2A push 回调
 # AGENTHUB_DB_MAX_OPEN_CONNS=25 AGENTHUB_DB_MAX_IDLE_CONNS=10 AGENTHUB_DB_CONN_MAX_LIFETIME=30m  # 连接池调优
 ```
@@ -442,33 +442,33 @@ make web-test          # cd web && bunx vitest run
 store 分支不需要数据库就能覆盖；而 `internal/store` 只有在设置了 `DATABASE_URL` 时才测得出来——
 它的用例是 skip，而不是伪造结果。
 
-对着运行中实例的端到端接口测试——把所有 `curl` 可达的端点都脚本化了：健康与发现、整套 `/api`
-控制面（资源 CRUD、导出、任务、span、事件回放）、A2A 方法（send、get、流式、push 通知、
-input-required → resume → cancel）、JSON-RPC 错误约定与控制台产物。每条断言打印一行 PASS / FAIL，
-有一条失败就以非 0 退出，便于 CI 卡口：
+对着运行中实例的端到端测试——`e2e/` 下两套彼此独立的「用户视角」套件（完整开关清单与报告格式见
+[`e2e/README.md`](e2e/README.md)）。接口套件是声明式用例表，覆盖**全部 144 条文档端点**：发现、
+认证与会话、资源与治理、A2A 各方法（含 HITL park → resume / cancel）、流式与 `since` 回放、任务、
+权限与 API 密钥、渠道/连接器、线程/语音、文件、沙箱、调度/计算机/知识、路由、审计与检查点；界面套件
+用 Playwright 跑六段真实控制台旅程（登录、登记资源、试跑、任务追踪、治理审批、后台管理）。两者都只
+通过 `BASE_URL` 指向已启动的服务，只测不起停，自动回收全部自建数据，并产出 JSON + Markdown 报告。
 
 ```bash
-AGENTHUB_SEED_DEMO=true make up                     # 脚本面向 demo-* 资源
-AGENTHUB_SEED_DEMO=true make run                    # 或本地运行
-./scripts/test-api.sh                               # 默认 http://127.0.0.1:3500
-BASE_URL=https://hub.example.com ./scripts/test-api.sh
-AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
-AGENTHUB_API_KEY=ahk_xxx ./scripts/test-api.sh      # 用长效密钥鉴权
-MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # 网络慢 / 冷启动时放宽超时
+AGENTHUB_SEED_DEMO=true make up   # 优先使用 demo-* 种子资源
+AGENTHUB_SEED_DEMO=true make run  # 或本地运行
+cd e2e && bun install && cd ..    # 首次运行；测试依赖隔离安装
+make e2e-api                      # 接口套件（./scripts/test-api.sh 为转发器）
+make e2e-ui                       # 界面旅程（需 bun x playwright install chromium）
+make e2e                          # 两套都跑
+make e2e-coverage                 # 仅端点覆盖度守卫，不发请求
 ```
 
-脚本会先登录（实例全新时注册第一个账号），断言无会话时 `/api/*` 被拦，随后遍历用户、角色、
-权限矩阵与资源授权，并验证「被授权的资源会从发现文档里消失」。
+凭据来自 `AGENTHUB_TEST_EMAIL` / `AGENTHUB_TEST_PASSWORD`（bootstrap 管理员）或
+`AGENTHUB_API_KEY=ahk_…`（长效 bearer 密钥），`BASE_URL` 默认 `http://127.0.0.1:3500`；
+`MAX_TIME` / `READY_TIMEOUT` 控制单请求与就绪等待上限。**完整运行需要近似 owner 的权限**：
+已有用户的实例上自助注册只会拿到 `role-viewer`，此时套件以退出码 2 给出一条可操作的提示，
+而不是打印几十条误导性的 403 失败。
 
-也可以设置 `AGENTHUB_API_KEY=ahk_…`，改用长效 bearer 密钥为每次请求鉴权、而非登录：脚本会跳过登录、
-以该密钥作为身份；API 密钥小节转而**校验这条导入的密钥**，而不是现造现销（以免误废掉本轮运行所依赖的凭证）。密钥必须拥有本脚本用到的全部权限——完整冒烟测试需要近似 owner 的权限范围。
-
-它还覆盖目录治理：建命名空间 → 在其中注册 → 记录走 `draft → pending → approved`（草稿不得出现在
-可发现列表，`draft → approved` 必须被拒）、`(namespace, name, version)` 去重启用键，以及一个上游
-注册中心源经离线 fixture 同步两次（首次导入、二次刷新）。
-
-脚本面向种子资源（`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` / `demo-cli`），除
-`curl` 与 `python3` 外无依赖，跑完会删掉自己创建的资源；若服务始终不应答 `/healthz` 则以 2 退出。
+实例上未接线的能力一律记为 SKIP，绝不伪造结果；需要第三方服务、真实数据库恢复、S3、签名 webhook、
+push 接收端或真实容器执行的用例，默认 SKIP，只有显式设置对应的 `AGENTHUB_E2E_*` 开关才执行。
+内置守卫会把用例表与 `docs/docs.md` 做差集，新增端点漏写用例即失败。两套套件与 Go 单测、
+web Vitest 基线完全隔离。
 
 <div align="right">
 

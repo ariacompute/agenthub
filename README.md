@@ -494,41 +494,40 @@ governance rules are driven through in-package fakes, so the store-backed branch
 are covered without a database, while `internal/store` only measures once `DATABASE_URL` is set —
 its cases skip rather than fabricate.
 
-End-to-end API test against a running instance — the scripted form of every `curl`-able endpoint:
-health and discovery, the whole `/api` control plane (resources CRUD, exports, tasks, spans, event
-replay), the A2A methods (send, get, streaming, push notifications, input-required → resume →
-cancel), the JSON-RPC error contract and the console bundle. One PASS / FAIL line per assertion and
-a non-zero exit as soon as one of them fails, so CI can gate on it:
+End-to-end test against a running instance — two independent user-facing suites in `e2e/`
+(see [`e2e/README.md`](e2e/README.md) for the full switch list and report format). The API suite is
+a declarative case table covering **every documented route** (144): discovery, auth/session,
+resources and governance, the A2A methods with HITL park → resume / cancel, streaming and `since`
+replay, tasks, RBAC and API keys, channels/connectors, threads/speech, files, sandboxes,
+schedules/computers/knowledge, router, audit and checkpoints. The UI suite drives six real console
+journeys (login, register a resource, playground trial run, task trace, governance approvals,
+administration) with Playwright. Both point at `BASE_URL`, never start or stop the service, clean
+up everything they create, and write a JSON + Markdown report.
 
 ```bash
-AGENTHUB_SEED_DEMO=true make up                     # the test targets the demo-* resources
-AGENTHUB_SEED_DEMO=true make run                    # or locally
-./scripts/test-api.sh                               # defaults to http://127.0.0.1:3500
-BASE_URL=https://hub.example.com ./scripts/test-api.sh
-AGENTHUB_TEST_EMAIL=me@example.com AGENTHUB_TEST_PASSWORD='…' ./scripts/test-api.sh
-AGENTHUB_API_KEY=ahk_xxx ./scripts/test-api.sh      # authenticate with a long-lived key
-MAX_TIME=60 READY_TIMEOUT=60 ./scripts/test-api.sh  # slow networks / cold boots
+AGENTHUB_SEED_DEMO=true make up   # demo-* resources are the preferred targets
+AGENTHUB_SEED_DEMO=true make run  # or locally
+cd e2e && bun install && cd ..    # first run only; isolated dev dependency
+make e2e-api                      # API suite (./scripts/test-api.sh is a shim)
+make e2e-ui                       # UI journeys (bun x playwright install chromium)
+make e2e                          # both
+make e2e-coverage                 # endpoint coverage guard only, no requests
 ```
 
-The script logs in first (registering the first account when the instance is brand new) and asserts
-that `/api/*` stays closed without a session, then walks users, roles, the permission matrix and a
-resource grant — including the fact that a granted resource disappears from discovery.
+Credentials come from `AGENTHUB_TEST_EMAIL` / `AGENTHUB_TEST_PASSWORD` (bootstrap administrator) or
+`AGENTHUB_API_KEY=ahk_…` (long-lived bearer key), and `BASE_URL` defaults to
+`http://127.0.0.1:3500`. `MAX_TIME` / `READY_TIMEOUT` bound per-request and readiness waits.
+A **full run needs owner-equivalent scopes**: on an instance that already has users,
+self-registration only grants `role-viewer`, so the suite exits 2 with one actionable message
+instead of dozens of misleading 403 failures.
 
-Alternatively, set `AGENTHUB_API_KEY=ahk_…` to authenticate every request with a long-lived bearer key
-instead of logging in: the script skips login and uses the key as its identity, and the API-keys section
-then verifies the imported key rather than minting and revoking one (so it never disables the credential
-the run depends on). The key must carry every permission the run exercises — for a full smoke test that
-means owner-equivalent scopes.
+Capabilities not wired up on the instance are reported as SKIP, never faked. Anything needing a
+third party, a real database restore, S3, a signed webhook, a push receiver or a real container
+exec stays SKIP until its `AGENTHUB_E2E_*` switch is set. A built-in guard diffs the case table
+against `docs/docs.md`, so a newly documented endpoint without a case fails the run. The suites are
+isolated from the Go unit tests and the web Vitest baseline.
 
-It also covers the catalogue governance: creating a namespace, registering into it and watching the
-record go `draft → pending → approved` (a draft must stay out of the discoverable list, and
-`draft → approved` has to be refused), the `(namespace, name, version)` dedup key, and an upstream
-registry source syncing twice through the offline fixture — imported on the first run, refreshed on
-the second.
-
-It targets the seeded resources (`demo-model` / `demo-agent` / `demo-mcp` / `demo-skill` /
-`demo-cli`), needs nothing beyond `curl` and `python3`, deletes the resource it creates, and exits
-2 when the service never answers `/healthz`.
+`./scripts/test-api.sh` remains as a compatibility shim that forwards to the API suite.
 
 <div align="right">
 

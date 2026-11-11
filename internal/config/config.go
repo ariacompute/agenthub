@@ -136,7 +136,7 @@ type Config struct {
 	// SeedDemo inserts the five demo resources at startup. It is off by
 	// default: an instance should start with whatever the operator registers,
 	// not with sample rows nobody asked for. Turn it on for a local walkthrough
-	// or for scripts/test-api.sh, which targets those resources.
+	// or for the e2e suite, which prefers those resources.
 	SeedDemo        bool
 	LegacyMethods   bool
 	MaxParallel     int

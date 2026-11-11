@@ -97,6 +97,23 @@ test-cover: db-migrate
 	@printf '\nper package:\n'
 	@go test -count=1 -cover ./... | grep -v 'no test files' || true
 
+# User-facing E2E suites against an already running agenthub (see e2e/README.md).
+# They only test: BASE_URL selects the target, nothing is started or stopped.
+# The API suite needs bun >= 1.4.4; the UI suite additionally needs Chromium
+# (`cd e2e && bun x playwright install chromium`).
+.PHONY: e2e e2e-api e2e-ui e2e-coverage
+
+e2e-api:
+	cd e2e && bun run api/index.js
+
+e2e-coverage:
+	cd e2e && bun run api/index.js --coverage-only
+
+e2e-ui:
+	cd e2e && bun x playwright test --config playwright.config.js
+
+e2e: e2e-api e2e-ui
+
 vet:
 	go vet ./...
 

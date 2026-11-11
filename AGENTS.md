@@ -259,7 +259,8 @@ persistence ← internal/store（GORM 实现）
   浅合并英文兜底；组件内禁止硬编码自然语言。
 - **破坏性操作需显式确认**：恢复（restore）是 agenthub 唯一会摧毁数据的操作——接口要求
   `{"confirm":"<checkpoint id>"}` 二次确认，执行前自动打回滚点、静默等待在途任务、失败时保持原状；
-  真实恢复的集成用例与 `scripts/test-api.sh` 段落都以 `AGENTHUB_TEST_BACKUP_RESTORE=true` 门控。
+  真实恢复的集成用例与 `e2e/api/cases/99-optin.js` 用例都以 `AGENTHUB_TEST_BACKUP_RESTORE=true` /
+  `AGENTHUB_E2E_BACKUP_RESTORE=true` 门控。
 - **新错误码必须登记**：`internal/httputil` 的 `Code*` 常量 + `WriteErr` 状态码映射，
   否则一律退化为 500；前端同步登记 `errors.js` 的 `CODE_KEYS` 与 `errors-copy.js` 的 13 语。
 - **自助注册默认只读**：自助注册成功的账号由 handler 调 `Authz.Store().SetUserRoles` 写入
@@ -323,9 +324,11 @@ make test-integration # db-migrate + 只跑 Integration 用例
 make test-cover       # db-migrate + 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
-./scripts/test-api.sh        # 对运行中实例的完整 HTTP 接口自测（PASS/FAIL 逐条，失败非 0 退出）
-                             # 备份段落：AGENTHUB_BACKUP_DIR 未配置则 SKIP；
-                             # 真实恢复需 AGENTHUB_TEST_BACKUP_RESTORE=true（否则会清空会话）
+make e2e-api                 # e2e/ 接口套件：144 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）
+make e2e-ui                  # e2e/ 界面套件：Playwright 六段控制台旅程
+make e2e / make e2e-coverage # 两套都跑 / 仅端点覆盖度守卫
+                             # ./scripts/test-api.sh 为兼容转发器；BASE_URL 指向已运行实例
+                             # 默认 SKIP 的外部依赖由 AGENTHUB_E2E_* 开关开启，详见 e2e/README.md
 ```
 
 ## 发布（镜像）
@@ -345,13 +348,13 @@ make web-install / make web-dev / make web-build / make web-test
 
 - 唯一的 mock data 就是 `store.Seed()` 写入的五条 `demo-*` 资源，**默认不再灌**：新实例以空 registry
   启动，只有显式 `AGENTHUB_SEED_DEMO=true`（见 `internal/config`）才幂等写入
-  （`ON CONFLICT DO NOTHING`），用于本地走查与 `scripts/test-api.sh`。
+  （`ON CONFLICT DO NOTHING`），用于本地走查与 `e2e/` 套件。
 - `cmd/agenthub-server` 在未开启时打一条 `store: demo resources not seeded` 日志（带 hint），
   绝不静默。
 - `config.Validate` 拒绝 `AGENTHUB_ENV=prod` + `AGENTHUB_SEED_DEMO=true`：生产实例里 demo 资源与真实
   资源无法区分。`AGENTHUB_SEED_DEMO` 取值解析走 `envBool`，不可解析回落默认 false。
-- 因此 README 与 `scripts/test-api.sh` 都必须以 `AGENTHUB_SEED_DEMO=true` 启动依赖方能跑；
-  脚本在 `/api/resources` 里找不到 `demo-mcp` / `demo-agent` 时直接 exit 2 并给出同一条命令。
+- `e2e/` 套件优先使用 `demo-mcp` / `demo-agent` 等种子资源；未开启时由 `fixtures.js` 自建等价资源
+  并在结束时回收，因此不再强制要求 `AGENTHUB_SEED_DEMO=true`（仍推荐，可覆盖五类适配器）。
 - 关闭开关**不会**清理已存在的行（`store.Seed` 只做 insert，不做 purge）；要回到干净状态手动
   `DELETE FROM resources WHERE id LIKE 'demo-%'`（compose 环境用 `make db-psql`）。
 

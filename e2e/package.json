@@ -1,0 +1,19 @@
+{
+  "name": "agenthub-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "User-facing end-to-end suites for a running agenthub instance",
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "scripts": {
+    "api": "bun run api/index.js",
+    "ui": "bun x playwright test --config playwright.config.js",
+    "all": "bun run api/index.js && bun x playwright test --config playwright.config.js",
+    "coverage": "bun run api/index.js --coverage-only"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

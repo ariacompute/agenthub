@@ -332,7 +332,7 @@ func TestSeedIsIdempotentAndPublishesTheDemoRows(t *testing.T) {
 		t.Fatalf("demo rows = %d after two seeds, want %d", count, len(entries))
 	}
 	// Authorisation is fail closed: an unpublished demo row would break the
-	// walkthrough and scripts/test-api.sh on a fresh instance.
+	// walkthrough and the e2e suite on a fresh instance.
 	var unpublished int64
 	if err := db.Table("resources").
 		Where("id LIKE ? AND visibility <> ?", "demo-%", registry.VisibilityPublic).
