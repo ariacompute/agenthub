@@ -205,7 +205,7 @@ export const endpointGroups = [
   { id: 'sources', groupKey: 'groupSources' },
   { id: 'tasks', groupKey: 'groupTasks' },
   { id: 'export', groupKey: 'groupExport' },
-  { id: 'users', groupKey: 'groupUsers' },
+  { id: 'users', groupKey: 'groupUsers', noteKey: 'groupUsersNote' },
   { id: 'roles', groupKey: 'groupRoles' },
   { id: 'backups', groupKey: 'groupBackups', noteKey: 'groupBackupsNote' },
   { id: 'apikeys', groupKey: 'groupApiKeys' },

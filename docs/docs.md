@@ -193,6 +193,8 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `DELETE` | `/api/users/{id}` | `users:manage` — Manage users | Delete one of the users | — | `204, no body` |
 | `DELETE` | `/api/users/{id}/sessions` | `sessions:manage` — Revoke sessions | Revoke every session belonging to one user. | — | `204, no body` |
 
+Deleting a user is a soft delete: the row is kept so the audit trail, tasks and grants that name it survive, and every live session is revoked so a deleted identity cannot keep working. The account’s status becomes `deleted` — distinct from `disabled`, which is a reversible lockout. Enable and Disable flip status between `active` and `disabled` via `PUT /api/users/{id}`; a soft-deleted account can be re-enabled the same way.
+
 ### Roles, groups and grants
 
 | Method | Path | Permission | What it does | Request | Response |

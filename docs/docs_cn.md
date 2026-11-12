@@ -193,6 +193,8 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `DELETE` | `/api/users/{id}` | `users:manage` — 管理用户 | 删除其中一条用户 | — | `204, no body` |
 | `DELETE` | `/api/users/{id}/sessions` | `sessions:manage` — 吊销会话 | 吊销某个用户的全部会话。 | — | `204, no body` |
 
+删除用户是软删除：用户行会被保留，以便以它命名的审计记录、任务与授权得以留存，同时吊销其全部活跃会话，使已删除的身份无法继续工作。账户的 `status` 变为 `deleted`——这与可逆的 `disabled`（停用）不同。启用与停用通过 `PUT /api/users/{id}` 在 `active` 与 `disabled` 之间切换；被软删除的账户也可用同样的方式重新启用。
+
 ### 角色、用户组与授权
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
