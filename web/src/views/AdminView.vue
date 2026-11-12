@@ -262,6 +262,17 @@ async function remove(user) {
   await auth.deleteUser(user.id)
 }
 
+// Enable and Disable are reversible: they only flip the account's ability to
+// sign in, never the row. Delete (above) is the soft removal that keeps the
+// audit trail but marks the user removed.
+async function enable(user) {
+  await auth.updateUser(user.id, { status: 'active' })
+}
+
+async function disable(user) {
+  await auth.updateUser(user.id, { status: 'disabled' })
+}
+
 function openGroupCreate() {
   auth.clearError()
   groupForm.id = ''
@@ -430,11 +441,21 @@ watch(query, (value) => {
             <button
               class="btn btn-ghost"
               type="button"
-              :disabled="user.isOwner"
+              :disabled="user.isOwner || user.status === 'active'"
+              @click="enable(user)"
+            >{{ t('actionEnable') }}</button>
+            <button
+              class="btn btn-ghost"
+              type="button"
+              :disabled="user.isOwner || user.status === 'disabled' || user.status === 'deleted'"
+              @click="disable(user)"
+            >{{ t('actionDisable') }}</button>
+            <button
+              class="btn btn-ghost"
+              type="button"
+              :disabled="user.isOwner || user.status === 'deleted'"
               @click="confirmDelete = user"
-            >
-              {{ user.status === 'disabled' ? t('actionEnable') : t('actionDisable') }}
-            </button>
+            >{{ t('actionDelete') }}</button>
           </span>
         </div>
       </div>

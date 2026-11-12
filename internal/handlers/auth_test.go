@@ -112,7 +112,7 @@ func (s *memUsers) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if u, ok := s.byID[id]; ok {
-		u.Status = auth.StatusDisabled
+		u.Status = auth.StatusDeleted
 		now := time.Now().UTC()
 		u.DisabledAt = &now
 	}

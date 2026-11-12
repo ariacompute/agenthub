@@ -32,6 +32,11 @@ import (
 const (
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
+	// StatusDeleted is a soft delete: the row stays for the audit trail (tasks,
+	// grants and sessions keep their owner) but the account can no longer sign
+	// in and is shown as removed in the console. It is distinct from
+	// StatusDisabled, which is a reversible lockout an admin may lift.
+	StatusDeleted = "deleted"
 )
 
 var (

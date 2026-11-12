@@ -158,12 +158,14 @@ func (s *userStore) Count(ctx context.Context) (int64, error) {
 	return n, err
 }
 
-// Delete disables instead of removing: tasks, grants and sessions keep their
-// owner so the audit trail stays readable.
+// Delete soft-deletes instead of removing: tasks, grants and sessions keep
+// their owner so the audit trail stays readable. The row is marked deleted
+// (distinct from a reversible disable) but never dropped, and the account
+// loses every live session so a "deleted" identity cannot keep working.
 func (s *userStore) Delete(ctx context.Context, id string) error {
 	now := time.Now().UTC()
 	return s.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).
-		Updates(map[string]any{"status": auth.StatusDisabled, "disabled_at": now, "updated_at": now}).Error
+		Updates(map[string]any{"status": auth.StatusDeleted, "disabled_at": now, "updated_at": now}).Error
 }
 
 // RecordLoginFailure increments the consecutive-failure counter for the account

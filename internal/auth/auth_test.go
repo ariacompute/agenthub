@@ -141,7 +141,7 @@ func (s *memUserStore) List(_ context.Context, _ string) ([]User, error) {
 func (s *memUserStore) Count(_ context.Context) (int64, error) { return int64(len(s.byID)), nil }
 func (s *memUserStore) Delete(_ context.Context, id string) error {
 	if u, ok := s.byID[id]; ok {
-		u.Status = StatusDisabled
+		u.Status = StatusDeleted
 	}
 	return nil
 }

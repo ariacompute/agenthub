@@ -177,9 +177,10 @@ func TestAdminChangesStatusAndPasswordTogether(t *testing.T) {
 	}
 }
 
-// Deleting an account disables it: the tasks, spans and grants it produced are
-// part of the audit trail, so the row has to survive the deletion.
-func TestDeletingAnAccountDisablesIt(t *testing.T) {
+// Deleting an account soft-deletes it: the tasks, spans and grants it produced
+// are part of the audit trail, so the row has to survive the deletion and the
+// status has to read "deleted".
+func TestDeletingAnAccountSoftDeletesIt(t *testing.T) {
 	d, _ := adminTestDeps(t)
 	h := Register(d)
 	owner := backupOwner(t, h)
@@ -199,7 +200,59 @@ func TestDeletingAnAccountDisablesIt(t *testing.T) {
 		} `json:"user"`
 	}
 	decodeJSON(t, w, &out)
-	if out.User.Status != "disabled" {
-		t.Fatalf("status = %q, want disabled", out.User.Status)
+	if out.User.Status != "deleted" {
+		t.Fatalf("status = %q, want deleted", out.User.Status)
+	}
+
+	// A soft-deleted account can be restored by an administrator.
+	w = do(t, h, http.MethodPut, "/api/users/"+id, `{"status":"active"}`, authHeader(owner))
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var restored struct {
+		User struct {
+			Status string `json:"status"`
+		} `json:"user"`
+	}
+	decodeJSON(t, w, &restored)
+	if restored.User.Status != "active" {
+		t.Fatalf("status = %q, want active", restored.User.Status)
+	}
+}
+
+// Disabling and re-enabling an account only flips its sign-in ability; the row
+// survives both transitions and the status round-trips.
+func TestDisablingAndEnablingAUser(t *testing.T) {
+	d, _ := adminTestDeps(t)
+	h := Register(d)
+	owner := backupOwner(t, h)
+	id := createUser(t, h, owner, "toggle@example.com", "correct horse")
+
+	w := do(t, h, http.MethodPut, "/api/users/"+id, `{"status":"disabled"}`, authHeader(owner))
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var dis struct {
+		User struct {
+			Status string `json:"status"`
+		} `json:"user"`
+	}
+	decodeJSON(t, w, &dis)
+	if dis.User.Status != "disabled" {
+		t.Fatalf("status = %q, want disabled", dis.User.Status)
+	}
+
+	w = do(t, h, http.MethodPut, "/api/users/"+id, `{"status":"active"}`, authHeader(owner))
+	if w.Code != http.StatusOK {
+		t.Fatalf("enable: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var en struct {
+		User struct {
+			Status string `json:"status"`
+		} `json:"user"`
+	}
+	decodeJSON(t, w, &en)
+	if en.User.Status != "active" {
+		t.Fatalf("status = %q, want active", en.User.Status)
 	}
 }

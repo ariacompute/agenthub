@@ -206,8 +206,9 @@ func (d Deps) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"user": userView(u)})
 }
 
-// handleDeleteUser disables instead of removing: the tasks, spans and grants a
-// user produced are part of the audit trail and must survive it.
+// handleDeleteUser soft-deletes instead of removing: the tasks, spans and
+// grants a user produced are part of the audit trail and must survive it. The
+// account is marked deleted (not merely disabled) but its row is kept.
 func (d Deps) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	store, ok := d.userStore()
 	if !ok || d.Auth == nil {
@@ -242,7 +243,7 @@ func (d Deps) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err := d.Auth.RevokeSession(r.Context(), id, ""); err != nil && !errors.Is(err, auth.ErrNotFound) {
 		d.Log.Warn("handler: revoke sessions of disabled user", "user", id, "error", err)
 	}
-	d.Log.Info("handler: user disabled", "user", id, "by", PrincipalFrom(r).UserID)
+	d.Log.Info("handler: user deleted", "user", id, "by", PrincipalFrom(r).UserID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
