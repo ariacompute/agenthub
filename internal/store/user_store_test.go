@@ -251,8 +251,10 @@ func TestUserStoreStatusSwitch(t *testing.T) {
 		t.Fatalf("after enable: status = %q, disabled_at = %v", on.Status, on.DisabledAt)
 	}
 
-	// Delete is a soft disable, never a row removal: grants, tasks and sessions
-	// keep pointing at an account that still resolves.
+	// Delete is a soft delete, never a row removal: grants, tasks and sessions
+	// keep pointing at an account that still resolves. Status becomes "deleted"
+	// (distinct from a reversible disable) but disabled_at is still stamped so
+	// the deletion moment is recorded.
 	if err := users.Delete(ctx, u.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -260,7 +262,7 @@ func TestUserStoreStatusSwitch(t *testing.T) {
 	if err != nil || gone == nil {
 		t.Fatalf("get after delete: user = %v, err = %v", gone, err)
 	}
-	if gone.Status != auth.StatusDisabled || gone.DisabledAt == nil {
+	if gone.Status != auth.StatusDeleted || gone.DisabledAt == nil {
 		t.Fatalf("after delete: status = %q, disabled_at = %v", gone.Status, gone.DisabledAt)
 	}
 }
