@@ -1,6 +1,6 @@
 import {
   expectAvailable, expectStatus, expectStatusAndCode, expectShape,
-  expectArray, expectValue, expectTruthy,
+  expectArray, expectValue, requireState,
 } from '../../lib/assertions.js'
 import { createResource } from '../fixtures.js'
 
@@ -15,23 +15,26 @@ export default [
   }),
 
   c('the catalogue lists the new resource', 'GET /api/resources', async (ctx) => {
+    const id = requireState(ctx, 'resourceId')
     const res = await ctx.api('GET', '/api/resources')
     expectAvailable(res, 'resource list')
     expectArray(res, 'resources', 'resource list')
     expectShape(res, ['counts', 'health'], 'resource list')
-    if (!res.json.resources.some((e) => e.id === ctx.state.resourceId)) {
+    if (!res.json.resources.some((e) => e.id === id)) {
       throw new Error('the resource we created is missing from the catalogue')
     }
   }),
 
   c('reading one resource returns the full entry', 'GET /api/resources/{id}', async (ctx) => {
-    const res = await ctx.api('GET', `/api/resources/${ctx.state.resourceId}`)
+    const id = requireState(ctx, 'resourceId')
+    const res = await ctx.api('GET', `/api/resources/${id}`)
     expectStatus(res, 200, 'get resource')
-    expectValue(res.json?.id, ctx.state.resourceId, 'resource id')
+    expectValue(res.json?.id, id, 'resource id')
   }),
 
   c('replacing a resource keeps its id', 'PUT /api/resources/{id}', async (ctx) => {
-    const res = await ctx.api('PUT', `/api/resources/${ctx.state.resourceId}`, {
+    const id = requireState(ctx, 'resourceId')
+    const res = await ctx.api('PUT', `/api/resources/${id}`, {
       body: {
         id: 'ignored-by-the-path',
         kind: 'model',
@@ -45,12 +48,13 @@ export default [
       },
     })
     expectStatus(res, 200, 'update resource')
-    expectValue(res.json?.id, ctx.state.resourceId, 'path id wins over body')
+    expectValue(res.json?.id, id, 'path id wins over body')
     expectValue(res.json?.name, 'e2e renamed model', 'updated name')
   }),
 
   c('a health value can be written by hand', 'POST /api/resources/{id}/health', async (ctx) => {
-    const res = await ctx.api('POST', `/api/resources/${ctx.state.resourceId}/health`, {
+    const id = requireState(ctx, 'resourceId')
+    const res = await ctx.api('POST', `/api/resources/${id}/health`, {
       body: { health: 'degraded' },
     })
     expectStatus(res, 200, 'set health')
@@ -58,7 +62,8 @@ export default [
   }),
 
   c('probing a resource measures it', 'POST /api/resources/{id}/probe', async (ctx) => {
-    const res = await ctx.api('POST', `/api/resources/${ctx.state.resourceId}/probe`, { body: {} })
+    const id = requireState(ctx, 'resourceId')
+    const res = await ctx.api('POST', `/api/resources/${id}/probe`, { body: {} })
     expectStatus(res, 200, 'probe')
     expectShape(res, ['id', 'health'], 'probe')
   }),
@@ -88,7 +93,7 @@ export default [
   }),
 
   c('deleting a resource removes it', 'DELETE /api/resources/{id}', async (ctx) => {
-    const id = expectTruthy(ctx.state.curationId, 'curation resource')
+    const id = requireState(ctx, 'curationId')
     const res = await ctx.api('DELETE', `/api/resources/${id}`)
     expectStatus(res, 204, 'delete resource')
     const gone = await ctx.api('GET', `/api/resources/${id}`)

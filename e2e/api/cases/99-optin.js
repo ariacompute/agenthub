@@ -7,7 +7,7 @@
 import { createHmac } from 'node:crypto'
 import http from 'node:http'
 import {
-  expectStatus, expectStatusAndCode, expectAvailable, expectShape, skip,
+  expectStatus, expectStatusAndCode, expectAvailable, expectShape, requireState, skip,
 } from '../../lib/assertions.js'
 import { rpcBody, messageParams, uniqueName } from '../fixtures.js'
 import { deleteIfExists } from '../../lib/cleanup.js'
@@ -81,7 +81,7 @@ export default [
   c('a push callback endpoint is registered and read back', 'POST /a2a', async (ctx) => {
     const url = process.env.AGENTHUB_E2E_PUSH_URL
     if (!url) throw new Error('set AGENTHUB_E2E_PUSH_URL to an HTTPS callback that echoes the HMAC headers')
-    const task = await ctx.rpc(70, 'message/send', messageParams(ctx.state.sendResource, 'e2e push callback'))
+    const task = await ctx.rpc(70, 'message/send', messageParams(requireState(ctx, 'sendResource'), 'e2e push callback'))
     const taskId = task.json?.result?.id
     if (!taskId) throw new Error('could not create a task for the push config')
     const set = await ctx.rpc(71, 'tasks/pushNotification/set', {
@@ -107,7 +107,7 @@ export default [
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     const port = server.address().port
     try {
-      const sent = await ctx.rpc(80, 'message/send', messageParams(ctx.state.sendResource, 'e2e loopback probe'))
+      const sent = await ctx.rpc(80, 'message/send', messageParams(requireState(ctx, 'sendResource'), 'e2e loopback probe'))
       const taskId = sent.json?.result?.id
       const set = await ctx.rpc(81, 'tasks/pushNotification/set', {
         taskId, pushNotificationConfig: { url: `http://127.0.0.1:${port}/callback` },

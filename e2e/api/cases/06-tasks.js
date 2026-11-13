@@ -8,7 +8,8 @@ const group = 'task control plane'
 const c = (id, route, run, extra = {}) => ({ id, group, route, ...extra, run })
 
 async function freshParkedTask(ctx, salt) {
-  const res = await ctx.rpc(50 + salt, 'message/send', messageParams(ctx.state.parkResource, `please confirm ${salt}`))
+  const parkResource = requireState(ctx, 'parkResource')
+  const res = await ctx.rpc(50 + salt, 'message/send', messageParams(parkResource, `please confirm ${salt}`))
   const task = expectRpcOk(res, 'park for control-plane case')
   requireParked(task, 'control-plane park')
   return task.id
@@ -41,7 +42,6 @@ export default [
   }),
 
   c('control-plane cancel stops a parked task', 'POST /api/tasks/{id}/cancel', async (ctx) => {
-    requireState(ctx, 'parkResource')
     const id = await freshParkedTask(ctx, 1)
     const res = await ctx.api('POST', `/api/tasks/${id}/cancel`, { body: {} })
     expectStatus(res, 200, 'cancel')
@@ -49,7 +49,6 @@ export default [
   }),
 
   c('control-plane resume answers a parked task', 'POST /api/tasks/{id}/resume', async (ctx) => {
-    requireState(ctx, 'parkResource')
     const id = await freshParkedTask(ctx, 2)
     const res = await ctx.api('POST', `/api/tasks/${id}/resume`, {
       body: { message: { role: 'user', parts: [{ type: 'text', text: 'approved' }] } },

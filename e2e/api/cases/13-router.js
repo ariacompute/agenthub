@@ -1,5 +1,6 @@
 import {
-  expectAvailable, expectStatus, expectShape, expectArray, skip,
+  expectAvailable, expectStatus, expectShape, expectArray, requireState, skip,
+  expectSseAvailable,
 } from '../../lib/assertions.js'
 import { uniqueName } from '../fixtures.js'
 
@@ -49,8 +50,8 @@ export default [
   }),
 
   c('a trigger can be read', 'GET /api/router/triggers/{id}', async (ctx) => {
-    if (!ctx.state.triggerId) skip('no trigger was created')
-    const res = await ctx.api('GET', `/api/router/triggers/${ctx.state.triggerId}`)
+    const id = requireState(ctx, 'triggerId')
+    const res = await ctx.api('GET', `/api/router/triggers/${id}`)
     expectStatus(res, 200, 'get trigger')
   }),
 
@@ -63,8 +64,8 @@ export default [
   }),
 
   c('a ticket detail carries its decisions', 'GET /api/router/tickets/{id}', async (ctx) => {
-    if (!ctx.state.ticketId) skip('no ticket has been created yet')
-    const res = await ctx.api('GET', `/api/router/tickets/${ctx.state.ticketId}`)
+    const id = requireState(ctx, 'ticketId')
+    const res = await ctx.api('GET', `/api/router/tickets/${id}`)
     expectStatus(res, 200, 'get ticket')
     expectShape(res, ['ticket', 'decisions'], 'ticket detail')
   }),
@@ -119,7 +120,6 @@ export default [
       query: { since: 0 }, timeoutMs: 2500, maxFrames: 4,
       stopWhen: (frame, collected) => collected.frames.length >= 2,
     })
-    if (res.status === 503 || res.status === 409) skip('router events: router disabled')
-    expectStatus(res, 200, 'router events')
+    expectSseAvailable(res, 'router events')
   }),
 ]

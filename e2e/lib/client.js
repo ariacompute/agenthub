@@ -7,9 +7,25 @@
  * Four auth modes: 'session' (cookie jar / X-AgentHub-Session / bearer fallback),
  * 'anon' (nothing), 'key' (bearer only) and 'cookie' (cookie jar only).
  */
+
+/** AbortSignal.timeout and a timed-out body stream surface as a DOMException. */
+function isAbortError(error) {
+  if (!error) return false
+  if (error.name === 'AbortError' || error.name === 'TimeoutError') return true
+  return /timed out|timeout|aborted/i.test(String(error.message || ''))
+}
+
 export function createClient(config) {
   let cookie = ''
   const identity = { sessionToken: config.sessionToken, apiKey: config.apiKey }
+
+  // Only a login-driven run owns a session cookie. In API-key / injected-token
+  // mode the auth cases still call POST /api/auth/login to test that endpoint;
+  // absorbing the Set-Cookie it returns would silently replace the supplied
+  // credential with that account's session for every later request. On a
+  // populated instance that self-registered account is a viewer, which turns
+  // every write into 403. See e2e/README.md.
+  const captureSession = !identity.apiKey && !identity.sessionToken
 
   function authHeaders(mode) {
     if (mode === 'anon') return {}
@@ -64,7 +80,7 @@ export function createClient(config) {
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     })
-    absorbCookies(response)
+    if (captureSession) absorbCookies(response)
     return { response, url }
   }
 
@@ -113,15 +129,30 @@ export function createClient(config) {
   /**
    * Read an SSE body with bounded time and frame count. There is no [DONE]
    * sentinel in agenthub streams, so callers pass stopWhen() to break on the
-   * terminal status frame and never wait for the 15s keep-alive.
+   * terminal status frame and never wait for the 15s keep-alive. A quiet
+   * stream that runs out of budget is an empty event set, not an error: the
+   * caller decides whether to SKIP.
    */
   async function collectStream(method, path, opts = {}) {
     const {
       maxFrames = 80, timeoutMs = Math.min(config.maxTimeMs, 15000),
       stopWhen, ...rest
     } = opts
-    const { response, url } = await send(method, path, { ...rest, timeoutMs })
-    const result = { method, url, status: response.status, frames: [], text: '', headers: Object.fromEntries(response.headers.entries()) }
+    let sent
+    try {
+      sent = await send(method, path, { ...rest, timeoutMs })
+    } catch (error) {
+      if (!isAbortError(error)) throw error
+      return {
+        method, url: buildUrl(path, rest.query), status: 0,
+        frames: [], text: '', headers: {}, timedOut: true,
+      }
+    }
+    const { response, url } = sent
+    const result = {
+      method, url, status: response.status, frames: [], text: '',
+      headers: Object.fromEntries(response.headers.entries()), timedOut: false,
+    }
     if (!response.body) return result
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -130,11 +161,28 @@ export function createClient(config) {
     try {
       while (Date.now() < deadline && result.frames.length < maxFrames) {
         const remaining = Math.max(1, deadline - Date.now())
-        const chunk = await Promise.race([
-          reader.read(),
-          new Promise((resolve) => setTimeout(() => resolve({ done: true, value: undefined, timedOut: true }), remaining)),
-        ])
-        if (chunk.done) break
+        let timer
+        let chunk
+        try {
+          chunk = await Promise.race([
+            reader.read(),
+            new Promise((resolve) => {
+              timer = setTimeout(() => resolve({ done: true, timedOut: true }), remaining)
+            }),
+          ])
+        } catch (error) {
+          // AbortSignal.timeout aborts the body stream. Swallow only that: a
+          // genuine network failure must still surface as FAIL.
+          if (!isAbortError(error)) throw error
+          result.timedOut = true
+          break
+        } finally {
+          clearTimeout(timer)
+        }
+        if (chunk.done) {
+          if (chunk.timedOut) result.timedOut = true
+          break
+        }
         buffer += decoder.decode(chunk.value, { stream: true }).replace(/\r\n/g, '\n')
         let split
         while ((split = buffer.indexOf('\n\n')) !== -1) {

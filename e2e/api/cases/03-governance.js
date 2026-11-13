@@ -1,4 +1,6 @@
-import { expectAvailable, expectStatus, expectShape, expectArray, expectValue } from '../../lib/assertions.js'
+import {
+  expectAvailable, expectStatus, expectShape, expectArray, expectValue, requireState,
+} from '../../lib/assertions.js'
 import { uniqueName } from '../fixtures.js'
 import { deleteIfExists } from '../../lib/cleanup.js'
 
@@ -20,14 +22,16 @@ export default [
     const res = await ctx.api('GET', '/api/registries')
     expectAvailable(res, 'namespace list')
     expectArray(res, 'registries', 'namespace list')
-    if (ctx.state.namespaceId && !res.json.registries.some((n) => n.id === ctx.state.namespaceId)) {
+    const created = ctx.state.namespaceId
+    if (created && !res.json.registries.some((n) => n.id === created)) {
       throw new Error('the namespace we created is missing')
     }
   }),
 
   c('a namespace can be replaced', 'PUT /api/registries/{id}', async (ctx) => {
-    const res = await ctx.api('PUT', `/api/registries/${ctx.state.namespaceId}`, {
-      body: { id: ctx.state.namespaceId, name: 'E2E curated renamed', description: 'renamed', auto_approve: true },
+    const id = requireState(ctx, 'namespaceId')
+    const res = await ctx.api('PUT', `/api/registries/${id}`, {
+      body: { id, name: 'E2E curated renamed', description: 'renamed', auto_approve: true },
     })
     expectStatus(res, 200, 'update namespace')
     expectValue(res.json?.auto_approve, true, 'auto_approve')
@@ -51,10 +55,11 @@ export default [
   }),
 
   c('deleting a namespace removes it', 'DELETE /api/registries/{id}', async (ctx) => {
-    const res = await ctx.api('DELETE', `/api/registries/${ctx.state.namespaceId}`)
+    const id = requireState(ctx, 'namespaceId')
+    const res = await ctx.api('DELETE', `/api/registries/${id}`)
     expectStatus(res, 204, 'delete namespace')
     const gone = await ctx.api('GET', '/api/registries')
-    if (gone.json?.registries?.some((n) => n.id === ctx.state.namespaceId)) {
+    if (gone.json?.registries?.some((n) => n.id === id)) {
       throw new Error('the deleted namespace is still listed')
     }
     delete ctx.state.namespaceId
@@ -81,14 +86,16 @@ export default [
   }),
 
   c('syncing the fixture imports records', 'POST /api/registry-sources/{id}/sync', async (ctx) => {
-    const res = await ctx.api('POST', `/api/registry-sources/${ctx.state.sourceId}/sync`, { body: {} })
+    const id = requireState(ctx, 'sourceId')
+    const res = await ctx.api('POST', `/api/registry-sources/${id}/sync`, { body: {} })
     expectAvailable(res, 'first sync')
     expectShape(res, ['status', 'imported', 'updated', 'skipped', 'total'], 'sync result')
     ctx.state.firstSync = res.json
   }),
 
   c('a second sync reports no new imports', 'POST /api/registry-sources/{id}/sync', async (ctx) => {
-    const res = await ctx.api('POST', `/api/registry-sources/${ctx.state.sourceId}/sync`, { body: {} })
+    const id = requireState(ctx, 'sourceId')
+    const res = await ctx.api('POST', `/api/registry-sources/${id}/sync`, { body: {} })
     expectAvailable(res, 'second sync')
     if (typeof res.json?.updated !== 'number' && typeof res.json?.skipped !== 'number') {
       throw new Error('second sync did not report its counters')
@@ -96,9 +103,10 @@ export default [
   }),
 
   c('a source can be replaced', 'PUT /api/registry-sources/{id}', async (ctx) => {
-    const res = await ctx.api('PUT', `/api/registry-sources/${ctx.state.sourceId}`, {
+    const id = requireState(ctx, 'sourceId')
+    const res = await ctx.api('PUT', `/api/registry-sources/${id}`, {
       body: {
-        id: ctx.state.sourceId, kind: 'mcp', name: 'E2E fixture source renamed',
+        id, kind: 'mcp', name: 'E2E fixture source renamed',
         url: 'https://registry.test/servers', namespace: 'default', fixture: true, enabled: true,
       },
     })
@@ -111,7 +119,8 @@ export default [
   }),
 
   c('deleting a source removes it', 'DELETE /api/registry-sources/{id}', async (ctx) => {
-    const res = await ctx.api('DELETE', `/api/registry-sources/${ctx.state.sourceId}`)
+    const id = requireState(ctx, 'sourceId')
+    const res = await ctx.api('DELETE', `/api/registry-sources/${id}`)
     expectStatus(res, 204, 'delete source')
     delete ctx.state.sourceId
   }),

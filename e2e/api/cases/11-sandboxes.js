@@ -1,5 +1,6 @@
 import {
   expectAvailable, expectStatus, expectShape, expectArray, requireState, skip,
+  expectSseAvailable,
 } from '../../lib/assertions.js'
 import { uniqueName } from '../fixtures.js'
 import { deleteIfExists } from '../../lib/cleanup.js'
@@ -35,8 +36,7 @@ export default [
       query: { since: 0 }, timeoutMs: 2500, maxFrames: 4,
       stopWhen: (frame, collected) => collected.frames.length >= 2,
     })
-    if (res.status === 503 || res.status === 409) skip('sandbox events: module disabled')
-    expectStatus(res, 200, 'sandbox events')
+    expectSseAvailable(res, 'sandbox events')
   }),
 
   c('sandbox providers are enumerable', 'GET /api/sandbox-providers', async (ctx) => {

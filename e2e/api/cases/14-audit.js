@@ -1,5 +1,5 @@
 import {
-  expectAvailable, expectStatus, expectShape, expectArray, skip,
+  expectAvailable, expectStatus, expectShape, expectArray, requireState,
 } from '../../lib/assertions.js'
 
 const group = 'audit trail'
@@ -24,8 +24,8 @@ export default [
   }),
 
   c('an audit event detail is readable', 'GET /api/audit/{id}', async (ctx) => {
-    if (!ctx.state.auditEventId) skip('no audit event has been recorded in this window')
-    const res = await ctx.api('GET', `/api/audit/${encodeURIComponent(ctx.state.auditEventId)}`)
+    const id = requireState(ctx, 'auditEventId', 'audit event')
+    const res = await ctx.api('GET', `/api/audit/${encodeURIComponent(id)}`)
     expectStatus(res, 200, 'audit detail')
     expectShape(res, ['hash', 'httpMethod', 'path'], 'audit detail')
   }),

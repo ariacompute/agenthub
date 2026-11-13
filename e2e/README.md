@@ -75,6 +75,12 @@ actionable message instead of dozens of 403 failures. Exit codes: `0` all
 green, `1` at least one FAIL (or coverage guard failed / cleanup warning), `2`
 preflight failed (service unreachable or read-only identity).
 
+With `AGENTHUB_API_KEY` or `AGENTHUB_SESSION_TOKEN` set, the auth cases still
+exercise `POST /api/auth/login`, but the client deliberately does **not** absorb
+that response's `Set-Cookie`: only a login-driven run owns a session cookie.
+Absorbing it would silently replace the supplied, owner-equivalent credential
+with a viewer session for every later request and turn all writes into 403.
+
 ## Opt-in switches
 
 Anything that needs a third party, rewinds the database, dials an external URL
@@ -96,10 +102,13 @@ run it; the case prepares its own data and cleans up in `finally`.
 
 A case is SKIPped, not failed, when a module is not wired up on the target
 instance (`feature_unavailable`, `files_disabled`, `speech_disabled`,
-`backups_disabled`, sandbox/router disabled), when a prerequisite object was
-not produced by an earlier case, when demo resources are absent, or when its
-opt-in switch is off. Each SKIP line carries the reason. This follows
-`requirements.md` §8: a missing capability is reported, never faked.
+`channel_disabled`, `skill_distill_disabled`, `backups_disabled`,
+sandbox/router disabled), when a prerequisite object was not produced by an
+earlier case (every dependent case reads it through `requireState()`), when demo
+resources are absent, when an SSE stream stays quiet until its read budget
+expires, or when its opt-in switch is off. Each SKIP line carries the reason.
+This follows `requirements.md` §8: a missing capability is reported, never
+faked.
 
 ## Cleanup
 

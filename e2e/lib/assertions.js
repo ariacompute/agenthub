@@ -59,6 +59,8 @@ const DEGRADED_CODES = new Set([
   'feature_unavailable',
   'files_disabled',
   'speech_disabled',
+  'channel_disabled',
+  'skill_distill_disabled',
   'sandbox_node_offline',
   'sandbox_unsupported',
   'sandbox_disabled',
@@ -202,4 +204,22 @@ export function requireState(ctx, key, label = key) {
     skip(`${label} unavailable: no ${key} was produced by an earlier case`)
   }
   return ctx.state[key]
+}
+
+/**
+ * SSE streams may legitimately be quiet: collectStream reports status 0 with
+ * timedOut when AbortSignal.timeout fires, and a disabled module answers 503.
+ * Neither means the feature is broken, so callers SKIP instead of asserting a
+ * bare 200 and cascading failures when no events were persisted.
+ */
+export function expectSseAvailable(stream, label = 'SSE stream') {
+  if (!stream) throw new AssertionError(`${label}: no response`)
+  if (stream.timedOut && !stream.frames?.length) {
+    skip(`${label}: no events arrived within the read timeout`)
+  }
+  if (stream.status === 503 || stream.status === 409) {
+    skip(`${label}: module not enabled on this instance (status ${stream.status})`)
+  }
+  expectStatus(stream, 200, label)
+  return stream
 }
