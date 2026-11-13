@@ -171,7 +171,6 @@ func TestBuildConfigRendersTheGovernanceKnobs(t *testing.T) {
 	cr.Spec.RLSAck = boolp(true)
 	cr.Spec.AgentTimeout = "90s"
 	cr.Spec.A2ALegacyMethods = boolp(true)
-	cr.Spec.AdminToken = agenthubv1alpha1.SecretOrValue{Value: "inline-token"}
 	cr.Spec.MigrateDatabaseURL = &agenthubv1alpha1.DatabaseSpec{
 		ExistingSecret: "agenthub-migrate", SecretKey: "MIGRATE_URL",
 	}
@@ -189,7 +188,7 @@ func TestBuildConfigRendersTheGovernanceKnobs(t *testing.T) {
 		AssessMode: "llm", AssessResource: "model-1", Resource: "agent-1",
 	}
 
-	cm, secret, extra := buildConfig(cr)
+	cm, _, extra := buildConfig(cr)
 	for key, want := range map[string]string{
 		envRLS:            "off",
 		envRLSAck:         "true",
@@ -218,14 +217,6 @@ func TestBuildConfigRendersTheGovernanceKnobs(t *testing.T) {
 		if got := cm.Data[key]; got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
-	}
-
-	// An inline token goes to the Secret, never the ConfigMap.
-	if _, leaked := cm.Data[envAdminToken]; leaked {
-		t.Fatalf("%s must never be rendered into a ConfigMap", envAdminToken)
-	}
-	if got := string(secret.Data[envAdminToken]); got != "inline-token" {
-		t.Errorf("secret %s = %q, want the inline value", envAdminToken, got)
 	}
 
 	// A referenced Secret becomes a secretKeyRef, so the value never enters the

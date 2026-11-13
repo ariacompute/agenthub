@@ -91,7 +91,6 @@ const (
 	envRLS            = "AGENTHUB_RLS"
 	envRLSAck         = "AGENTHUB_RLS_ACK"
 	envMigrateDBURL   = "AGENTHUB_MIGRATE_DATABASE_URL"
-	envAdminToken     = "AGENTHUB_ADMIN_TOKEN"
 	envAgentTimeout   = "AGENTHUB_AGENT_TIMEOUT"
 	envA2ALegacy      = "AGENTHUB_A2A_LEGACY_METHODS"
 	envAuditEnabled   = "AGENTHUB_AUDIT_ENABLED"
@@ -480,7 +479,6 @@ func buildConfig(cr *agenthubv1alpha1.AgentHub) (corev1.ConfigMap, corev1.Secret
 			Key:            defaultString(spec.MigrateDatabaseURL.SecretKey, envMigrateDBURL),
 		}, &secret, &extra)
 	}
-	addSecretValue(envAdminToken, spec.AdminToken, &secret, &extra)
 	putStr(envAgentTimeout, spec.AgentTimeout)
 	if spec.A2ALegacyMethods != nil {
 		putStr(envA2ALegacy, boolStr(spec.A2ALegacyMethods))

@@ -31,8 +31,7 @@ conditions.
 - An **external PostgreSQL** (the operator never provisions a database).
 - Two container images:
   - `agenthub-operator` — built from `operator/Dockerfile`.
-  - `agenthub` — the application image (your existing build, e.g. `docker
-    build -f Dockerfile -t agenthub .`).
+  - `agenthub` — the application image (your existing build, e.g. `docker build -f Dockerfile -t agenthub .`).
 
 ## Build & install
 
@@ -193,6 +192,9 @@ are fixed and the two manifests now agree; `controller-gen` merges the two
 - the only identity the operator creates is the bootstrap administrator, which
   the service marks as the owner (`IsOwner`) exactly as it does when
   `AGENTHUB_BOOTSTRAP_ADMIN_*` is set out of band.
+
+Application-layer RBAC therefore belongs in the console, and only there; the
+CR has no user-permission fields and never will.
 
 ## Local cluster walkthrough (kind / k3d)
 

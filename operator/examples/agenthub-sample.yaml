@@ -75,11 +75,6 @@ spec:
   # migrateDatabaseURL:
   #   existingSecret: agenthub-migrate-db
   #   secretKey: MIGRATE_DATABASE_URL
-  #
-  # Break-glass bearer token. Prefer an existingSecret over an inline value.
-  # adminToken:
-  #   existingSecret: agenthub-admin
-  #   key: ADMIN_TOKEN
 
   # --- Audit trail ---
   audit:

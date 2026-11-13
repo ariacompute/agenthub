@@ -54,7 +54,7 @@ kubectl -n agenthub-operator get pods,svc,deploy
 | spec 字段 | 环境变量 | 说明 |
 |---|---|---|
 | `image` | — | agenthub 容器镜像 |
-| `replicas` | — | 默认 **1**（见迁移警告） |
+| `replicas` | — | 默认 **1**（见多副本迁移） |
 | `env` | `AGENTHUB_ENV` | `dev` / `staging` / `prod` |
 | `httpPort` | `AGENTHUB_HTTP_PORT` | 默认 3500 |
 | `staticDir` | `AGENTHUB_STATIC_DIR` | 默认 `/app/backend/static` |
@@ -81,7 +81,6 @@ kubectl -n agenthub-operator get pods,svc,deploy
 | `rls` | `AGENTHUB_RLS` | `enforce`（默认）/ `off`；`off` 且 `env: prod` 时还必须给 `rlsAck` |
 | `rlsAck` | `AGENTHUB_RLS_ACK` | 关掉行级策略的第二道签名 |
 | `migrateDatabaseURL` | `AGENTHUB_MIGRATE_DATABASE_URL` | DDL 角色；密钥（优先 `existingSecret`） |
-| `adminToken` | `AGENTHUB_ADMIN_TOKEN` | 应急 bearer token；密钥 |
 | `agentTimeout` | `AGENTHUB_AGENT_TIMEOUT` | |
 | `a2aLegacyMethods` | `AGENTHUB_A2A_LEGACY_METHODS` | |
 | `audit.enabled` / `audit.retention` | `AGENTHUB_AUDIT_ENABLED` / `_RETENTION` | API 审计 |
@@ -117,9 +116,11 @@ kubectl -n agenthub-operator get pods,svc,deploy
 `reason=WeakEncryptionKey`——Pod 永远不会被创建，因此你得到的是清晰的状态条件，
 而不是静默的 CrashLoop。
 
-### 多副本迁移竞态
-agenthub 在启动时执行内嵌的 schema 迁移。当 `replicas > 1` 时，多个 Pod 会在 DDL 上产生竞态。
-**初始建表阶段保持 `replicas: 1`**，等数据库迁移完成后再扩容。（专门的迁移 Job 不在本文范围。）
+### 多副本迁移
+agenthub 在启动时执行内嵌的 schema 迁移，`store.Migrate` 会将其串行化：
+`schema_migrations` 引导与每个文件都在事务级 advisory lock（`pg_advisory_xact_lock`）下执行，
+并在锁内重新检查账本。因此同时启动的多个 Pod 会排队而不是在 DDL 上竞态，
+`replicas > 1` 从首次启动起就是安全的。专门的迁移 Job 仍不在本文范围——由这把锁替代它。
 
 ### 命名空间作用域
 operator 被授予一个**命名空间级 `Role`**（而非 `ClusterRole`），权限限定在其发布命名空间内，
@@ -155,9 +156,8 @@ operator 被授予一个**命名空间级 `Role`**（而非 `ClusterRole`），�
 | `events`（core **与** `events.k8s.io`） | create, patch | 记录器写的是 `core/v1` 事件；`events.k8s.io` 是新兄弟组，两组都授予才不挑集群 |
 
 生成出来的 `ClusterRole` 曾经缺 `persistentvolumeclaims` 与 core `events`，而 chart 的 `Role`
-两项都有：于是不是用 Helm 安装（直接 apply `config/rbac`）的集群，一旦开 `persistence` 就会
-403，记录器也发不出事件。现在两边都补齐且一致；`controller-gen` 会把两个 `events` 组合并成
-一条规则，等价。
+两项都有：于是直接 apply `config/rbac` 安装的集群无法创建备份 PVC（403），记录器也发不出事件。
+现在两边都补齐且一致；`controller-gen` 会把两个 `events` 组合并成一条规则，等价。
 
 **2. agenthub 应用层 RBAC——服务自己的授权。** `permissions` / `roles` / `grants` 三张表、
 十四个权限码（`tasks:read`、`resources:write`、`audit:read` 等）与组成员关系。这一层**无法**
@@ -240,7 +240,7 @@ kubectl -n agenthub-operator apply -f operator/examples/agenthub-sample.yaml
 
 示例文件 `operator/examples/agenthub-sample.yaml` 自带的 `database.url` 指向一个集群内 Postgres
 （`postgres://agenthub:changeme@postgres:5432/agenthub?sslmode=disable`）。
-如果你的 Postgres 不同，请按第 3 步的 DSN 修改
+如果你的 Postgres 不同，请按[第 3 步](#3-在集群内启动-postgresql)的 DSN 修改
 （例如 `postgres://agenthub:agenthub@postgres.agenthub-operator.svc.cluster.local:5432/agenthub`）。
 
 如果你不想把 DSN 内联，可预先创建一个 Secret，并以它替代 `spec.database.url`：
@@ -263,7 +263,7 @@ curl -s localhost:8080/healthz
 
 `status.conditions[Available]=True` 且 `readyReplicas: 1` 表示 operator 已成功调和。
 数据库迁移完成后，你可以用 `kubectl -n agenthub-operator scale agenthub agenthub --replicas=3`
-（或修改 CR 的 `spec.replicas`）扩容——见『多副本迁移竞态』。
+（或修改 CR 的 `spec.replicas`）扩容——见[多副本迁移](#多副本迁移)。
 
 ### 清理
 

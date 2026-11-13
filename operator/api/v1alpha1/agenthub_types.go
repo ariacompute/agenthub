@@ -180,10 +180,7 @@ type AgentHubSpec struct {
 	RLS string `json:"rls,omitempty"`
 	// RLSAck is AGENTHUB_RLS_ACK: the operator's second signature on turning the
 	// policies off.
-	RLSAck *bool `json:"rlsAck,omitempty"`
-	// AdminToken is AGENTHUB_ADMIN_TOKEN, the break-glass bearer token. Prefer an
-	// existingSecret reference: an inline value lands in the managed Secret.
-	AdminToken       SecretOrValue                `json:"adminToken,omitempty"`
+	RLSAck           *bool                        `json:"rlsAck,omitempty"`
 	AgentTimeout     string                       `json:"agentTimeout,omitempty"`
 	A2ALegacyMethods *bool                        `json:"a2aLegacyMethods,omitempty"`
 	OAuth            *OAuthSpec                   `json:"oauth,omitempty"`

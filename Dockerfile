@@ -143,7 +143,7 @@ COPY --from=web-build /backend/static /app/backend/static
 # PostgreSQL, so the container stays stateless. DATABASE_URL is mandatory:
 # config.Validate refuses to start without it.
 # dev is the safe default: `AGENTHUB_ENV=prod` additionally requires
-# AGENTHUB_ADMIN_TOKEN (config.Validate refuses an open production deployment).
+# AGENTHUB_BOOTSTRAP_ADMIN_EMAIL (config.Validate refuses to start without it).
 ENV AGENTHUB_HTTP_PORT=3500 \
     AGENTHUB_ENV=dev \
     AGENTHUB_STATIC_DIR=/app/backend/static \

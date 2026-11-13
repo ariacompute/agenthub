@@ -58,18 +58,6 @@ spec:
             properties:
               a2aLegacyMethods:
                 type: boolean
-              adminToken:
-                description: |-
-                  AdminToken is AGENTHUB_ADMIN_TOKEN, the break-glass bearer token. Prefer an
-                  existingSecret reference: an inline value lands in the managed Secret.
-                properties:
-                  existingSecret:
-                    type: string
-                  key:
-                    type: string
-                  value:
-                    type: string
-                type: object
               agentTimeout:
                 type: string
               audioMaxBytes:

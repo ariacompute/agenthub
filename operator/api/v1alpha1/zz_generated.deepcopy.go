@@ -95,7 +95,6 @@ func (in *AgentHubSpec) DeepCopyInto(out *AgentHubSpec) {
 		*out = new(bool)
 		**out = **in
 	}
-	out.AdminToken = in.AdminToken
 	if in.A2ALegacyMethods != nil {
 		in, out := &in.A2ALegacyMethods, &out.A2ALegacyMethods
 		*out = new(bool)
