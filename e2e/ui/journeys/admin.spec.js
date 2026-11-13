@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import {
-  SEL, preparePage, open, afterWrite, unique, apiCleanup, canWrite,
+  SEL, preparePage, open, afterWrite, unique, apiCleanup, canWrite, canPermission,
 } from '../helpers.js'
 
 test.describe('journey: administration', () => {
@@ -37,10 +37,17 @@ test.describe('journey: administration', () => {
       await page.locator('.admin-head button.btn-primary').click()
       await expect(page.locator('#key-name')).toBeVisible()
       await page.locator('#key-name').fill(unique('e2e-ui-key'))
+      // The server rejects a key with an empty scope set, and the drawer starts
+      // with none ticked: pick one through the real scope matrix before saving.
+      const scope = page.locator('.scope-matrix input[type=checkbox]').first()
+      await expect(scope).toBeVisible()
+      await scope.check()
       const createdKey = await afterWrite(page, 'POST', '/api/api-keys', () =>
         page.locator('form.drawer-form button.btn-primary[type=submit]').click())
       expect(createdKey.status()).toBe(201)
-      keyId = (await createdKey.json())?.apiKey?.id
+      const key = (await createdKey.json())?.apiKey
+      keyId = key?.id
+      expect(key?.scopes?.length).toBeGreaterThan(0)
       // The one-time token is shown exactly once, in a read-only input.
       await expect(page.locator('input.token-input[readonly]')).toBeVisible()
       await page.locator('.token-block button.btn-primary').click()
@@ -60,10 +67,14 @@ test.describe('journey: administration', () => {
   })
 
   test('the audit console renders its filter bar', async ({ page }) => {
-    test.skip(!(await canWrite(page)), 'the audit route needs audit:read')
+    test.skip(!(await canPermission(page, 'audit:read')), 'the audit route needs audit:read')
     await open(page, '/audit')
     await expect(page).toHaveURL(/\/audit/)
-    await expect(page.locator('.toolbar').first()).toBeVisible()
-    await expect(page.locator('.toolbar select, .toolbar input').first()).toBeVisible()
+    // AuditView has its own filter rail (.audit-filters), not the shared
+    // .toolbar used by the other screens: time presets, selects, search, chain.
+    const filters = page.locator('.audit-filters')
+    await expect(filters).toBeVisible()
+    await expect(filters.locator('select').first()).toBeVisible()
+    await expect(filters.locator('#audit-search')).toBeVisible()
   })
 })

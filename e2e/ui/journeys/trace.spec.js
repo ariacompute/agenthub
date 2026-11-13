@@ -20,10 +20,12 @@ test.describe('journey: task trace', () => {
     await expect(rows.first()).toBeVisible({ timeout: 20000 })
 
     await rows.first().click()
-    await expect(page.locator('.detail')).toBeVisible()
+    // TaskTraceView renders the selection straight into the timeline pane: there
+    // is no .detail wrapper, so the selected row and its nodes are the visible
+    // result of the click. Spans are fetched for the selected task.
+    await expect(page.locator('.task-row.selected')).toBeVisible()
     await expect(page.locator('.timeline')).toBeVisible()
-    // Spans are fetched for the selected task.
-    await expect(page.locator('.timeline .tl-node, .timeline').first()).toBeVisible()
+    await expect(page.locator('.timeline .tl-node').first()).toBeVisible()
 
     const filter = page.locator('.toolbar select')
     await expect(filter).toBeVisible()

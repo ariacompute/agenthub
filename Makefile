@@ -99,8 +99,11 @@ test-cover: db-migrate
 
 # User-facing E2E suites against an already running agenthub (see e2e/README.md).
 # They only test: BASE_URL selects the target, nothing is started or stopped.
-# The API suite needs bun >= 1.4.4; the UI suite additionally needs Chromium
-# (`cd e2e && bun x playwright install chromium`).
+# The API suite needs bun >= 1.4.4; the UI suite additionally needs the exact
+# Chromium revision pinned by e2e/@playwright/test
+# (`cd e2e && bun x playwright install chromium`) plus the shared libraries on
+# a bare Ubuntu/WSL2 (`bun x playwright install-deps chromium`). A newer browser
+# cached by another Playwright version does not satisfy the pinned revision.
 .PHONY: e2e e2e-api e2e-ui e2e-coverage
 
 e2e-api:

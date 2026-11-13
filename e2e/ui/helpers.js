@@ -75,14 +75,19 @@ export async function seedTask(page, resourceId, text = 'e2e ui task') {
   return (await response.json())?.result?.id || null
 }
 
-/** A read-only identity cannot drive the write journeys; skip instead of failing. */
-export async function canWrite(page) {
+/** Route guards gate on a named permission; skip when the screen cannot open. */
+export async function canPermission(page, permission) {
   try {
     const response = await page.request.get('/api/auth/me')
     if (!response.ok()) return false
     const body = await response.json()
-    return body.user?.isOwner === true || (body.permissions || []).includes('resources:write')
+    return body.user?.isOwner === true || (body.permissions || []).includes(permission)
   } catch { return false }
+}
+
+/** A read-only identity cannot drive the write journeys; skip instead of failing. */
+export async function canWrite(page) {
+  return canPermission(page, 'resources:write')
 }
 
 export async function firstResourceId(page) {

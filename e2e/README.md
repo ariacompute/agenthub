@@ -25,10 +25,21 @@ unit tests and from `web/`'s Vitest baseline.
 | bun | >= 1.4.4. No `sh`, `curl` or `python3` is needed, so Windows works too |
 | identity | an **owner-equivalent** account or an API key with all scopes (the run writes to every domain) |
 | first run | `cd e2e && bun install` — installs only `@playwright/test`, isolated in this directory |
-| UI only | `cd e2e && bun x playwright install chromium` |
+| UI only | `cd e2e && bun x playwright install chromium`; on a bare Ubuntu/WSL2 also `bun x playwright install-deps chromium` |
 
 `AGENTHUB_SEED_DEMO=true` is recommended but no longer required: the fixtures
 prefer `demo-*` resources and otherwise create their own equivalents.
+
+The UI browser is pinned: `@playwright/test` in this directory asks for one
+specific Chromium / headless-shell build, so a newer Chromium cached by another
+Playwright version is **not** a substitute. When every journey fails with
+`browserType.launch: Executable doesn't exist at ...chromium_headless_shell-<revision>...`,
+run `bun install && bun x playwright install chromium` here. On a minimal
+Ubuntu 24.04 / WSL2 image the browser additionally needs `libnspr4`, `libnss3`
+and `libasound2t64`; install them once with
+`sudo apt-get install -y libnspr4 libnss3 libasound2t64` (or
+`sudo npx playwright install-deps chromium`). Without both steps all journeys
+fail before a single page is opened.
 
 ## Run
 
