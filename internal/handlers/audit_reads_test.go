@@ -71,6 +71,9 @@ func (s *auditStub) Segment(_ context.Context, from time.Time, _ int64, _ int) (
 }
 
 func (s *auditStub) Prune(context.Context, time.Time) (int64, error) { return 0, nil }
+func (s *auditStub) Anchor(context.Context) (audit.Anchor, error) {
+	return audit.Anchor{}, nil
+}
 
 // readDeps returns Deps wired to the stub. No auth services: the handlers are
 // called directly, and the permission gate is covered separately by

@@ -343,3 +343,47 @@ func TestAuditStorePruneStopsAtTheCutoff(t *testing.T) {
 		t.Fatalf("the prune took a row newer than its cutoff: %v, %v", kept, err)
 	}
 }
+
+// A prune leaves a head whose prev_hash points at a row that is gone. It must
+// record that removed tail in the same transaction, or /api/audit/verify calls
+// a healthy trail broken at its first row.
+func TestAuditStorePruneRecordsTheChainAnchor(t *testing.T) {
+	db := requireAuditLedger(t)
+	testdb.RequireTablePrivilege(t, db, "audit_chain_anchor", "UPDATE")
+	s := NewAuditStore(db)
+	t.Cleanup(func() { auditCleanup(t, s) })
+
+	tag := uniqueName("audit-anchor")
+	old := auditTestEvent(t, tag+"-old", tag, "tasks.get", auditOldTime, 200, true)
+	old.PrevHash, old.Hash = "before-the-cutoff", tag+"-old-hash"
+	newer := auditTestEvent(t, tag+"-new", tag, "tasks.get", auditNewTime, 200, true)
+	newer.PrevHash, newer.Hash = old.Hash, tag+"-new-hash"
+	if err := s.Append(auditWriterCtx(), []audit.Event{old, newer}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	cutoff := time.Date(2002, 1, 1, 0, 0, 0, 0, time.UTC)
+	removed, err := s.Prune(auditRetentionCtx(), cutoff)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if removed < 1 {
+		t.Fatalf("Prune removed %d rows, want at least the expired one", removed)
+	}
+	anchor, err := s.Anchor(auditReaderCtx())
+	if err != nil {
+		t.Fatalf("Anchor: %v", err)
+	}
+	if anchor.Hash != old.Hash || anchor.EventID != old.EventID {
+		t.Fatalf("anchor = %+v, want the removed tail %q / %q", anchor, old.Hash, old.EventID)
+	}
+
+	// A prune that expires nothing must leave the anchor where it is.
+	if _, err := s.Prune(auditRetentionCtx(), cutoff); err != nil {
+		t.Fatalf("second Prune: %v", err)
+	}
+	again, err := s.Anchor(auditReaderCtx())
+	if err != nil || again.Hash != old.Hash {
+		t.Fatalf("anchor after a no-op prune = %+v, %v", again, err)
+	}
+}

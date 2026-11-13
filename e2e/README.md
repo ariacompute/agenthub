@@ -185,7 +185,7 @@ e2e/
 | many 401s | the session was invalidated; provide `AGENTHUB_API_KEY` instead |
 | resource writes answer `404 not_found` | an all-scopes API key is not the owner: `resource_grants` are checked after scopes. The preflight now proves a created record can be written back and exits 2 with a hint; check `resource_grants` for the creator or use the bootstrap owner session |
 | `create a computer card` times out | the sandbox default image is not local yet; `docker pull debian:bookworm-slim`, or set `AGENTHUB_SANDBOX_ENABLED=false` (the sandbox group then SKIPs) |
-| `the audit chain is broken at <first event id>` | an older build hashed nanosecond timestamps that PostgreSQL truncates to microseconds. Upgrade, then reset the dev trail once: `BEGIN; SET LOCAL app.retention = 'on'; DELETE FROM audit_log; COMMIT;` and restart the server |
+| `the audit chain is broken at <first event id>` | older builds hashed nanosecond timestamps and could not verify a trail whose oldest rows had been pruned. Upgrade and restart: verify now seeds from the anchor recorded by retention, or from the head's own `prev_hash`. No data reset is needed |
 | many SKIPs | optional modules are off; that is expected unless you need those features |
 | coverage guard fails | a new route was added to `docs/docs.md`; declare a case for it |
 | Windows | use `bun run api` / `bun x playwright test`; `scripts/test-api.sh` requires a POSIX shell |

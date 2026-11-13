@@ -222,9 +222,22 @@ func (r *Recorder) Verify(ctx context.Context, from, to time.Time, pageSize int)
 	// Reading the trail is an administrative act; the identity says so rather
 	// than running with whatever scope the caller happened to have.
 	ctx = identity.With(systemContextOf(ctx), identity.Identity{AuditRead: true, System: true})
+	anchor, err := r.store.Anchor(ctx)
+	if err != nil {
+		return Verification{}, err
+	}
+	// A retained anchor only describes the head of the whole table. A walk
+	// with a time window starts at an arbitrary row whose predecessor is merely
+	// outside the window, not removed, so it must infer its own seed.
 	seed := ""
+	anchorSource := ""
+	if from.IsZero() && anchor.Hash != "" {
+		seed, anchorSource = anchor.Hash, AnchorRetention
+	}
 	var checked int64
 	var afterID int64 = 0
+	var anchored bool
+	var anchorAt string
 	for {
 		rows, err := r.store.Segment(ctx, from, afterID, pageSize)
 		if err != nil {
@@ -233,9 +246,24 @@ func (r *Recorder) Verify(ctx context.Context, from, to time.Time, pageSize int)
 		if len(rows) == 0 {
 			break
 		}
+		if checked == 0 {
+			if seed == "" && rows[0].PrevHash != "" {
+				// No trusted anchor: a trail pruned before anchors existed, a
+				// manual expiry, or a window starting mid-chain. The head names
+				// its own predecessor; use it as the seed. Every row from here
+				// on is still hash- and link-checked normally, so this cannot
+				// hide tampering — it only stops a legitimate prune from being
+				// reported as a break.
+				seed, anchorSource = rows[0].PrevHash, AnchorInferred
+			}
+			if anchorSource != "" {
+				anchored, anchorAt = true, rows[0].EventID
+			}
+		}
 		prev, broken := VerifySegment(seed, rows)
 		if broken != nil {
 			broken.Checked += checked
+			broken.Anchored, broken.AnchorAt, broken.AnchorSource = anchored, anchorAt, anchorSource
 			return *broken, nil
 		}
 		seed = prev
@@ -246,7 +274,13 @@ func (r *Recorder) Verify(ctx context.Context, from, to time.Time, pageSize int)
 			break
 		}
 	}
-	return Verification{Checked: checked, OK: true}, nil
+	return Verification{
+		Checked:      checked,
+		OK:           true,
+		Anchored:     anchored,
+		AnchorAt:     anchorAt,
+		AnchorSource: anchorSource,
+	}, nil
 }
 
 // List answers a console query. The caller's context already carries the audit
@@ -276,6 +310,8 @@ func (r *Recorder) Get(ctx context.Context, eventID string) (*Event, error) {
 }
 
 // Prune expires rows older than the retention window and returns how many went.
+// The store records the removed tail as the chain anchor in the same
+// transaction, so the surviving head keeps a verifiable predecessor.
 func (r *Recorder) Prune(ctx context.Context) (int64, error) {
 	if r.store == nil || r.opts.Retention <= 0 {
 		return 0, nil

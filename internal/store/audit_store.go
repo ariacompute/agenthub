@@ -91,6 +91,23 @@ func (s *auditStore) LastHash(ctx context.Context) (string, int64, error) {
 	return tail.Hash, tail.ID, err
 }
 
+// Anchor reads the trusted seed left by the last retention pass. An empty
+// hash means the trail has never been pruned through the recorder.
+func (s *auditStore) Anchor(ctx context.Context) (audit.Anchor, error) {
+	return scoped(ctx, s.db, func(db *gorm.DB) (audit.Anchor, error) {
+		// Find, not Take: an unpruned trail is the normal case, and Take would
+		// log "record not found" on every /api/audit/verify call.
+		var rows []model.AuditChainAnchor
+		if err := db.Where("id = ?", 1).Limit(1).Find(&rows).Error; err != nil {
+			return audit.Anchor{}, err
+		}
+		if len(rows) == 0 {
+			return audit.Anchor{}, nil
+		}
+		return audit.Anchor{Hash: rows[0].Hash, EventID: rows[0].EventID}, nil
+	})
+}
+
 func (s *auditStore) List(ctx context.Context, q audit.Query) ([]audit.Event, error) {
 	return scoped(ctx, s.db, func(db *gorm.DB) ([]audit.Event, error) {
 		var rows []model.AuditLog
@@ -167,8 +184,42 @@ func (s *auditStore) Segment(ctx context.Context, from time.Time, afterID int64,
 
 func (s *auditStore) Prune(ctx context.Context, cutoff time.Time) (int64, error) {
 	return scoped(ctx, s.db, func(db *gorm.DB) (int64, error) {
-		res := db.Where("ts < ?", cutoff.UTC()).Delete(&model.AuditLog{})
-		return res.RowsAffected, res.Error
+		// Retention removes a prefix of the chain. Remember the last row that
+		// disappears: the survivor still points at it through prev_hash, and
+		// without that seed a verifier starting from "" calls a healthy chain
+		// broken. Read, delete and anchor write share one transaction, so a
+		// crash cannot leave a head with no known predecessor. The retention
+		// identity is what the policies require for both the delete and the
+		// anchor write.
+		cutoff = cutoff.UTC()
+		// Find keeps a no-op prune quiet: an empty window is the common case.
+		var tails []model.AuditLog
+		if err := db.Where("ts < ?", cutoff).Order("id DESC").Limit(1).Find(&tails).Error; err != nil {
+			return 0, err
+		}
+		if len(tails) == 0 {
+			return 0, nil
+		}
+		res := db.Where("ts < ?", cutoff).Delete(&model.AuditLog{})
+		if res.Error != nil {
+			return 0, res.Error
+		}
+		if res.RowsAffected == 0 {
+			return 0, nil
+		}
+		anchor := model.AuditChainAnchor{
+			ID:       1,
+			Hash:     tails[0].Hash,
+			EventID:  tails[0].EventID,
+			PrunedAt: time.Now().UTC(),
+		}
+		if err := db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"hash", "event_id", "pruned_at"}),
+		}).Create(&anchor).Error; err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
 	})
 }
 

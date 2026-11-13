@@ -321,6 +321,8 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		"channel_messages", "threads", "thread_messages",
 		// 031 added the shared-file surface; it carries its own owner.
 		"shared_files",
+		// 033 keeps the audit chain anchor; only the retention job may move it.
+		"audit_chain_anchor",
 	}
 	for _, table := range expected {
 		var enabled, forced bool
@@ -361,6 +363,7 @@ func TestRLSEveryPolicyTableIsForced(t *testing.T) {
 		"task_pending_owner_access", "task_push_owner_access", "events_owner_access",
 		"knowledge_owner_access",
 		"audit_log_read", "audit_log_append", "audit_log_retention",
+		"audit_chain_anchor_read", "audit_chain_anchor_retention",
 		"channels_owner_access", "schedules_owner_access", "computers_owner_access",
 		"channel_messages_owner_access", "threads_owner_access", "thread_messages_owner_access",
 		"shared_files_owner_access",

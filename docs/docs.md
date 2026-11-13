@@ -342,7 +342,7 @@ A checkpoint carries application tables only: the catalogue and the append-only 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/audit` | `audit:read` — Read the audit trail | List all audit events | `?from=&to=&actor=&action=&resource=&source=&outcome=&q=&before=&limit=` | `{ events: AuditEvent[], stats: { total, failed, denied, written }, next }` |
-| `GET` | `/api/audit/verify` | `audit:read` — Read the audit trail | Recompute the hash chain over the window and report the first row that does not link. | `?from=&to=` | `{ ok, checked, brokenAt } — brokenAt is the first row whose hash does not link` |
+| `GET` | `/api/audit/verify` | `audit:read` — Read the audit trail | Recompute the hash chain over the window and report the first row that does not link. A pruned trail starts from a retained anchor rather than an empty seed. | `?from=&to=` | `{ ok, checked, brokenAt, anchored, anchorAt, anchorSource } — anchorSource is `retention` (trusted seed stored by the retention job) or `inferred` (the head's own prev_hash, for older pruned trails and time windows) |
 | `GET` | `/api/audit/{id}` | `audit:read` — Read the audit trail | Read one of the audit events by id | — | `AuditEvent { eventId, eventTime, requestId, eventSource, eventName, readOnly, actorKind, actorId, actorLabel, sourceIPAddress, httpMethod, path, resourceId, resourceKind, status, errorCode, latencyMs, userAgent, prevHash, hash }` |
 
 Request and response shapes are listed in the last two columns of each table.

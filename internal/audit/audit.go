@@ -101,6 +101,14 @@ type Stats struct {
 	Written int64 `json:"written"`
 }
 
+// Anchor is the hash of the newest row retention removed. The row surviving as
+// the chain head still points at it through prev_hash. Both fields are empty
+// when the trail has never been pruned through the recorder.
+type Anchor struct {
+	Hash    string
+	EventID string
+}
+
 // Store is the persistence port. It is implemented in internal/store so this
 // package stays free of GORM, and it is nil-safe in tests: with no store the
 // recorder keeps the chain in memory only.
@@ -116,8 +124,13 @@ type Store interface {
 	// Segment returns rows ordered by id ascending in [from, id <= to], at most
 	// limit per page, for the chain verifier.
 	Segment(ctx context.Context, from time.Time, afterID int64, limit int) ([]Event, error)
+	// Anchor returns the trusted seed for the current chain head. Empty when
+	// retention has never removed a row.
+	Anchor(ctx context.Context) (Anchor, error)
 	// Prune deletes rows older than cutoff. It is the only delete the policies
-	// accept, and it runs under the retention identity.
+	// accept, and it runs under the retention identity. It also records the
+	// removed tail as the new anchor in the same transaction, so the head that
+	// survives keeps a verifiable predecessor.
 	Prune(ctx context.Context, cutoff time.Time) (int64, error)
 }
 

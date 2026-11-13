@@ -35,3 +35,16 @@ type AuditLog struct {
 
 // TableName returns the audit_log table name.
 func (AuditLog) TableName() string { return "audit_log" }
+
+// AuditChainAnchor remembers the last row retention removed. The surviving
+// head of the chain still points at it through prev_hash, so the verifier needs
+// this hash as its seed. The table holds exactly one row (id = 1); see 033.
+type AuditChainAnchor struct {
+	ID       int16     `gorm:"primaryKey"`
+	Hash     string    `gorm:"size:64;not null;default:''"`
+	EventID  string    `gorm:"size:64;not null;default:''"`
+	PrunedAt time.Time `gorm:"not null;default:now()"`
+}
+
+// TableName returns the audit_chain_anchor table name.
+func (AuditChainAnchor) TableName() string { return "audit_chain_anchor" }

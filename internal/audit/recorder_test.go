@@ -22,6 +22,8 @@ type fakeStore struct {
 	stats     Stats
 	pruned    int64
 	pruneErr  error
+	anchor    Anchor
+	anchorErr error
 
 	appendCalls int
 	lastCtx     context.Context
@@ -79,6 +81,10 @@ func (f *fakeStore) Segment(_ context.Context, _ time.Time, _ int64, _ int) ([]E
 func (f *fakeStore) Prune(_ context.Context, cutoff time.Time) (int64, error) {
 	f.cutoff = cutoff
 	return f.pruned, f.pruneErr
+}
+
+func (f *fakeStore) Anchor(context.Context) (Anchor, error) {
+	return f.anchor, f.anchorErr
 }
 
 // start runs the writer and waits until it owns the chain, so a test cannot
@@ -385,6 +391,111 @@ func TestAppendNormalisesTimeBeforeHashing(t *testing.T) {
 	}
 	if _, broken := VerifySegment("", []Event{written}); broken != nil {
 		t.Fatalf("a round-tripped row must verify: %+v", broken)
+	}
+}
+
+// prunedChain builds linked rows whose head still points at a row that is no
+// longer in the table — exactly what a retention pass leaves behind.
+func prunedChain(headPrev string, ids ...string) []Event {
+	out := make([]Event, 0, len(ids))
+	prev := headPrev
+	for i, id := range ids {
+		ev := Event{Seq: int64(i + 1), EventID: id, PrevHash: prev}
+		ev.Hash = Hash(prev, ev)
+		out = append(out, ev)
+		prev = ev.Hash
+	}
+	return out
+}
+
+// A trail pruned before anchors were recorded (or expired by hand) has no
+// trusted seed. The head's own prev_hash must be used, and the answer must say
+// so rather than pretending this was a genesis chain.
+func TestVerifyInfersAnAnchorForAPrunedHead(t *testing.T) {
+	rows := prunedChain("removed-tail-hash", "head", "second", "third")
+	store := &fakeStore{segment: [][]Event{rows}}
+
+	got, err := New(store, Options{}).Verify(context.Background(), time.Time{}, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !got.OK || got.Checked != 3 {
+		t.Fatalf("verification = %+v, want ok over 3 rows", got)
+	}
+	if !got.Anchored || got.AnchorAt != "head" || got.AnchorSource != AnchorInferred {
+		t.Fatalf("anchor = %+v, want inferred at head", got)
+	}
+}
+
+// A retained anchor is trusted, not inferred: it must also refuse a head that
+// no longer points at the row retention says it removed.
+func TestVerifyUsesTheRetentionAnchorStrictly(t *testing.T) {
+	rows := prunedChain("removed-tail-hash", "head", "second")
+	trusted := &fakeStore{
+		segment: [][]Event{rows},
+		anchor:  Anchor{Hash: "removed-tail-hash", EventID: "gone"},
+	}
+	got, err := New(trusted, Options{}).Verify(context.Background(), time.Time{}, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !got.OK || !got.Anchored || got.AnchorSource != AnchorRetention || got.AnchorAt != "head" {
+		t.Fatalf("verification = %+v, want a retained anchor", got)
+	}
+
+	mismatched := &fakeStore{
+		segment: [][]Event{rows},
+		anchor:  Anchor{Hash: "some-other-hash", EventID: "gone"},
+	}
+	got, err = New(mismatched, Options{}).Verify(context.Background(), time.Time{}, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got.OK || got.BrokenAt != "head" || got.Reason == "" {
+		t.Fatalf("a head that ignores the anchor must be reported: %+v", got)
+	}
+	if got.AnchorSource != AnchorRetention {
+		t.Fatalf("anchor source = %q, want retention", got.AnchorSource)
+	}
+}
+
+// A time window starts at an arbitrary row whose predecessor is merely outside
+// the window. The retained anchor describes the table head, not that row.
+func TestVerifyInfersAnAnchorInsideATimeWindow(t *testing.T) {
+	rows := prunedChain("outside-window", "first", "second")
+	store := &fakeStore{
+		segment: [][]Event{rows},
+		anchor:  Anchor{Hash: "retained-but-not-this-window"},
+	}
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	got, err := New(store, Options{}).Verify(context.Background(), from, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !got.OK || got.AnchorSource != AnchorInferred || got.AnchorAt != "first" {
+		t.Fatalf("verification = %+v, want an inferred window anchor", got)
+	}
+}
+
+// A genesis chain is not anchored at all.
+func TestVerifyGenesisChainIsNotAnchored(t *testing.T) {
+	rows := prunedChain("", "first", "second")
+	store := &fakeStore{segment: [][]Event{rows}}
+
+	got, err := New(store, Options{}).Verify(context.Background(), time.Time{}, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !got.OK || got.Anchored || got.AnchorSource != "" {
+		t.Fatalf("verification = %+v, want no anchor", got)
+	}
+}
+
+func TestVerifyReportsAnAnchorReadFailure(t *testing.T) {
+	store := &fakeStore{anchorErr: errors.New("anchor unavailable")}
+	if _, err := New(store, Options{}).Verify(context.Background(), time.Time{}, time.Time{}, 10); err == nil {
+		t.Fatal("an anchor read failure must be reported, not silently ignored")
 	}
 }
 

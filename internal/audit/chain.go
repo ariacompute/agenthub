@@ -79,11 +79,30 @@ type Verification struct {
 	BrokenAt string `json:"brokenAt,omitempty"`
 	BrokenID int64  `json:"brokenId,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Anchored says the walk did not begin at the start of history: the trail
+	// was pruned, or a time window was supplied. AnchorAt is the first row
+	// checked and AnchorSource is where its seed came from.
+	Anchored     bool   `json:"anchored,omitempty"`
+	AnchorAt     string `json:"anchorAt,omitempty"`
+	AnchorSource string `json:"anchorSource,omitempty"`
 }
 
+const (
+	// AnchorRetention is a seed recorded by the retention job when it removed
+	// the predecessor of the current chain head. It is trusted: the head must
+	// point at exactly this hash.
+	AnchorRetention = "retention"
+	// AnchorInferred takes the seed from the first row's own prev_hash. It is
+	// the fallback for trails pruned before anchors were recorded, for a manual
+	// expiry, and for windows that do not start at the head of the table.
+	AnchorInferred = "inferred"
+)
+
 // VerifySegment checks rows that arrive in ascending id order. seed is the hash
-// of the row before the first one (empty when the segment starts at the
-// beginning of the table).
+// of the row before the first one: empty for a genesis row, the retained anchor
+// for a pruned trail, or rows[0].PrevHash for a walk that starts mid-chain.
+// The first row is still hash-checked against that seed, so trusting a head's
+// own prev_hash cannot hide a rewritten row.
 //
 // A segment check is what makes this affordable: verifying a year of audit
 // history does not need the whole table in memory, and a broken link is found at
