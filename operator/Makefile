@@ -5,9 +5,13 @@
 # go.mod) is never affected.
 
 CONTROLLER_GEN ?= ./bin/controller-gen
+# Keep in sync with the controller-gen.kubebuilder.io/version annotation in
+# config/crd/bases/agenthub.ai_agenthubs.yaml. A different version rewrites the
+# generated manifests in ways unrelated to the actual schema change.
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
 IMG ?= agenthub-operator:latest
 
-.PHONY: all build run test manifests docker-build lint tidy generate vet
+.PHONY: all build run test manifests controller-gen docker-build lint tidy generate vet
 
 all: build
 
@@ -18,8 +22,14 @@ tidy:
 ## generate: regenerate deepcopy (alias of manifests)
 generate: manifests
 
+## controller-gen: install the pinned generator into ./bin (never touches go.mod)
+controller-gen:
+	@if [ ! -x "$(CONTROLLER_GEN)" ]; then \
+		GOBIN="$(CURDIR)/bin" go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION); \
+	fi
+
 ## manifests: regenerate CRD, RBAC and deepcopy via controller-gen
-manifests:
+manifests: controller-gen
 	$(CONTROLLER_GEN) object:headerFile="" paths="./api/..."
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:dir=config/crd/bases
 	$(CONTROLLER_GEN) rbac:roleName=agenthub-operator paths="./internal/..." output:rbac:dir=config/rbac

@@ -335,5 +335,11 @@ with its own `go.mod`; the parent agenthub module and its zero-extra-dependency
 ## Regenerate manifests
 
 ```bash
-cd operator && make manifests  # requires ./bin/controller-gen (downloaded by go install)
+cd operator && make manifests
 ```
+
+On first use `make manifests` installs the pinned `./bin/controller-gen`
+(`v0.19.0`, matching the `controller-gen.kubebuilder.io/version` annotation in
+the CRD) via `go install`; `go.mod` / `go.sum` are untouched and `operator/bin/`
+is ignored by Git. Override with `CONTROLLER_TOOLS_VERSION=<version> make manifests`
+only when deliberately migrating the generated manifests to a newer generator.

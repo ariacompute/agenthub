@@ -299,5 +299,10 @@ operator/
 ## 重新生成清单
 
 ```bash
-cd operator && make manifests  # 需要 ./bin/controller-gen（由 go install 下载）
+cd operator && make manifests
 ```
+
+首次运行时 `make manifests` 会通过 `go install` 装好固定版本的 `./bin/controller-gen`
+（`v0.19.0`，与 CRD 中的 `controller-gen.kubebuilder.io/version` 注解一致）；
+不会改动 `go.mod` / `go.sum`，`operator/bin/` 已被 Git 忽略。只有在打算把生成清单
+迁移到新版生成器时，才用 `CONTROLLER_TOOLS_VERSION=<版本> make manifests` 覆盖。
