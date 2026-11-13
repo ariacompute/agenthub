@@ -88,7 +88,6 @@ server (defaults mirror `config.go`):
 | `rls` | `AGENTHUB_RLS` | `enforce` (default) / `off`; `off` + `env: prod` also needs `rlsAck` |
 | `rlsAck` | `AGENTHUB_RLS_ACK` | the second signature on turning the policies off |
 | `migrateDatabaseURL` | `AGENTHUB_MIGRATE_DATABASE_URL` | DDL role; secret (`existingSecret` preferred) |
-| `adminToken` | `AGENTHUB_ADMIN_TOKEN` | break-glass bearer token; secret |
 | `agentTimeout` | `AGENTHUB_AGENT_TIMEOUT` | |
 | `a2aLegacyMethods` | `AGENTHUB_A2A_LEGACY_METHODS` | |
 | `audit.enabled` / `audit.retention` | `AGENTHUB_AUDIT_ENABLED` / `_RETENTION` | the API trail |

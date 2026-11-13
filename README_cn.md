@@ -450,14 +450,38 @@ store 分支不需要数据库就能覆盖；而 `internal/store` 只有在设�
 通过 `BASE_URL` 指向已启动的服务，只测不起停，自动回收全部自建数据，并产出 JSON + Markdown 报告。
 
 ```bash
-AGENTHUB_SEED_DEMO=true make up   # 优先使用 demo-* 种子资源
-AGENTHUB_SEED_DEMO=true make run  # 或本地运行
-cd e2e && bun install && cd ..    # 首次运行；测试依赖隔离安装
-make e2e-api                      # 接口套件（./scripts/test-api.sh 为转发器）
-make e2e-ui                       # 界面旅程（需 bun x playwright install chromium）
-make e2e                          # 两套都跑
-make e2e-coverage                 # 仅端点覆盖度守卫，不发请求
+# 1. 服务端：所有 AGENTHUB_* 开关只在启动时读取一次，必须在启动/重启实例之前设置，
+#    不能加在 `make e2e` 前面。
+AGENTHUB_SEED_DEMO=true \
+AGENTHUB_CHANNELS_ENABLED=true \
+AGENTHUB_ROUTER_ENABLED=true AGENTHUB_ROUTER_RESOURCE=demo-mcp \
+AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups AGENTHUB_BACKUP_MODE=off \
+make up  # compose 部署：--force-recreate 也会让 .env 改动生效
+# 或：同样的变量由 `make run`（宿主机运行 Go）继承
+
+# 2. 客户端：两套套件只通过 BASE_URL 访问服务。
+cd e2e && bun install && cd ..  # 首次运行；测试依赖隔离安装
+make e2e-api                    # 接口套件（./scripts/test-api.sh 为转发器）
+make e2e-ui                     # 界面旅程（需 bun x playwright install chromium）
+make e2e                        # 两套都跑
+make e2e-coverage               # 仅端点覆盖度守卫，不发请求
 ```
+
+`AGENTHUB_SEED_DEMO=true` 的写法同样适用于其余可选模块：它们是**服务端启动期**配置，不是测试脚本的
+开关，把变量加在 `make e2e` 前面不会改变服务端行为。Compose 已显式转发这些键，因此 `VAR=true make up`
+和写进 `.env` 两种方式都生效；全部服务端变量见 `docker-compose.yml`、`.env.example` 与
+`.env.sec.example`。
+
+| 服务端变量 | 默认值 | 为什么完整运行需要设置 |
+| --- | --- | --- |
+| `AGENTHUB_SEED_DEMO=true` | `false` | 灌入五个 `demo-*` 资源，作为 A2A / 路由的目标；不设置时套件会自建等价资源 |
+| `AGENTHUB_CHANNELS_ENABLED=true` | `false` | 否则 `/api/channels*` 返回 `503 channel_disabled`，整组 SKIP |
+| `AGENTHUB_ROUTER_ENABLED=true` | `false` | 否则 `/api/router/*` 与 `/api/schedules/{id}/run` 返回 `503 feature_unavailable` |
+| `AGENTHUB_ROUTER_RESOURCE=demo-mcp` | 空 | 兜底执行者；未设置时工单可能返回 `409 router_resource_unset` |
+| `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | 空 | **这才是**检查点功能的开关（compose 已把卷挂到该路径） |
+| `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | 只是调度模式；`off` 仍允许套件手工打点 |
+| `AGENTHUB_FILES_STORE=local`（配合 `AGENTHUB_FILES_DIR`） | `off` | 否则共享文件路由返回 `503 files_disabled`；compose 需为该路径额外挂载可写卷 |
+| `AGENTHUB_SPEECH_MODE=mock` | `mock` | 当前唯一可用的语音后端，其它值会让线程音频 SKIP |
 
 凭据来自 `AGENTHUB_TEST_EMAIL` / `AGENTHUB_TEST_PASSWORD`（bootstrap 管理员）或
 `AGENTHUB_API_KEY=ahk_…`（长效 bearer 密钥），`BASE_URL` 默认 `http://127.0.0.1:3500`；

@@ -83,10 +83,12 @@ services:
     environment:
       AGENTHUB_HTTP_PORT: "3500"
       AGENTHUB_ENV: ${AGENTHUB_ENV:-dev}
+      AGENTHUB_STATIC_DIR: ${AGENTHUB_STATIC_DIR:-./backend/static}
       # DATABASE_URL is interpolated from the environment so a deployment can
       # override the connection. The default keeps the bundled postgres usable for
       # local/dev. When you override it, the password must match POSTGRES_PASSWORD
-      # below.
+      # below. The separate DDL role (AGENTHUB_MIGRATE_DATABASE_URL) is a secret
+      # and therefore travels only through env_file below.
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub}@postgres:${POSTGRES_PORT:-5434}/${POSTGRES_DB:-agenthub}}
       # Identities live in Postgres. The bootstrap administrator is upserted at
       # every boot; without it the first registered account becomes the owner.
@@ -99,11 +101,16 @@ services:
       AGENTHUB_OAUTH_ENABLED: ${AGENTHUB_OAUTH_ENABLED:-false}
       AGENTHUB_OAUTH_GOOGLE_CLIENT_ID: ${AGENTHUB_OAUTH_GOOGLE_CLIENT_ID:-}
       AGENTHUB_OAUTH_GOOGLE_CLIENT_SECRET: ${AGENTHUB_OAUTH_GOOGLE_CLIENT_SECRET:-}
+      AGENTHUB_OAUTH_GOOGLE_SCOPES: ${AGENTHUB_OAUTH_GOOGLE_SCOPES:-}
       AGENTHUB_OAUTH_GITHUB_CLIENT_ID: ${AGENTHUB_OAUTH_GITHUB_CLIENT_ID:-}
       AGENTHUB_OAUTH_GITHUB_CLIENT_SECRET: ${AGENTHUB_OAUTH_GITHUB_CLIENT_SECRET:-}
+      AGENTHUB_OAUTH_GITHUB_SCOPES: ${AGENTHUB_OAUTH_GITHUB_SCOPES:-}
+      AGENTHUB_OAUTH_WECHAT_APP_ID: ${AGENTHUB_OAUTH_WECHAT_APP_ID:-}
+      AGENTHUB_OAUTH_WECHAT_APP_SECRET: ${AGENTHUB_OAUTH_WECHAT_APP_SECRET:-}
       AGENTHUB_OAUTH_OIDC_CLIENT_ID: ${AGENTHUB_OAUTH_OIDC_CLIENT_ID:-}
       AGENTHUB_OAUTH_OIDC_CLIENT_SECRET: ${AGENTHUB_OAUTH_OIDC_CLIENT_SECRET:-}
       AGENTHUB_OAUTH_OIDC_ISSUER: ${AGENTHUB_OAUTH_OIDC_ISSUER:-}
+      AGENTHUB_OAUTH_OIDC_SCOPES: ${AGENTHUB_OAUTH_OIDC_SCOPES:-}
       # Demo resources are opt-in: a default instance starts with an empty
       # registry. Enable for a walkthrough or before make e2e-api.
       AGENTHUB_SEED_DEMO: ${AGENTHUB_SEED_DEMO:-false}
@@ -111,23 +118,81 @@ services:
       AGENTHUB_MAX_PARALLEL: ${AGENTHUB_MAX_PARALLEL:-8}
       AGENTHUB_CLI_TIMEOUT: ${AGENTHUB_CLI_TIMEOUT:-15s}
       AGENTHUB_CLI_ALLOWLIST: ${AGENTHUB_CLI_ALLOWLIST:-git,ls,cat,echo,date,aria-memo}
+      AGENTHUB_AGENT_TIMEOUT: ${AGENTHUB_AGENT_TIMEOUT:-120s}
       AGENTHUB_MAX_OUTPUT_BYTES: ${AGENTHUB_MAX_OUTPUT_BYTES:-65536}
       AGENTHUB_EVENT_BUFFER: ${AGENTHUB_EVENT_BUFFER:-512}
+      AGENTHUB_MODEL_ROUTER_MODE: ${AGENTHUB_MODEL_ROUTER_MODE:-mock}
       AGENTHUB_PUSH_ENABLED: ${AGENTHUB_PUSH_ENABLED:-true}
       AGENTHUB_PUSH_RECORD_LIMIT: ${AGENTHUB_PUSH_RECORD_LIMIT:-100}
+      # Optional modules. Listing them here (not only in env_file) means a
+      # switch can also be flipped from the shell, e.g.
+      #   AGENTHUB_CHANNELS_ENABLED=true make up
+      # Defaults mirror internal/config.Load so an unset key behaves identically
+      # whether it arrives by substitution or by env_file.
+      AGENTHUB_CHANNELS_ENABLED: ${AGENTHUB_CHANNELS_ENABLED:-false}
+      AGENTHUB_SPEECH_MODE: ${AGENTHUB_SPEECH_MODE:-mock}
+      AGENTHUB_AUDIO_MAX_BYTES: ${AGENTHUB_AUDIO_MAX_BYTES:-16777216}
+      AGENTHUB_REGISTRY_SYNC_ENABLED: ${AGENTHUB_REGISTRY_SYNC_ENABLED:-false}
+      AGENTHUB_REGISTRY_SYNC_INTERVAL: ${AGENTHUB_REGISTRY_SYNC_INTERVAL:-1h}
+      AGENTHUB_REGISTRY_SYNC_FIXTURE: ${AGENTHUB_REGISTRY_SYNC_FIXTURE:-true}
+      AGENTHUB_FILES_STORE: ${AGENTHUB_FILES_STORE:-off}
+      AGENTHUB_FILES_MAX_BYTES: ${AGENTHUB_FILES_MAX_BYTES:-33554432}
+      AGENTHUB_FILES_DIR: ${AGENTHUB_FILES_DIR:-}
+      AGENTHUB_FILES_S3_ENDPOINT: ${AGENTHUB_FILES_S3_ENDPOINT:-}
+      AGENTHUB_FILES_S3_BUCKET: ${AGENTHUB_FILES_S3_BUCKET:-}
+      AGENTHUB_FILES_S3_REGION: ${AGENTHUB_FILES_S3_REGION:-us-east-1}
+      AGENTHUB_FILES_S3_PATH_STYLE: ${AGENTHUB_FILES_S3_PATH_STYLE:-true}
+      # The *_ENV values name credential variables; the credentials themselves
+      # are injected by env_file and must never be inlined here.
+      AGENTHUB_FILES_S3_ACCESS_KEY_ENV: ${AGENTHUB_FILES_S3_ACCESS_KEY_ENV:-AGENTHUB_FILES_S3_ACCESS_KEY}
+      AGENTHUB_FILES_S3_SECRET_KEY_ENV: ${AGENTHUB_FILES_S3_SECRET_KEY_ENV:-AGENTHUB_FILES_S3_SECRET_KEY}
       # Database checkpoints. The volume below is mounted either way;
       # AGENTHUB_BACKUP_DIR stays empty by default so an instance takes no
-      # checkpoints until somebody switches the feature on.
+      # checkpoints until somebody switches the feature on. MODE is the
+      # schedule (off | interval | daily | cron), not the on/off switch.
       AGENTHUB_BACKUP_DIR: ${AGENTHUB_BACKUP_DIR:-}
       AGENTHUB_BACKUP_MODE: ${AGENTHUB_BACKUP_MODE:-off}
+      AGENTHUB_BACKUP_INTERVAL: ${AGENTHUB_BACKUP_INTERVAL:-24h}
+      AGENTHUB_BACKUP_DAILY_TIME: ${AGENTHUB_BACKUP_DAILY_TIME:-03:00}
+      AGENTHUB_BACKUP_TIMEZONE: ${AGENTHUB_BACKUP_TIMEZONE:-UTC}
+      AGENTHUB_BACKUP_CRON: ${AGENTHUB_BACKUP_CRON:-}
       AGENTHUB_BACKUP_KEEP_LAST: ${AGENTHUB_BACKUP_KEEP_LAST:-7}
       AGENTHUB_BACKUP_MAX_AGE_DAYS: ${AGENTHUB_BACKUP_MAX_AGE_DAYS:-30}
+      # Router / scheduler: off until enabled. ROUTER_RESOURCE names the
+      # fallback worker; without one, tickets can answer router_resource_unset.
+      AGENTHUB_ROUTER_ENABLED: ${AGENTHUB_ROUTER_ENABLED:-false}
+      AGENTHUB_ROUTER_INTERVAL: ${AGENTHUB_ROUTER_INTERVAL:-2s}
+      AGENTHUB_ROUTER_BATCH_MAX: ${AGENTHUB_ROUTER_BATCH_MAX:-20}
+      AGENTHUB_ROUTER_MAX_TICKETS: ${AGENTHUB_ROUTER_MAX_TICKETS:-8}
+      AGENTHUB_ROUTER_MAX_ATTEMPTS: ${AGENTHUB_ROUTER_MAX_ATTEMPTS:-3}
+      AGENTHUB_ROUTER_ASSESS_MODE: ${AGENTHUB_ROUTER_ASSESS_MODE:-rule}
+      AGENTHUB_ROUTER_ASSESS_RESOURCE: ${AGENTHUB_ROUTER_ASSESS_RESOURCE:-}
+      AGENTHUB_ROUTER_RESOURCE: ${AGENTHUB_ROUTER_RESOURCE:-}
+      AGENTHUB_ROUTER_TRIGGER_TTL: ${AGENTHUB_ROUTER_TRIGGER_TTL:-168h}
+      AGENTHUB_ROUTER_PRUNE_INTERVAL: ${AGENTHUB_ROUTER_PRUNE_INTERVAL:-10m}
+      # Execution sandboxes. AGENTHUB_SANDBOX_PROVIDERS is a JSON array and is
+      # deliberately left to env_file: interpolating JSON into YAML is unsafe.
+      AGENTHUB_SANDBOX_ENABLED: ${AGENTHUB_SANDBOX_ENABLED:-true}
+      AGENTHUB_SANDBOX_PROVIDER: ${AGENTHUB_SANDBOX_PROVIDER:-docker}
+      AGENTHUB_SANDBOX_DEFAULT_IMAGE: ${AGENTHUB_SANDBOX_DEFAULT_IMAGE:-debian:bookworm-slim}
+      AGENTHUB_SANDBOX_DOCKER_HOST: ${AGENTHUB_SANDBOX_DOCKER_HOST:-}
+      AGENTHUB_SANDBOX_RUNTIME: ${AGENTHUB_SANDBOX_RUNTIME:-}
+      AGENTHUB_SANDBOX_IDLE_TTL: ${AGENTHUB_SANDBOX_IDLE_TTL:-30m}
+      AGENTHUB_SANDBOX_MAX_TTL: ${AGENTHUB_SANDBOX_MAX_TTL:-2h}
+      AGENTHUB_SANDBOX_MAX_PER_OWNER: ${AGENTHUB_SANDBOX_MAX_PER_OWNER:-4}
+      AGENTHUB_SANDBOX_MAX_TOTAL: ${AGENTHUB_SANDBOX_MAX_TOTAL:-16}
+      AGENTHUB_SANDBOX_EGRESS_ALLOWLIST: ${AGENTHUB_SANDBOX_EGRESS_ALLOWLIST:-}
+      AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT: ${AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT:-25s}
+      AGENTHUB_SANDBOX_SWEEP_INTERVAL: ${AGENTHUB_SANDBOX_SWEEP_INTERVAL:-30s}
       # Row level security. `enforce` is the default and the only value a
       # production deployment should run: `off` makes every isolation policy a
       # no-op and is refused with AGENTHUB_ENV=prod unless AGENTHUB_RLS_ACK=1
-      # also says the operator meant it (left to .env on purpose, so enabling it
-      # is always a deliberate edit).
+      # also says the operator meant it.
       AGENTHUB_RLS: ${AGENTHUB_RLS:-enforce}
+      AGENTHUB_RLS_ACK: ${AGENTHUB_RLS_ACK:-false}
+      AGENTHUB_DB_MAX_OPEN_CONNS: ${AGENTHUB_DB_MAX_OPEN_CONNS:-25}
+      AGENTHUB_DB_MAX_IDLE_CONNS: ${AGENTHUB_DB_MAX_IDLE_CONNS:-10}
+      AGENTHUB_DB_CONN_MAX_LIFETIME: ${AGENTHUB_DB_CONN_MAX_LIFETIME:-30m}
       # API audit trail: on by default, one append-only row per /api and /a2a
       # call, hash-chained. Retention is how long a row may live before the
       # cleanup tick removes it (and records that it did).
@@ -137,10 +202,11 @@ services:
       AGENTHUB_AUDIT_BATCH: ${AGENTHUB_AUDIT_BATCH:-64}
     # Pass the operator's .env (or .env.sec copied to .env) into the container.
     # A root-level .env is only used by Compose for variable *substitution*; it is
-    # NOT injected as container env unless we do it here. Any variable not listed
-    # in the environment: block above (e.g. AGENTHUB_ENCRYPTION_KEY,
-    # AGENTHUB_PUSH_SECRET, pool/registry settings) would otherwise never reach
-    # the app.
+    # NOT injected as container env unless we do it here. Keys deliberately left
+    # out of the block above are secrets (AGENTHUB_ENCRYPTION_KEY,
+    # AGENTHUB_PUSH_SECRET, AGENTHUB_MIGRATE_DATABASE_URL, S3 credentials) and
+    # AGENTHUB_SANDBOX_PROVIDERS (JSON); env_file injects them verbatim without
+    # YAML interpolation.
     env_file:
       - .env
     ports:

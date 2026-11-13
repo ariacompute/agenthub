@@ -505,14 +505,39 @@ administration) with Playwright. Both point at `BASE_URL`, never start or stop t
 up everything they create, and write a JSON + Markdown report.
 
 ```bash
-AGENTHUB_SEED_DEMO=true make up   # demo-* resources are the preferred targets
-AGENTHUB_SEED_DEMO=true make run  # or locally
-cd e2e && bun install && cd ..    # first run only; isolated dev dependency
-make e2e-api                      # API suite (./scripts/test-api.sh is a shim)
-make e2e-ui                       # UI journeys (bun x playwright install chromium)
-make e2e                          # both
-make e2e-coverage                 # endpoint coverage guard only, no requests
+# 1. Server side: every AGENTHUB_* switch is read once at startup. Set them before
+#    starting/restarting the instance, never in front of `make e2e`.
+AGENTHUB_SEED_DEMO=true \
+AGENTHUB_CHANNELS_ENABLED=true \
+AGENTHUB_ROUTER_ENABLED=true AGENTHUB_ROUTER_RESOURCE=demo-mcp \
+AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups AGENTHUB_BACKUP_MODE=off \
+make up  # compose also picks up edits to .env (--force-recreate)
+# or: the same variables inherited by `make run` (host-run Go server)
+
+# 2. Client side: the suites only talk to BASE_URL.
+cd e2e && bun install && cd ..  # first run only; isolated dev dependency
+make e2e-api                    # API suite (./scripts/test-api.sh is a shim)
+make e2e-ui                     # UI journeys (bun x playwright install chromium)
+make e2e                        # both
+make e2e-coverage               # endpoint coverage guard only, no requests
 ```
+
+`AGENTHUB_SEED_DEMO=true` is the pattern to follow for the other optional modules: they are
+**server startup** settings, not switches of the test runner. Prefixing `make e2e` with one of them
+does not change the server. Compose forwards these keys explicitly, so both `VAR=true make up` and a
+line in `.env` work; `docker-compose.yml`, `.env.example` and `.env.sec.example` list every
+service-side variable.
+
+| server variable | default | why set it for a full run |
+| --- | --- | --- |
+| `AGENTHUB_SEED_DEMO=true` | `false` | seeds the five `demo-*` resources used as A2A / router targets; without them the suite creates its own equivalents |
+| `AGENTHUB_CHANNELS_ENABLED=true` | `false` | otherwise `/api/channels*` answers `503 channel_disabled` and the whole group SKIPs |
+| `AGENTHUB_ROUTER_ENABLED=true` | `false` | otherwise `/api/router/*` and `/api/schedules/{id}/run` answer `503 feature_unavailable` |
+| `AGENTHUB_ROUTER_RESOURCE=demo-mcp` | empty | fallback worker; without one a ticket can answer `409 router_resource_unset` |
+| `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | empty | **this** is the checkpoint on/off switch (the compose volume is already mounted here) |
+| `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | schedule mode only — `off` still allows the manual checkpoints the suite creates |
+| `AGENTHUB_FILES_STORE=local` (+ `AGENTHUB_FILES_DIR`) | `off` | shared-file routes otherwise answer `503 files_disabled`; compose needs a writable volume mounted at that path |
+| `AGENTHUB_SPEECH_MODE=mock` | `mock` | the only shipping voice backend; any other value makes thread audio SKIP |
 
 Credentials come from `AGENTHUB_TEST_EMAIL` / `AGENTHUB_TEST_PASSWORD` (bootstrap administrator) or
 `AGENTHUB_API_KEY=ahk_…` (long-lived bearer key), and `BASE_URL` defaults to
