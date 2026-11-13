@@ -176,8 +176,8 @@ of pretending to be a release. Images take the same values through the `VERSION`
 
 [`example/`](example/README.md) registers a realistic catalogue straight from the repository: 41
 complete `registry.Entry` payloads plus a re-runnable loader, covering all five kinds in both a
-Windows and an Ubuntu shape. `deploy-agent.sh` goes one step further and stands one of the agents
-up on WSL2 / Ubuntu, so the `card_url` the catalogue registers really answers.
+Windows and an Ubuntu shape. Four `deploy-*.sh` scripts go one step further and materialise one
+asset each on WSL2 / Ubuntu: an A2A agent, a stdio MCP server, a skill directory or a CLI command.
 
 ```bash
 cp .env.example .env     # then set AGENTHUB_EXAMPLE_ENABLED=true and
@@ -185,8 +185,11 @@ cp .env.example .env     # then set AGENTHUB_EXAMPLE_ENABLED=true and
 ./example/load.sh        # picks the platform from uname -s
 ./example/load.sh --all  # both platforms
 
-./example/deploy-agent.sh google-adk start  # stand one agent up so its card_url answers
-./example/deploy-agent.sh google-adk smoke  # print its Agent Card, then send one message/send
+./example/deploy-agent.sh google-adk start      # stand one agent up so its card_url answers
+./example/deploy-agent.sh google-adk smoke      # print its Agent Card, then send one message/send
+./example/deploy-mcp.sh filesystem start        # serve one stdio MCP server in the background
+./example/deploy-skill.sh anthropics-pdf start  # acquire the skill directory at its file:// endpoint
+./example/deploy-cli.sh gh start                # PATH + AGENTHUB_CLI_ALLOWLIST preflight
 ```
 
 | Kind | What it registers |
@@ -203,12 +206,16 @@ exists — PUT is not an upsert — so it is safe to re-run.
 
 `example/README.md` also documents the payload contract (the 21 accepted keys, the `kind` /
 `transport` / `health` / `status` enums and `kind_config`), the upstream install and start commands
-per platform, and the two settings people trip over: `AGENTHUB_EXAMPLE_API_KEY` for the gateway and
-`AGENTHUB_CLI_ALLOWLIST` for the CLI commands.
+per platform, what each of the four deployment scripts does, and the two settings people trip over:
+`AGENTHUB_EXAMPLE_API_KEY` for the gateway and `AGENTHUB_CLI_ALLOWLIST` for the CLI commands.
 
-`deploy-agent.sh` is deliberately separate from the loader: it never logs in, never touches the
-database and never calls `/probe` — it only installs, serves and verifies one agent, which is what
-`Try run` and a health probe need before they can report anything measured.
+The deployment scripts are deliberately separate from the loader: none of them logs in, touches the
+database or calls `/probe`. `deploy-agent.sh` installs, serves and verifies one agent, which is what
+`Try run` and a health probe need before they can report anything measured; `deploy-mcp.sh` holds a
+stdio server open over a FIFO and checks its tool list, `deploy-skill.sh` acquires the `file://`
+directory and reads `SKILL.md`, and `deploy-cli.sh` checks PATH plus `AGENTHUB_CLI_ALLOWLIST` before
+running a read-only probe. The server-side mcp / skill / cli connectors are still `TODO(real)`, so
+those three verify the local asset only.
 
 <div align="right">
 

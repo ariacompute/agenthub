@@ -2,8 +2,8 @@
 
 A catalogue you can load straight into a running agenthub instance: five kinds of assets
 (model / agent / mcp / skill / cli), one set for Windows and one for Ubuntu, **41 JSON files**
-in total, plus a re-runnable `load.sh` and `deploy-agent.sh`, which stands one of the agents
-up on WSL2 / Ubuntu so the `card_url` it registers really answers.
+in total, plus a re-runnable `load.sh` and four `deploy-*.sh` scripts that stand one asset up on
+WSL2 / Ubuntu, so its registered `card_url`, `file://` directory or command can be verified.
 
 Every file is a **complete `registry.Entry` payload**: the server's `DisallowUnknownFields`,
 the four enum checks and the `kind_config` validation prove the fields are written correctly,
@@ -29,7 +29,8 @@ instead of refusing, use `deploy-agent.sh`:
 ./example/deploy-agent.sh google-adk stop    # TERM the recorded pid
 ```
 
-Section 7 covers what it installs, where it puts things and how it handles the gateway key.
+Section 7 covers what `deploy-agent.sh` installs, where it puts things and how it handles the
+gateway key; section 8 covers the other three scripts (MCP / skill / CLI).
 
 Loading is **opt-in**: `load.sh` exits with a message until
 `AGENTHUB_EXAMPLE_ENABLED=true` is set, so a plain `cp .env.example .env` can never
@@ -73,6 +74,9 @@ Open the console and you will find three namespaces: `example` (model), `example
 | skill | `skill-{anthropics-pdf,skillssh-find-skills}-{ubuntu,windows}.json` | `example-*` | 2 × 2 |
 | cli | `cli-{gh,huggingface,modelscope}-{ubuntu,windows}.json` | `example-*` | 3 × 2 |
 | — | `deploy-agent.sh` | — | deployment script: stands one agent up on WSL2 / Ubuntu (`google-adk` today), see §7 |
+| — | `deploy-mcp.sh` | — | serves one stdio MCP server over a FIFO, see §8 |
+| — | `deploy-skill.sh` | — | acquires one skill directory at its `file://` endpoint, see §8 |
+| — | `deploy-cli.sh` | — | preflights one CLI against PATH + `AGENTHUB_CLI_ALLOWLIST`, see §8 |
 
 ## 3. Upstream choices & Windows / Ubuntu comparison
 
@@ -277,3 +281,47 @@ WSL2 / Ubuntu and takes the agent as its first argument:
 - everything lands in `$HOME/.local/share/agenthub-<agent>` (`--workdir` to override), which keeps
   the venv and the log out of the repository.
 - the script never talks to agenthub: no login, no `load.sh`, no `/probe`.
+
+## 8. Deploying MCP / skill / CLI assets on Ubuntu
+
+`load.sh` registers what an asset *is*; §7's `deploy-agent.sh` makes one A2A agent answer. The
+other three scripts materialise assets that are not services. All four share the same shape —
+`set -euo pipefail`, a usage block with `--help`, a parsed (not sourced) root `.env`, the matching
+`resources/*-ubuntu.json` as the single source of truth, `start|stop|restart|status|smoke`, a
+workdir under `$HOME/.local/share`, `--dry-run`, and no agenthub login, `load.sh` or `/probe`.
+
+| Script | Selectors | `start` | `smoke` |
+| --- | --- | --- | --- |
+| `deploy-mcp.sh` | 10 servers: `filesystem`, `github`, `google-drive`, `google-docs`, `gmail`, `slack`, `stripe`, `wechat`, `dingtalk`, `feishu` | resolves `kind_config.mcp.command` + `args`, expands `<user>` / `<project>` / `<app_id>` / `<app_secret>`, serves the stdio process with a FIFO held open on stdin | sends MCP `initialize` / `notifications/initialized` / `tools/list` and prints the tools parsed from the log |
+| `deploy-skill.sh` | `anthropics-pdf`, `skillssh-find-skills` | acquires the directory at the registered `file://` endpoint (`git clone --depth 1` or `npx skills add`) and publishes a stable symlink | reads `SKILL.md`, prints its front matter, triggers and tools |
+| `deploy-cli.sh` | `gh`, `huggingface`, `modelscope` | resolves the command the way `entryCommand` does, checks PATH and `AGENTHUB_CLI_ALLOWLIST` (whole-string `EqualFold`), writes the deployment state | runs only `--version` / `--help` / `version` |
+
+```sh
+./example/deploy-mcp.sh filesystem start --dry-run  # print the resolved command, start nothing
+./example/deploy-mcp.sh filesystem start
+./example/deploy-mcp.sh filesystem smoke
+./example/deploy-mcp.sh filesystem stop
+
+./example/deploy-skill.sh anthropics-pdf start
+./example/deploy-skill.sh anthropics-pdf smoke
+./example/deploy-skill.sh anthropics-pdf stop
+
+AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh gh start
+./example/deploy-cli.sh gh status
+./example/deploy-cli.sh gh smoke
+./example/deploy-cli.sh gh stop
+```
+
+- A skill is a directory and a CLI is a binary on PATH: neither has a process, a pid or a port.
+  `stop` only unpublishes (removes the symlink / state file) and never deletes an acquired checkout
+  or a binary; `status` exits 1 when nothing is deployed.
+- `deploy-mcp.sh` never executes an unresolved placeholder. `<app_id>` / `<app_secret>` come from
+  `LARK_APP_ID` / `LARK_APP_SECRET`; the secret is masked in every printed command line, but
+  Feishu's server takes `-a` / `-s` as argv, so that value is visible in `ps`. Every other
+  credential is inherited from the process environment, never written to a pid file or the log.
+- `deploy-cli.sh` reads `AGENTHUB_CLI_ALLOWLIST` from the root `.env` / `.env.example` and mirrors
+  the server's whole-string comparison. The server reads it once at startup, so restart the server
+  after changing it; `--allowlist` overrides the preflight and `--skip-allowlist` records anyway.
+- None of these three changes the connector status in §6: the server-side mcp / skill / cli
+  connectors are still `TODO(real)`. They verify the local command, directory and tool list — not
+  an execution through agenthub.

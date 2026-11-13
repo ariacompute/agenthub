@@ -164,8 +164,8 @@ registry 默认为**空**，不灌任何演示数据；置 `AGENTHUB_SEED_DEMO=t
 
 [`example/`](example/README.md) 提供一份可直接灌进运行实例的真实目录：**41 份完整
 `registry.Entry` 载荷**加一个可重复执行的装载脚本，五类资产各有 Windows 与 Ubuntu 两套形态；
-`deploy-agent.sh` 更进一步，在 WSL2 / Ubuntu 上把其中一个 agent 真跑起来，让目录里登记的
-`card_url` 真能应答。
+四个 `deploy-*.sh` 脚本更进一步，在 WSL2 / Ubuntu 上各把一项资产落地：A2A agent、stdio MCP
+server、skill 目录或 CLI 命令。
 
 ```bash
 cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
@@ -173,8 +173,11 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 ./example/load.sh        # 按 uname -s 选平台
 ./example/load.sh --all  # 两个平台都灌
 
-./example/deploy-agent.sh google-adk start  # 把某个 agent 跑起来，让它登记的 card_url 真能应答
-./example/deploy-agent.sh google-adk smoke  # 打印它的 Agent Card，再发一条 message/send
+./example/deploy-agent.sh google-adk start      # 把某个 agent 跑起来，让它登记的 card_url 真能应答
+./example/deploy-agent.sh google-adk smoke      # 打印它的 Agent Card，再发一条 message/send
+./example/deploy-mcp.sh filesystem start        # 后台起一个 stdio MCP server
+./example/deploy-skill.sh anthropics-pdf start  # 按 file:// endpoint 落地 skill 目录
+./example/deploy-cli.sh gh start                # 检查 PATH 与 AGENTHUB_CLI_ALLOWLIST
 ```
 
 | 类别 | 注册了什么 |
@@ -190,11 +193,14 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 因此可反复执行。
 
 `example/README.md` 另附载荷契约（21 个可用键、`kind` / `transport` / `health` / `status` 四类枚举、
-`kind_config`）、每类上游项目的 Windows/Ubuntu 安装与启动命令，以及两个最容易踩的配置项：
-网关的 `AGENTHUB_EXAMPLE_API_KEY` 与 CLI 的 `AGENTHUB_CLI_ALLOWLIST`。
+`kind_config`）、每类上游项目的 Windows/Ubuntu 安装与启动命令、四个部署脚本各自的职责，
+以及两个最容易踩的配置项：网关的 `AGENTHUB_EXAMPLE_API_KEY` 与 CLI 的 `AGENTHUB_CLI_ALLOWLIST`。
 
-`deploy-agent.sh` 刻意与装载脚本分开：它不登录、不碰数据库、也不调 `/probe`，只负责安装、启动与
-校验某一个 agent——而这正是 `Try run` 与健康探测要报出「实测值」的前提。
+四个部署脚本都刻意与装载脚本分开：不登录、不碰数据库、也不调 `/probe`。`deploy-agent.sh` 只负责
+安装、启动与校验某一个 agent——而这正是 `Try run` 与健康探测要报出「实测值」的前提；
+`deploy-mcp.sh` 用 FIFO 托住 stdio server 的 stdin 并核对工具列表，`deploy-skill.sh` 按 `file://`
+落地目录并读取 `SKILL.md`，`deploy-cli.sh` 先检查 PATH 与 `AGENTHUB_CLI_ALLOWLIST` 再跑只读探测。
+服务端 mcp / skill / cli connector 仍是 `TODO(real)`，所以后三者只校验本地资产。
 
 <div align="right">
 

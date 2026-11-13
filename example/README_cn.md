@@ -1,8 +1,9 @@
 # example — Registry resource 真实配置示例
 
 一份可以直接灌进运行中 agenthub 的资源清单：五类资产（model / agent / mcp / skill / cli），
-Windows 与 Ubuntu 各一套，共 **41 份 JSON**，外加可重复执行的 `load.sh`，以及
-`deploy-agent.sh`（在 WSL2 / Ubuntu 上把其中一个 agent 真跑起来，让它登记的 `card_url` 真能应答）。
+Windows 与 Ubuntu 各一套，共 **41 份 JSON**，外加可重复执行的 `load.sh`，以及四个
+`deploy-*.sh` 脚本（在 WSL2 / Ubuntu 上把其中一项资产落地，验证登记的 `card_url`、
+`file://` 目录或命令）。
 
 每份 JSON 都是一份**完整的 `registry.Entry` 载荷**：服务端的 `DisallowUnknownFields`、
 四类枚举校验和 `kind_config` 校验会自动证明字段写对；`load.sh` 跑通即示例有效。
@@ -26,7 +27,7 @@ cp .env.example .env                  # 然后把 AGENTHUB_EXAMPLE_ENABLED 改�
 ./example/deploy-agent.sh google-adk stop    # TERM 记录的 pid
 ```
 
-它装什么、东西放哪、网关 key 怎么传，见第 7 节。
+`deploy-agent.sh` 装什么、东西放哪、网关 key 怎么传，见第 7 节；其余三个脚本（MCP / skill / CLI）见第 8 节。
 
 装载是**显式开启**的：未设置 `AGENTHUB_EXAMPLE_ENABLED=true` 时 `load.sh` 直接报错退出，
 因此单纯 `cp .env.example .env` 不会把示例数据灌进真实实例。
@@ -66,6 +67,9 @@ cp .env.example .env                  # 然后把 AGENTHUB_EXAMPLE_ENABLED 改�
 | skill | `skill-{anthropics-pdf,skillssh-find-skills}-{ubuntu,windows}.json` | `example-*` | 2 × 2 |
 | cli | `cli-{gh,huggingface,modelscope}-{ubuntu,windows}.json` | `example-*` | 3 × 2 |
 | — | `deploy-agent.sh` | — | 部署脚本：在 WSL2 / Ubuntu 上把某个 agent 跑起来（当前支持 `google-adk`），见第 7 节 |
+| — | `deploy-mcp.sh` | — | 用 FIFO 起一个 stdio MCP server，见第 8 节 |
+| — | `deploy-skill.sh` | — | 按 `file://` endpoint 落地 skill 目录，见第 8 节 |
+| — | `deploy-cli.sh` | — | 预检 CLI 的 PATH 与 `AGENTHUB_CLI_ALLOWLIST`，见第 8 节 |
 
 ## 3. 上游选型与 Windows / Ubuntu 对照
 
@@ -243,3 +247,43 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
   `smoke` 发一条 `message/send` 并打印回复，真实回复与 mock 一眼可分。
 - 产物都在 `$HOME/.local/share/agenthub-<agent>`（`--workdir` 可覆盖），venv 与日志都不进仓库。
 - 脚本不碰 agenthub：不登录、不调 `load.sh`、不调 `/probe`。
+
+## 8. 在 Ubuntu 上部署 MCP / skill / CLI 资产
+
+`load.sh` 登记的是资产「是什么」，第 7 节的 `deploy-agent.sh` 让一个 A2A agent 真应答；其余三个脚本
+落地的是**不是服务**的资产。四个脚本形态一致：`set -euo pipefail`、带 `--help` 的 usage 注释块、
+解析（而非 source）根目录 `.env`、以对应的 `resources/*-ubuntu.json` 为唯一配置源、
+`start|stop|restart|status|smoke`、`$HOME/.local/share` 下的 workdir、`--dry-run`，
+以及一律不登录 agenthub、不调 `load.sh`、不调 `/probe`。
+
+| 脚本 | 可选项 | `start` | `smoke` |
+| --- | --- | --- | --- |
+| `deploy-mcp.sh` | 10 个 server：`filesystem`、`github`、`google-drive`、`google-docs`、`gmail`、`slack`、`stripe`、`wechat`、`dingtalk`、`feishu` | 解析 `kind_config.mcp.command` + `args`，展开 `<user>` / `<project>` / `<app_id>` / `<app_secret>`，用 FIFO 托住 stdin 并后台起 stdio 进程 | 发送 MCP `initialize` / `notifications/initialized` / `tools/list`，打印从日志解析出的工具列表 |
+| `deploy-skill.sh` | `anthropics-pdf`、`skillssh-find-skills` | 按登记的 `file://` endpoint 落地目录（`git clone --depth 1` 或 `npx skills add`），并发布固定软链 | 读取 `SKILL.md`，打印 front matter、triggers 与 tools |
+| `deploy-cli.sh` | `gh`、`huggingface`、`modelscope` | 按 `entryCommand` 的顺序解析命令，检查 PATH 与 `AGENTHUB_CLI_ALLOWLIST`（整串 `EqualFold`），写入部署状态 | 只跑 `--version` / `--help` / `version` |
+
+```sh
+./example/deploy-mcp.sh filesystem start --dry-run  # 打印解析出的命令，不起任何东西
+./example/deploy-mcp.sh filesystem start
+./example/deploy-mcp.sh filesystem smoke
+./example/deploy-mcp.sh filesystem stop
+
+./example/deploy-skill.sh anthropics-pdf start
+./example/deploy-skill.sh anthropics-pdf smoke
+./example/deploy-skill.sh anthropics-pdf stop
+
+AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh gh start
+./example/deploy-cli.sh gh status
+./example/deploy-cli.sh gh smoke
+./example/deploy-cli.sh gh stop
+```
+
+- skill 是目录、CLI 是 PATH 上的二进制：都没有进程、pid 与端口。`stop` 只撤销发布（删软链 / 状态文件），
+  绝不删除已获取的 checkout 或二进制；没部署时 `status` 退出码为 1。
+- `deploy-mcp.sh` 绝不执行未解析的占位符。`<app_id>` / `<app_secret>` 来自
+  `LARK_APP_ID` / `LARK_APP_SECRET`；密钥在每条打印的命令行里都脱敏，但飞书 server 把 `-a` / `-s`
+  放在 argv 上，因此该值会出现在 `ps` 里。其余凭据一律从进程环境继承，不写进 pid 文件与日志。
+- `deploy-cli.sh` 从根目录 `.env` / `.env.example` 读 `AGENTHUB_CLI_ALLOWLIST`，并复刻服务端的整串比对。
+  服务端只在启动时读一次，改完要重启服务端；`--allowlist` 覆盖预检，`--skip-allowlist` 则照样记录。
+- 这三个脚本都不改变第 6 节所述的 connector 现状：服务端 mcp / skill / cli connector 仍是
+  `TODO(real)`。它们校验的是本地命令、目录与工具列表，不是经 agenthub 的一次执行。
