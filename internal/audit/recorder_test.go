@@ -362,6 +362,32 @@ func TestSnapshotCopiesTheMetadata(t *testing.T) {
 	}
 }
 
+// TestAppendNormalisesTimeBeforeHashing: PostgreSQL timestamptz stores
+// microseconds, so hashing a Go nanosecond timestamp and reading the row back
+// made Verify flag the very first row as tampered. The writer must normalise
+// before both the hash and the INSERT.
+func TestAppendNormalisesTimeBeforeHashing(t *testing.T) {
+	store := &fakeStore{}
+	rec := New(store, Options{})
+	nanos := time.Date(2026, 11, 13, 8, 45, 24, 123456789, time.UTC)
+
+	rec.append([]Event{{EventID: "e1", Time: nanos}})
+
+	if len(store.rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(store.rows))
+	}
+	written := store.rows[0]
+	if !written.Time.Equal(nanos.Truncate(time.Microsecond)) {
+		t.Fatalf("time = %v, want the microsecond-truncated value", written.Time)
+	}
+	if written.Hash != Hash("", written) {
+		t.Fatal("the stored hash must cover the stored timestamp")
+	}
+	if _, broken := VerifySegment("", []Event{written}); broken != nil {
+		t.Fatalf("a round-tripped row must verify: %+v", broken)
+	}
+}
+
 // TestStatusRecorderPassesTheWriterThrough covers the SSE path: Flush and
 // Unwrap exist so the stream keeps streaming through the wrapper.
 func TestStatusRecorderPassesTheWriterThrough(t *testing.T) {

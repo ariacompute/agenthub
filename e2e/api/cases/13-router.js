@@ -67,7 +67,8 @@ export default [
     const id = requireState(ctx, 'ticketId')
     const res = await ctx.api('GET', `/api/router/tickets/${id}`)
     expectStatus(res, 200, 'get ticket')
-    expectShape(res, ['ticket', 'decisions'], 'ticket detail')
+    // TicketDetail embeds *Ticket, so its fields are flattened into the body.
+    expectShape(res, ['id', 'decisions'], 'ticket detail')
   }),
 
   c('cancelling an unknown ticket is a clean 404', 'POST /api/router/tickets/{id}/cancel', async (ctx) => {

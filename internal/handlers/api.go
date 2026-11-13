@@ -9,6 +9,7 @@ import (
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/adapter"
+	"agenthub/internal/authz"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
@@ -107,8 +108,41 @@ func (d Deps) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		writeDomainErr(w, err)
 		return
 	}
+	// Permissions answer "may this caller use POST /api/resources"; resource
+	// grants answer "may this caller touch this particular record". A key with
+	// every scope is still not the owner, and CanAccessResource treats a record
+	// with no grants as closed — so without this row the creator's own PUT,
+	// probe, curation and DELETE would all answer 404 not_found.
+	if err := d.grantResourceCreator(r, stored.ID); err != nil {
+		_ = d.Reg.Delete(stored.ID)
+		if d.Log != nil {
+			d.Log.Error("handler: creator grant failed", "id", stored.ID, "error", err)
+		}
+		httputil.WriteErr(w, err)
+		return
+	}
 	d.Log.Info("handler: resource registered", "id", stored.ID, "kind", stored.Kind)
 	httputil.WriteJSON(w, http.StatusCreated, stored)
+}
+
+// grantResourceCreator records the caller's ownership of a record it just
+// registered. Owners bypass grants, anonymous callers have no principal, and an
+// instance without an authz store has nowhere to write — all three keep the
+// pre-identity behaviour unchanged.
+func (d Deps) grantResourceCreator(r *http.Request, resourceID string) error {
+	if d.Authz == nil || d.Authz.Store() == nil {
+		return nil
+	}
+	p := PrincipalFrom(r)
+	if p == nil || p.IsOwner || p.UserID == "" {
+		return nil
+	}
+	return d.Authz.Store().CreateGrant(r.Context(), &authz.Grant{
+		ResourceID:    resourceID,
+		PrincipalKind: authz.PrincipalUser,
+		PrincipalID:   p.UserID,
+		Level:         authz.LevelWrite,
+	})
 }
 
 func (d Deps) handleGetResource(w http.ResponseWriter, r *http.Request) {

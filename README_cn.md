@@ -491,12 +491,11 @@ make e2e-coverage               # 仅端点覆盖度守卫，不发请求
 | `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | 只是调度模式；`off` 仍允许套件手工打点 |
 | `AGENTHUB_FILES_STORE=local`（配合 `AGENTHUB_FILES_DIR`） | `off` | 否则共享文件路由返回 `503 files_disabled`；compose 需为该路径额外挂载可写卷 |
 | `AGENTHUB_SPEECH_MODE=mock` | `mock` | 当前唯一可用的语音后端，其它值会让线程音频 SKIP |
+| `AGENTHUB_SANDBOX_DEFAULT_IMAGE=debian:bookworm-slim` | `debian:bookworm-slim` | `POST /api/computers` 会用 `docker run --pull missing` 申请容器；先预拉镜像（`docker pull debian:bookworm-slim`），否则该请求可能超过 `MAX_TIME`。设 `AGENTHUB_SANDBOX_ENABLED=false` 可完全跳过租约（沙箱组将 SKIP） |
 
 凭据来自 `AGENTHUB_TEST_EMAIL` / `AGENTHUB_TEST_PASSWORD`（bootstrap 管理员）或
 `AGENTHUB_API_KEY=ahk_…`（长效 bearer 密钥），`BASE_URL` 默认 `http://127.0.0.1:3500`；
-`MAX_TIME` / `READY_TIMEOUT` 控制单请求与就绪等待上限。**完整运行需要近似 owner 的权限**：
-已有用户的实例上自助注册只会拿到 `role-viewer`，此时套件以退出码 2 给出一条可操作的提示，
-而不是打印几十条误导性的 403 失败。
+`MAX_TIME` / `READY_TIMEOUT` 控制单请求与就绪等待上限。
 
 实例上未接线的能力一律记为 SKIP，绝不伪造结果；需要第三方服务、真实数据库恢复、S3、签名 webhook、
 push 接收端或真实容器执行的用例，默认 SKIP，只有显式设置对应的 `AGENTHUB_E2E_*` 开关才执行。

@@ -181,6 +181,11 @@ func (r *Recorder) Close() {
 func (r *Recorder) append(batch []Event) {
 	out := make([]Event, 0, len(batch))
 	for _, ev := range batch {
+		// PostgreSQL timestamptz keeps microseconds, not Go nanoseconds.
+		// Canonical hashes the timestamp, so stamping a nanosecond value and
+		// reading a microsecond one back makes Verify report the very first
+		// row as tampered. Normalise once, before both the hash and the INSERT.
+		ev.Time = ev.Time.UTC().Truncate(time.Microsecond)
 		ev.PrevHash = r.prev
 		ev.Hash = Hash(r.prev, ev)
 		r.prev = ev.Hash

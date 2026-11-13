@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"agenthub/internal/authz"
@@ -185,5 +186,87 @@ func TestRequireAuthRefusesASessionLessRequest(t *testing.T) {
 	decodeJSON(t, w, &body)
 	if body.Code != "unauthenticated" {
 		t.Fatalf("code = %q, want unauthenticated", body.Code)
+	}
+}
+
+// creatorGrantStore records the grants a registration writes. Embedding
+// noopAuthz keeps the rest of the port inert.
+type creatorGrantStore struct {
+	noopAuthz
+	grants []authz.Grant
+	err    error
+}
+
+func (s *creatorGrantStore) CreateGrant(_ context.Context, g *authz.Grant) error {
+	s.grants = append(s.grants, *g)
+	return s.err
+}
+
+func createAs(d Deps, p *authz.Principal) *httptest.ResponseRecorder {
+	// (namespace, name, version) is the dedupe key, so repeated registrations
+	// in one test need distinct names.
+	name := "ledger" + strings.Repeat("x", len(d.Reg.List("", ""))+1)
+	body := `{"kind":"model","name":"` + name + `","version":"1.0.0","visibility":"public","namespace":"default"}`
+	r := withPrincipal(httptest.NewRequest(http.MethodPost, "/api/resources", strings.NewReader(body)), p)
+	w := httptest.NewRecorder()
+	d.handleCreateResource(w, r)
+	return w
+}
+
+// A key with every scope is still not the owner: without a creator grant its
+// own PUT / probe / curation / DELETE would all be answered 404 by
+// CanAccessResource, which treats a record with no grants as closed.
+func TestCreateResourceGrantsItsCreator(t *testing.T) {
+	az := &creatorGrantStore{}
+	d, reg := accessDeps(t, az)
+	p := &authz.Principal{UserID: "u-1", Permissions: map[string]bool{authz.PermResourcesWrite: true}}
+
+	if w := createAs(d, p); w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s), want 201", w.Code, w.Body.String())
+	}
+	if len(az.grants) != 1 {
+		t.Fatalf("grants = %+v, want exactly one", az.grants)
+	}
+	g := az.grants[0]
+	list := reg.List("", "")
+	if len(list) != 1 || g.ResourceID != list[0].ID || g.PrincipalKind != authz.PrincipalUser ||
+		g.PrincipalID != "u-1" || g.Level != authz.LevelWrite {
+		t.Fatalf("creator grant = %+v, records = %+v", g, list)
+	}
+
+	// Owners bypass grants, anonymous callers have no principal, and an
+	// instance without an authz store keeps the pre-identity behaviour.
+	before := len(az.grants)
+	owner := &authz.Principal{UserID: "owner", IsOwner: true}
+	if w := createAs(d, owner); w.Code != http.StatusCreated {
+		t.Fatalf("owner create = %d", w.Code)
+	}
+	if w := createAs(d, nil); w.Code != http.StatusCreated {
+		t.Fatalf("anonymous create = %d", w.Code)
+	}
+	if len(az.grants) != before {
+		t.Fatal("an owner or anonymous caller must not produce a grant")
+	}
+	bare := Deps{Reg: registry.New(), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if w := createAs(bare, p); w.Code != http.StatusCreated {
+		t.Fatalf("create without authz = %d", w.Code)
+	}
+}
+
+// A failed grant must not leave a record the creator cannot manage.
+func TestCreateResourceRollsBackWhenCreatorGrantFails(t *testing.T) {
+	az := &creatorGrantStore{err: errors.New("grant store down")}
+	d, reg := accessDeps(t, az)
+	p := &authz.Principal{UserID: "u-1", Permissions: map[string]bool{authz.PermResourcesWrite: true}}
+
+	w := createAs(d, p)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if len(az.grants) != 1 {
+		t.Fatalf("the grant was never attempted: %+v", az.grants)
+	}
+	if _, ok := reg.Get(az.grants[0].ResourceID); ok {
+		t.Fatal("the half-created record must be rolled back")
 	}
 }

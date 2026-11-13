@@ -66,7 +66,9 @@ export default [
     const created = await ctx.api('POST', '/api/threads', { body: { title: 'e2e stream' } })
     if (created.status === 503) skip('threads are not wired up on this instance')
     expectStatus(created, 201, 'create thread for events')
-    const id = created.json?.id
+    // POST /api/threads answers the Go struct itself, so the id arrives as `ID`.
+    // Keep the lowercase fallback for instances publishing a tagged view.
+    const id = created.json?.ID || created.json?.id
     ctx.cleanup(`thread ${id}`, () => deleteIfExists(ctx.api, `/api/threads/${id}`))
     const stream = await ctx.stream('GET', `/api/threads/${id}/events`, {
       timeoutMs: 3000, maxFrames: 6,

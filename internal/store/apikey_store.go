@@ -151,10 +151,12 @@ func (s *apiKeyStore) Update(ctx context.Context, k *auth.APIKey) error {
 	if k == nil || k.ID == "" {
 		return errors.New("store: update api key: key or id is empty")
 	}
+	// The api_keys table (migrations/010) has no updated_at column. Writing one
+	// makes every rename fail with a PostgreSQL "column does not exist" error
+	// that the handler reports as 500 internal_error.
 	fields := map[string]any{
 		"name":       k.Name,
 		"expires_at": k.ExpiresAt,
-		"updated_at": time.Now().UTC(),
 	}
 	return s.db.WithContext(ctx).Model(&model.APIKey{}).Where("id = ?", k.ID).Updates(fields).Error
 }

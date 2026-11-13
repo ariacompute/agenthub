@@ -142,6 +142,16 @@ func (c *mcpConnector) invokeHTTP(ctx context.Context, req InvokeRequest, cfg *r
 	}
 	tool, ok := pickAllowedTool(tools, cfg.ToolAllowlist)
 	if !ok {
+		// An offline demo record names an endpoint nobody serves and declares no
+		// tool allowlist. That is not a policy violation: no tool was ever
+		// permitted, so there is nothing to execute. Keep the deterministic
+		// answer the offline catalogue promises instead of turning every seeded
+		// demo-* resource into -32007 sandbox_policy_denied. A record that did
+		// declare tools keeps the strict behaviour: its tools/list failure is
+		// surfaced, never silently mocked.
+		if err != nil && len(cfg.ToolAllowlist) == 0 {
+			return mockMCPInvoke(req, cfg, transport), nil
+		}
 		return InvokeResult{}, &httputil.Error{Code: sandbox.CodePolicyDenied}
 	}
 	callArgs, _ := json.Marshal(map[string]any{"query": req.Prompt})

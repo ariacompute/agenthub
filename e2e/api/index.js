@@ -54,6 +54,33 @@ async function main() {
       }
     }
 
+    if (config.apiKey && identity.user?.isOwner !== true) {
+      // Scopes open a route; resource grants are a second gate. A key with every
+      // scope is still not the owner, so prove that a record it just created can
+      // be written back before 200 cases all report the same 404.
+      const body = {
+        kind: 'model', name: 'e2e preflight resource', version: '1.0.0',
+        health: 'healthy', status: 'approved', visibility: 'public',
+        namespace: 'default', kind_config: { model: { provider_mode: 'mock' } },
+      }
+      const probe = await client.request('POST', '/api/resources', { mode: 'session', body })
+      const id = probe.json?.id
+      if (id) {
+        cleanup.add(`preflight resource ${id}`, () => client.request('DELETE', `/api/resources/${id}`, { mode: 'session' }))
+      }
+      const write = id
+        ? await client.request('PUT', `/api/resources/${id}`, { mode: 'session', body: { ...body, name: 'e2e preflight resource (write)' } })
+        : { status: probe.status }
+      if (!id || write.status !== 200) {
+        throw new PreflightError(
+          `the run identity can register a resource but cannot write it back ` +
+          `(create=${probe.status}, update=${write.status}).\n` +
+          '  A non-owner principal needs a write grant on the records it creates;\n' +
+          '  check resource_grants, or run the suite with the bootstrap owner session.',
+        )
+      }
+    }
+
     const ctx = {
       config,
       client,

@@ -64,7 +64,13 @@ export default [
   c('a checkpoint can be read', 'GET /api/backups/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/backups/${requireState(ctx, 'checkpointId')}`)
     expectStatus(res, 200, 'get backup')
-    expectShape(res, ['id', 'status'], 'get backup')
+    // Every checkpoint endpoint answers {"checkpoint": {...}}; the create case
+    // already accepts that envelope, so the read case must assert the same one.
+    expectShape(res, ['checkpoint'], 'get backup')
+    const checkpoint = res.json.checkpoint
+    if (!checkpoint?.id || !checkpoint?.status) {
+      throw new Error('get backup: checkpoint is missing id or status')
+    }
   }, { enabled: backupsOn }),
 
   c('a checkpoint downloads as gzip', 'GET /api/backups/{id}/download', async (ctx) => {

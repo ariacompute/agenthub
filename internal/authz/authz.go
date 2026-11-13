@@ -309,9 +309,10 @@ func (s *Service) Load(ctx context.Context, userID, email, name string, isOwner 
 
 // CanAccessResource reports whether p may read (or write) one resource.
 //
-// An owner always can. Otherwise: a resource with no grants at all is open to
-// anyone holding the matching permission; a restricted one needs a grant that
-// covers the requested level.
+// An owner always can. Otherwise the record is closed unless it was explicitly
+// published (the handler's read path handles visibility) or a grant covers
+// this principal at the requested level. A record with no grant rows is not
+// open by default: registration is not publication.
 func (s *Service) CanAccessResource(ctx context.Context, p *Principal, resourceID string, write bool) (bool, error) {
 	perm := PermResourcesRead
 	if write {

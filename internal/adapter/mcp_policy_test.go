@@ -260,3 +260,47 @@ func TestMCPToolCallUsesTheAllowedToolOverHTTP(t *testing.T) {
 		t.Fatalf("the allow-listed tool must be the one called, got %q", result.Text)
 	}
 }
+
+// A seeded demo record names an endpoint nobody serves and declares no tool
+// allowlist. No tool was ever permitted, so this is an offline deterministic
+// record, not a policy violation.
+func TestOfflineMCPRecordUsesTheDeterministicAnswer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unreachable", http.StatusBadGateway)
+	}))
+	url := server.URL
+	server.Close()
+
+	entry := &registry.Entry{ID: "demo-mcp", Name: "legacy-hr-mcp", Kind: registry.KindMCP}
+	conn := &mcpConnector{}
+	res, err := conn.invokeHTTP(context.Background(), InvokeRequest{Entry: *entry, Prompt: "hello"},
+		mcpConfig(entry), string(registry.TransportStreamableHTTP), url)
+	if err != nil {
+		t.Fatalf("an offline demo record must still answer, got %v", err)
+	}
+	if !strings.Contains(res.Text, "mcp=legacy-hr-mcp") || len(res.Artifacts) != 2 {
+		t.Fatalf("the deterministic answer did not come back: %+v", res)
+	}
+}
+
+// A record declaring tools opted into real invocation. Its unreachable endpoint
+// must be reported, never silently mocked away.
+func TestDeclaredMCPToolsNeverFallBackToMock(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unreachable", http.StatusBadGateway)
+	}))
+	url := server.URL
+	server.Close()
+
+	entry := &registry.Entry{ID: "mcp-1", Name: "docs", Kind: registry.KindMCP}
+	cfg := &registry.MCPConfig{ToolAllowlist: []string{"call_action"}}
+	conn := &mcpConnector{}
+	_, err := conn.invokeHTTP(context.Background(), InvokeRequest{Entry: *entry, Prompt: "hello"},
+		cfg, string(registry.TransportStreamableHTTP), url)
+	if err == nil {
+		t.Fatal("a declared tool must not be silently mocked")
+	}
+	if got := err.Error(); got != string(CodeResourceUnreachable) {
+		t.Fatalf("code = %q, want %q", got, CodeResourceUnreachable)
+	}
+}

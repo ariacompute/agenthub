@@ -549,13 +549,11 @@ prefix wins; edit `.env` and restart that Go process. `make up` takes the same k
 | `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | schedule mode only — `off` still allows the manual checkpoints the suite creates |
 | `AGENTHUB_FILES_STORE=local` (+ `AGENTHUB_FILES_DIR`) | `off` | shared-file routes otherwise answer `503 files_disabled`; compose needs a writable volume mounted at that path |
 | `AGENTHUB_SPEECH_MODE=mock` | `mock` | the only shipping voice backend; any other value makes thread audio SKIP |
+| `AGENTHUB_SANDBOX_DEFAULT_IMAGE=debian:bookworm-slim` | `debian:bookworm-slim` | `POST /api/computers` leases a container with `docker run --pull missing`; pre-pull the image (`docker pull debian:bookworm-slim`) or the call can exceed `MAX_TIME`. `AGENTHUB_SANDBOX_ENABLED=false` skips leases altogether (the sandbox group then SKIPs) |
 
 Credentials come from `AGENTHUB_TEST_EMAIL` / `AGENTHUB_TEST_PASSWORD` (bootstrap administrator) or
 `AGENTHUB_API_KEY=ahk_…` (long-lived bearer key), and `BASE_URL` defaults to
 `http://127.0.0.1:3500`. `MAX_TIME` / `READY_TIMEOUT` bound per-request and readiness waits.
-A **full run needs owner-equivalent scopes**: on an instance that already has users,
-self-registration only grants `role-viewer`, so the suite exits 2 with one actionable message
-instead of dozens of misleading 403 failures.
 
 Capabilities not wired up on the instance are reported as SKIP, never faked. Anything needing a
 third party, a real database restore, S3, a signed webhook, a push receiver or a real container

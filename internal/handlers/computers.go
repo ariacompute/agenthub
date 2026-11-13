@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -8,6 +10,11 @@ import (
 	"agenthub/internal/httputil"
 	"agenthub/internal/sandbox"
 )
+
+// computerLeaseTimeout bounds how long creating a card may wait for a container
+// runtime to hand back a lease. It stays below the E2E per-request budget so a
+// missing image answers a coded timeout instead of an opaque client deadline.
+const computerLeaseTimeout = 8 * time.Second
 
 // computersReady short-circuits computer endpoints when the store is absent (the
 // feature is not wired in), reporting it as unavailable rather than 404.
@@ -108,7 +115,12 @@ func (d Deps) handleCreateComputer(w http.ResponseWriter, r *http.Request) {
 	if scope == "" {
 		scope = "computer:" + created.ID
 	}
-	lease, err := d.Sandboxes.Acquire(r.Context(), sandbox.LeaseRequest{
+	// A missing container image makes `docker run --pull missing` wait on the
+	// network. Bound that wait so the endpoint answers a coded timeout instead
+	// of an opaque client-side deadline (the E2E per-request budget is 20s).
+	leaseCtx, cancel := context.WithTimeout(r.Context(), computerLeaseTimeout)
+	defer cancel()
+	lease, err := d.Sandboxes.Acquire(leaseCtx, sandbox.LeaseRequest{
 		OwnerID:    ownerID,
 		ResourceID: created.AgentID,
 		Scope:      scope,
@@ -119,6 +131,10 @@ func (d Deps) handleCreateComputer(w http.ResponseWriter, r *http.Request) {
 		// exists when the lease was refused (no docker socket, limit reached...).
 		if derr := d.Computers.Delete(r.Context(), created.ID, ownerID); derr != nil && d.Log != nil {
 			d.Log.Warn("computers: rollback failed", "computer", created.ID, "error", derr)
+		}
+		if errors.Is(leaseCtx.Err(), context.DeadlineExceeded) {
+			httputil.WriteError(w, http.StatusGatewayTimeout, httputil.CodeSandboxTimeout)
+			return
 		}
 		httputil.WriteErr(w, err)
 		return
