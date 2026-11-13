@@ -463,8 +463,8 @@ AGENTHUB_CHANNELS_ENABLED=true \
 AGENTHUB_ROUTER_ENABLED=true AGENTHUB_ROUTER_RESOURCE=demo-mcp \
 AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh \
 AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups AGENTHUB_BACKUP_MODE=off \
-make up  # compose 部署：--force-recreate 也会让 .env 改动生效
-# 或：同样的变量由 `make run`（宿主机运行 Go）继承
+make run  # 宿主机运行 Go（WSL2 / 本地开发）
+# 或：`make up` 走 compose；两种启动方式也都会从 .env 读取同样的键
 
 # 2. 客户端：两套套件只通过 BASE_URL 访问服务。
 cd e2e && bun install && cd ..  # 首次运行；测试依赖隔离安装
@@ -475,9 +475,10 @@ make e2e-coverage               # 仅端点覆盖度守卫，不发请求
 ```
 
 `AGENTHUB_SEED_DEMO=true` 的写法同样适用于其余可选模块：它们是**服务端启动期**配置，不是测试脚本的
-开关，把变量加在 `make e2e` 前面不会改变服务端行为。Compose 已显式转发这些键，因此 `VAR=true make up`
-和写进 `.env` 两种方式都生效；全部服务端变量见 `docker-compose.yml`、`.env.example` 与
-`.env.sec.example`。
+开关，把变量加在 `make e2e` 前面不会改变服务端行为。`make run`（宿主机运行 Go，WSL2 常用）通过
+`config.LoadDotEnv()` 读 `.env`，且只补未设置的键，因此 `VAR=… make run` 前缀优先；改完 `.env` 要重启
+该 Go 进程。`make up` 则由 compose 的 `environment:` 块转发同一批键，并用 `--force-recreate` 使其生效。
+全部服务端变量见 `docker-compose.yml`、`.env.example` 与 `.env.sec.example`。
 
 | 服务端变量 | 默认值 | 为什么完整运行需要设置 |
 | --- | --- | --- |
@@ -486,7 +487,7 @@ make e2e-coverage               # 仅端点覆盖度守卫，不发请求
 | `AGENTHUB_ROUTER_ENABLED=true` | `false` | 否则 `/api/router/*` 与 `/api/schedules/{id}/run` 返回 `503 feature_unavailable` |
 | `AGENTHUB_ROUTER_RESOURCE=demo-mcp` | 空 | 兜底执行者；未设置时工单可能返回 `409 router_resource_unset` |
 | `AGENTHUB_CLI_ALLOWLIST=…,gh` | `git,ls,cat,echo,date,aria-memo` | 整串 `EqualFold` 匹配；种子里的 `demo-cli` 用 `git`（已在默认列表），但 `example/` 的 CLI 资源不在其中——补上 `gh`（其余再加 `hf` / `modelscope`），否则 `deploy-cli.sh gh start` 会拒绝启动，CLI 探测也判 `degraded` |
-| `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | 空 | **这才是**检查点功能的开关（compose 已把卷挂到该路径） |
+| `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | 空 | **这才是**检查点功能的开关（compose 会把卷挂到该路径；`make run` 下请换成宿主机可写路径） |
 | `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | 只是调度模式；`off` 仍允许套件手工打点 |
 | `AGENTHUB_FILES_STORE=local`（配合 `AGENTHUB_FILES_DIR`） | `off` | 否则共享文件路由返回 `503 files_disabled`；compose 需为该路径额外挂载可写卷 |
 | `AGENTHUB_SPEECH_MODE=mock` | `mock` | 当前唯一可用的语音后端，其它值会让线程音频 SKIP |

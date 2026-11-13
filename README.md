@@ -519,8 +519,8 @@ AGENTHUB_CHANNELS_ENABLED=true \
 AGENTHUB_ROUTER_ENABLED=true AGENTHUB_ROUTER_RESOURCE=demo-mcp \
 AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh \
 AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups AGENTHUB_BACKUP_MODE=off \
-make up  # compose also picks up edits to .env (--force-recreate)
-# or: the same variables inherited by `make run` (host-run Go server)
+make run  # host-run Go server (WSL2 / local dev)
+# or: `make up` for the compose stack; both targets also read the same keys from .env
 
 # 2. Client side: the suites only talk to BASE_URL.
 cd e2e && bun install && cd ..  # first run only; isolated dev dependency
@@ -532,9 +532,11 @@ make e2e-coverage               # endpoint coverage guard only, no requests
 
 `AGENTHUB_SEED_DEMO=true` is the pattern to follow for the other optional modules: they are
 **server startup** settings, not switches of the test runner. Prefixing `make e2e` with one of them
-does not change the server. Compose forwards these keys explicitly, so both `VAR=true make up` and a
-line in `.env` work; `docker-compose.yml`, `.env.example` and `.env.sec.example` list every
-service-side variable.
+does not change the server. `make run` (host-run Go server, e.g. WSL2) reads `.env` through
+`config.LoadDotEnv()` — it only fills keys the process does not already have, so a `VAR=… make run`
+prefix wins; edit `.env` and restart that Go process. `make up` takes the same keys from compose's
+`environment:` block and `--force-recreate`. `docker-compose.yml`, `.env.example` and
+`.env.sec.example` list every service-side variable.
 
 | server variable | default | why set it for a full run |
 | --- | --- | --- |
@@ -543,7 +545,7 @@ service-side variable.
 | `AGENTHUB_ROUTER_ENABLED=true` | `false` | otherwise `/api/router/*` and `/api/schedules/{id}/run` answer `503 feature_unavailable` |
 | `AGENTHUB_ROUTER_RESOURCE=demo-mcp` | empty | fallback worker; without one a ticket can answer `409 router_resource_unset` |
 | `AGENTHUB_CLI_ALLOWLIST=…,gh` | `git,ls,cat,echo,date,aria-memo` | whole-string `EqualFold` match; the seeded `demo-cli` uses `git` (already allowed), but the `example/` CLI resources are not — append `gh` (and `hf` / `modelscope` for the rest) or `deploy-cli.sh gh start` refuses and a CLI probe answers `degraded` |
-| `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | empty | **this** is the checkpoint on/off switch (the compose volume is already mounted here) |
+| `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | empty | **this** is the checkpoint on/off switch (compose mounts a volume here; under `make run` use a writable host path instead) |
 | `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | schedule mode only — `off` still allows the manual checkpoints the suite creates |
 | `AGENTHUB_FILES_STORE=local` (+ `AGENTHUB_FILES_DIR`) | `off` | shared-file routes otherwise answer `503 files_disabled`; compose needs a writable volume mounted at that path |
 | `AGENTHUB_SPEECH_MODE=mock` | `mock` | the only shipping voice backend; any other value makes thread audio SKIP |
