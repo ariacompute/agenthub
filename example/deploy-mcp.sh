@@ -8,17 +8,19 @@
 #   filesystem github google-drive google-docs gmail slack stripe wechat dingtalk feishu
 #
 # Commands (default: start):
-#   start    resolve the command from the catalogue, check its dependencies and
-#            serve it in the background with a FIFO held open on stdin
+#   start    resolve the command from the catalogue, check its dependencies,
+#            repair a missing npm global prefix and serve it in the background
+#            with a FIFO held open on stdin
 #   stop     TERM the recorded pid (KILL when it ignores TERM), then close the FIFO
 #   restart  stop, then start
-#   status   pid, the resolved command line and the tail of the log
+#   status   pid, the resolved command line, the tail of the log and a hint when
+#            the last start failed with an npm ENOENT
 #   smoke    send MCP initialize + tools/list over the FIFO and print the tools
 #
 # Options:
 #   --workdir <dir>    default $HOME/.local/share/agenthub-mcp-<server>
 #   --wait <sec>       timeout for the smoke handshake, default 30
-#   --path <dir>       override /home/<user>/... style path arguments
+#   --path <dir>       override /home/<user>/... style path arguments (must exist)
 #   --project <name>   replaces <project> in the catalogue's paths
 #   --dry-run          print the resolved command and start nothing
 #   -h | --help        this text
@@ -37,6 +39,11 @@
 # the resolved command line is printed with the app secret masked. The Feishu
 # server takes -a/-s as argv, so that one value is visible in `ps`; prefer an
 # env-driven server whenever the upstream offers one.
+#
+# npm / npx on WSL2: when ~/.npmrc sets `prefix=<dir>` and that directory was
+# never created, npx dies with "ENOENT ... lstat <dir>" before it can fetch the
+# package. `start` creates the missing prefix (and says so), and `status` shows
+# the same one-line fix when that failure is already in the log.
 #
 # This script never talks to agenthub: no login, no load.sh, no /probe. The
 # server-side MCP connector is still TODO(real), so this stands the stdio
@@ -262,6 +269,92 @@ pid_alive() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
+# Stop the FIFO writer and drop the FIFO. Shared by a failed start and `stop`,
+# so a server that dies during npm's startup cannot leave a stale pid, a leaked
+# `tail -f` process or an orphaned FIFO behind.
+release_fifo() {
+  if [ -f "$KEEP_PID_FILE" ]; then
+    kill "$(cat "$KEEP_PID_FILE")" 2>/dev/null || true
+    rm -f "$KEEP_PID_FILE"
+  fi
+  rm -f "$FIFO"
+}
+
+cleanup_failed_start() {
+  if [ -f "$PID_FILE" ]; then
+    kill -TERM "$(cat "$PID_FILE")" 2>/dev/null || true
+    rm -f "$PID_FILE"
+  fi
+  release_fifo
+}
+
+# npm/npx read `prefix` from ~/.npmrc (or NPM_CONFIG_PREFIX). A prefix that was
+# configured but never created makes npx abort with ENOENT on lstat, before any
+# package is fetched — a stock WSL2 setup step. Repair it once, here, so a
+# catalogue server starts without the operator knowing npm's internals.
+ensure_npm_prefix() {
+  local prefix
+  case "$CMD" in
+    npx | npm | */npx | */npm) ;;
+    *) return 0 ;;
+  esac
+  command -v npm >/dev/null 2>&1 || return 0
+  prefix="${NPM_CONFIG_PREFIX:-}"
+  if [ -z "$prefix" ]; then
+    prefix="$(npm config get prefix 2>/dev/null || true)"
+  fi
+  prefix="${prefix%$'\r'}"
+  [ -n "$prefix" ] || return 0
+  [ -d "$prefix" ] && return 0
+  case "$prefix" in
+    /*) ;;
+    *)
+      echo "npm prefix is not an absolute path: $prefix" >&2
+      return 1
+      ;;
+  esac
+  if mkdir -p "$prefix" 2>/dev/null; then
+    echo "created missing npm global prefix: $prefix" >&2
+    return 0
+  fi
+  echo "npm prefix $prefix does not exist and cannot be created here; run:" >&2
+  echo "  mkdir -p $prefix" >&2
+  return 1
+}
+
+# The filesystem server resolves its root directory before serving anything; a
+# missing one produces a stack trace that looks like another npm failure.
+check_path_args() {
+  local arg
+  for arg in "${ARGS[@]}"; do
+    case "$arg" in
+      /*)
+        if [ ! -d "$arg" ]; then
+          echo "the catalogue points at a directory that does not exist: $arg" >&2
+          echo "create it with: mkdir -p $arg" >&2
+          echo "or pass --path <existing directory>" >&2
+          return 1
+        fi
+        ;;
+    esac
+  done
+}
+
+# One actionable line for the failure this script sees most often on WSL2.
+log_hint() {
+  local path
+  [ -f "$LOG_FILE" ] || return 0
+  if grep -q 'npm error code ENOENT' "$LOG_FILE" 2>/dev/null; then
+    path="$(sed -n 's/^npm error path //p' "$LOG_FILE" | head -n 1 || true)"
+    echo "npm failed with ENOENT: the global prefix in ~/.npmrc points at a missing directory" >&2
+    if [ -n "$path" ]; then
+      echo "fix: mkdir -p $path" >&2
+    else
+      echo 'fix: mkdir -p "$(npm config get prefix)"' >&2
+    fi
+  fi
+}
+
 resolve_command() {
   case "$CMD" in
     */*) [ -x "$CMD" ] && return 0 ;;
@@ -316,11 +409,18 @@ start_server() {
     return 0
   fi
   require mkfifo
-  resolve_command
+  resolve_command || return 1
+  ensure_npm_prefix || return 1
+  check_path_args || return 1
   if pid_alive; then
     echo "$SERVER is already running (pid $(cat "$PID_FILE")) — log: $LOG_FILE"
     return 0
   fi
+
+  # A previous failed start may have left a pid file, a FIFO writer and a FIFO.
+  # Clear all three before creating a new one, otherwise the old writer keeps
+  # the removed inode open forever and `status` reports a stale pid.
+  cleanup_failed_start
 
   mkdir -p "$WORKDIR"
   rm -f "$FIFO"
@@ -339,13 +439,30 @@ start_server() {
   fi
   nohup "$CMD" "${ARGS[@]}" <"$FIFO" >>"$LOG_FILE" 2>&1 &
   echo $! >"$PID_FILE"
-  sleep 0.3
-  if ! pid_alive; then
-    echo "$SERVER exited immediately; see $LOG_FILE" >&2
-    tail -n 20 "$LOG_FILE" >&2
-    rm -f "$PID_FILE"
-    return 1
-  fi
+
+  # npx resolves and downloads the package before the server reads its first
+  # JSON-RPC line. A single 0.3s liveness check can therefore report success
+  # just before npm fails with ENOENT/404. Watch both the pid and the log for a
+  # few seconds; on failure clean up completely instead of leaving stale state.
+  local waited=0
+  while [ "$waited" -lt 12 ]; do
+    if ! pid_alive; then
+      echo "$SERVER exited during startup; see $LOG_FILE" >&2
+      tail -n 20 "$LOG_FILE" >&2
+      log_hint
+      cleanup_failed_start
+      return 1
+    fi
+    if grep -q 'npm error code' "$LOG_FILE" 2>/dev/null; then
+      echo "$SERVER reported an npm error during startup; see $LOG_FILE" >&2
+      tail -n 20 "$LOG_FILE" >&2
+      log_hint
+      cleanup_failed_start
+      return 1
+    fi
+    sleep 0.25
+    waited=$((waited + 1))
+  done
   echo "$SERVER started (pid $(cat "$PID_FILE")) — log: $LOG_FILE"
   echo "verify the handshake with: $SELF $SERVER smoke"
 }
@@ -372,11 +489,7 @@ stop_server() {
   else
     echo "$SERVER is not running (no pid file in $WORKDIR)"
   fi
-  if [ -f "$KEEP_PID_FILE" ]; then
-    kill "$(cat "$KEEP_PID_FILE")" 2>/dev/null || true
-    rm -f "$KEEP_PID_FILE"
-  fi
-  rm -f "$FIFO"
+  release_fifo
 }
 
 status_server() {
@@ -386,13 +499,16 @@ status_server() {
   fi
   if pid_alive; then
     echo "running       pid $pid"
+  elif [ -f "$PID_FILE" ]; then
+    echo "stopped       stale pid $pid — clean up with: $SELF $SERVER stop"
   else
-    echo "stopped       pid file: $pid"
+    echo "stopped       no pid file"
   fi
   show_plan
   if [ -f "$LOG_FILE" ]; then
     echo "log           $LOG_FILE"
     tail -n 10 "$LOG_FILE"
+    log_hint
   fi
   pid_alive
 }
@@ -469,6 +585,7 @@ smoke_server() {
     if ! pid_alive; then
       echo "the server exited during the handshake" >&2
       tail -n 20 "$LOG_FILE" >&2
+      log_hint
       return 1
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
@@ -477,6 +594,7 @@ smoke_server() {
         echo "a server waiting on credentials or OAuth stays silent: $ENV_HINT" >&2
       fi
       tail -n 20 "$LOG_FILE" >&2
+      log_hint
       return 1
     fi
     sleep 1
