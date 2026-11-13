@@ -517,6 +517,7 @@ up everything they create, and write a JSON + Markdown report.
 AGENTHUB_SEED_DEMO=true \
 AGENTHUB_CHANNELS_ENABLED=true \
 AGENTHUB_ROUTER_ENABLED=true AGENTHUB_ROUTER_RESOURCE=demo-mcp \
+AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh \
 AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups AGENTHUB_BACKUP_MODE=off \
 make up  # compose also picks up edits to .env (--force-recreate)
 # or: the same variables inherited by `make run` (host-run Go server)
@@ -541,6 +542,7 @@ service-side variable.
 | `AGENTHUB_CHANNELS_ENABLED=true` | `false` | otherwise `/api/channels*` answers `503 channel_disabled` and the whole group SKIPs |
 | `AGENTHUB_ROUTER_ENABLED=true` | `false` | otherwise `/api/router/*` and `/api/schedules/{id}/run` answer `503 feature_unavailable` |
 | `AGENTHUB_ROUTER_RESOURCE=demo-mcp` | empty | fallback worker; without one a ticket can answer `409 router_resource_unset` |
+| `AGENTHUB_CLI_ALLOWLIST=…,gh` | `git,ls,cat,echo,date,aria-memo` | whole-string `EqualFold` match; the seeded `demo-cli` uses `git` (already allowed), but the `example/` CLI resources are not — append `gh` (and `hf` / `modelscope` for the rest) or `deploy-cli.sh gh start` refuses and a CLI probe answers `degraded` |
 | `AGENTHUB_BACKUP_DIR=/var/lib/agenthub/backups` | empty | **this** is the checkpoint on/off switch (the compose volume is already mounted here) |
 | `AGENTHUB_BACKUP_MODE=off\|daily\|interval\|cron` | `off` | schedule mode only — `off` still allows the manual checkpoints the suite creates |
 | `AGENTHUB_FILES_STORE=local` (+ `AGENTHUB_FILES_DIR`) | `off` | shared-file routes otherwise answer `503 files_disabled`; compose needs a writable volume mounted at that path |
