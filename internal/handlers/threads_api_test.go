@@ -16,6 +16,7 @@ import (
 	"agenthub/internal/adapter"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
+	"agenthub/internal/router"
 	"agenthub/internal/threads"
 )
 
@@ -703,6 +704,156 @@ func TestPostThreadMessageStripsTheMentionToken(t *testing.T) {
 	}
 	if got := task.History[0].Text(); got != "hi" {
 		t.Fatalf("prompt = %q, want the handle stripped", got)
+	}
+}
+
+// A hand-typed @handle is authoritative. When the console's picker could not
+// resolve it and sent its default agent, the run used to land on that default
+// (aria-agent-cloud's offline mock, answering "agent=... steps=... digest=...")
+// instead of the agent the person addressed.
+func TestPostThreadMessageResolvesHandTypedHandleOverTheFallback(t *testing.T) {
+	fallback := &registry.Entry{ID: "demo-agent", Kind: registry.KindAgent, Name: "aria-agent-cloud"}
+	google := &registry.Entry{ID: "example-agent-google-adk", Kind: registry.KindAgent, Name: "google-adk"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), fallback, google)
+	d.Threads = mt
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
+		`{"body":"@google-adk hi","mentions":["demo-agent"]}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+		Failed    []string `json:"failed"`
+	}
+	decodeJSON(t, w, &body)
+	if len(body.Delegated) != 1 || len(body.Failed) != 0 {
+		t.Fatalf("delegated = %+v, failed = %+v", body.Delegated, body.Failed)
+	}
+	task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
+	if task == nil || len(task.History) == 0 {
+		t.Fatalf("task %q carries no history", body.Delegated[0])
+	}
+	if task.ResourceID != google.ID {
+		t.Fatalf("task ran on %q, want the mentioned %q", task.ResourceID, google.ID)
+	}
+	if got := task.History[0].Text(); got != "hi" {
+		t.Fatalf("prompt = %q, want the handle stripped", got)
+	}
+}
+
+// The scheduler path must carry the same target: the ticket's resource is read
+// from the trigger metadata, so a stale client id there would reproduce the bug
+// even though the direct delegation path was fixed.
+func TestPostThreadMessageRoutesHandTypedHandleToTheMentionedAgent(t *testing.T) {
+	fallback := &registry.Entry{ID: "demo-agent", Kind: registry.KindAgent, Name: "aria-agent-cloud"}
+	google := &registry.Entry{ID: "example-agent-google-adk", Kind: registry.KindAgent, Name: "google-adk"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), fallback, google)
+	d.Threads = mt
+	d.Router = routerService(t)
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
+		`{"body":"@google-adk hi","mentions":["demo-agent"]}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	triggers, err := d.Router.ListTriggers(context.Background(), router.TriggerQuery{Limit: 10})
+	if err != nil || len(triggers) != 1 {
+		t.Fatalf("triggers = %+v, err = %v", triggers, err)
+	}
+	trig := triggers[0]
+	if !trig.Explicit {
+		t.Fatal("a resolved @handle must mark the trigger explicit")
+	}
+	if got, _ := trig.Meta["resource"].(string); got != google.ID {
+		t.Fatalf("meta resource = %v, want %q", trig.Meta["resource"], google.ID)
+	}
+	if trig.Meta["mention"] != true {
+		t.Fatal("a resolved @handle must be marked so the scheduler re-targets an existing ticket")
+	}
+	if trig.Body != "hi" {
+		t.Fatalf("trigger body = %q, want the handle stripped", trig.Body)
+	}
+}
+
+// An address to an agent nobody registered is not a request to the default
+// worker: the message is kept, but no run is started and no trigger is injected.
+func TestPostThreadMessageDoesNotDelegateAnUnknownHandle(t *testing.T) {
+	fallback := &registry.Entry{ID: "demo-agent", Kind: registry.KindAgent, Name: "aria-agent-cloud"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), fallback)
+	d.Threads = mt
+	d.Router = routerService(t)
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
+		`{"body":"@google-adk hi","mentions":[]}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+		Failed    []string `json:"failed"`
+		Routed    bool     `json:"routed"`
+	}
+	decodeJSON(t, w, &body)
+	if len(body.Delegated) != 0 || body.Routed {
+		t.Fatalf("delegated = %+v, routed = %v", body.Delegated, body.Routed)
+	}
+	if len(body.Failed) != 1 || body.Failed[0] != "google-adk" {
+		t.Fatalf("failed = %+v, want [google-adk]", body.Failed)
+	}
+	if tasks := d.Hub.Store().List(context.Background()); len(tasks) != 0 {
+		t.Fatalf("an unknown handle opened %d tasks", len(tasks))
+	}
+	if triggers, _ := d.Router.ListTriggers(context.Background(), router.TriggerQuery{Limit: 10}); len(triggers) != 0 {
+		t.Fatalf("an unknown handle injected %d triggers", len(triggers))
+	}
+	if msgs, _ := mt.ListMessages(context.Background(), th.ID, 0); len(msgs) != 1 || msgs[0].Body != "@google-adk hi" {
+		t.Fatalf("the message was not kept as typed: %+v", msgs)
+	}
+}
+
+func TestMentionHandles(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{"@google-adk hi", []string{"google-adk"}},
+		{"@a @b @c", []string{"a", "b", "c"}},
+		{"@a @a @A", []string{"a"}}, // handles are case insensitive
+		{"mail@example.com hi", nil},
+		{"@", nil},
+		{"hi there", nil},
+	}
+	for _, tc := range cases {
+		got := mentionHandles(tc.body)
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("mentionHandles(%q) = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestResolveMentionHandlesMatchesEverySpelling(t *testing.T) {
+	google := &registry.Entry{
+		ID: "adk-1", Kind: registry.KindAgent, Name: "google-adk", DisplayName: "Google ADK",
+	}
+	d := testDeps(t, openConfig(""), google)
+	r := httptest.NewRequest(http.MethodPost, "/api/threads/1/messages", nil)
+	got := d.resolveMentionHandles(r, []string{"GOOGLE-ADK", "adk-1", "Google ADK", "nobody"})
+	if len(got) != 1 || got[0] != google.ID {
+		t.Fatalf("resolved = %v, want [%s] once", got, google.ID)
+	}
+	// Without a registry there is nothing to resolve, but no panic either.
+	if empty := (Deps{}).resolveMentionHandles(r, []string{"anyone"}); len(empty) != 0 {
+		t.Fatalf("resolved without a registry = %v", empty)
 	}
 }
 

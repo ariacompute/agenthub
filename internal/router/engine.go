@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -186,6 +187,15 @@ func (e *Engine) fanOut(ctx context.Context, t *Trigger, now time.Time) (int, bo
 		}
 		if !t.Human() {
 			continue
+		}
+		// An explicit @mention names the worker the person wants. A ticket that
+		// already owns this thread may have been opened for a different one;
+		// waking it unchanged would answer from the old worker. Re-target it
+		// before wake saves the row, so the pass-through keeps one ticket per
+		// conversation and still runs on the agent that was addressed.
+		mentioned, _ := t.Meta["mention"].(bool)
+		if resource := strings.TrimSpace(metaString(t.Meta, "resource")); mentioned && resource != "" && resource != tk.Resource {
+			tk.Resource = resource
 		}
 		human = true
 		e.wake(ctx, tk, t, now)

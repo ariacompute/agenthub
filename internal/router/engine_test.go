@@ -181,6 +181,72 @@ func TestHumanMessageOnASubscribedThreadSkipsTheEvaluation(t *testing.T) {
 	}
 }
 
+// A thread some ticket already owns passes human messages straight through. An
+// explicit @mention still names the worker the person wants, so the pass-through
+// has to re-target that ticket instead of answering from the agent that opened
+// the conversation.
+func TestExplicitMentionReTargetsTheThreadTicket(t *testing.T) {
+	e, store, c := newTestEngine(t)
+	ctx := context.Background()
+
+	opening := &Trigger{
+		Source: string(SourceThread), ThreadID: "th-retarget",
+		ActorID: "u-1", ActorKind: ActorHuman, Explicit: true,
+		Body: "hi", At: c.now(), DueAt: c.now(),
+		Meta: map[string]any{"resource": "aria-agent-cloud"},
+	}
+	if _, _, err := e.Intake(ctx, opening); err != nil {
+		t.Fatalf("opening: %v", err)
+	}
+	if _, err := e.EvaluateDue(ctx, c.now()); err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	tickets, _ := e.ListTickets(ctx, TicketQuery{})
+	if len(tickets) != 1 || tickets[0].Resource != "aria-agent-cloud" {
+		t.Fatalf("owner = %+v", tickets)
+	}
+	owner := tickets[0]
+
+	c.advance(time.Minute)
+	followUp := &Trigger{
+		Source: string(SourceThread), ThreadID: "th-retarget",
+		ActorID: "u-1", ActorKind: ActorHuman, Explicit: true,
+		Body: "@google-adk hi", At: c.now(), DueAt: c.now(),
+		Meta: map[string]any{"resource": "google-adk", "mention": true},
+	}
+	got, fresh, err := e.Intake(ctx, followUp)
+	if err != nil || !fresh {
+		t.Fatalf("follow-up: fresh=%v err=%v", fresh, err)
+	}
+	if got.Disposition != string(DispositionRouted) {
+		t.Fatalf("disposition = %q, want the subscription pass-through", got.Disposition)
+	}
+	after, _ := store.GetTicket(ctx, owner.ID)
+	if after == nil || after.Resource != "google-adk" {
+		t.Fatalf("ticket resource = %+v, want google-adk", after)
+	}
+	if all, _ := e.ListTickets(ctx, TicketQuery{}); len(all) != 1 {
+		t.Fatalf("re-targeting opened %d tickets, want 1", len(all))
+	}
+
+	// A plain follow-up still carries the client's default worker, but without
+	// an @handle it must not undo the re-target.
+	c.advance(time.Minute)
+	plain := &Trigger{
+		Source: string(SourceThread), ThreadID: "th-retarget",
+		ActorID: "u-1", ActorKind: ActorHuman, Explicit: true,
+		Body: "thanks", At: c.now(), DueAt: c.now(),
+		Meta: map[string]any{"resource": "aria-agent-cloud"},
+	}
+	if _, _, err := e.Intake(ctx, plain); err != nil {
+		t.Fatalf("plain follow-up: %v", err)
+	}
+	after, _ = store.GetTicket(ctx, owner.ID)
+	if after.Resource != "google-adk" {
+		t.Fatalf("a plain follow-up changed the resource to %q", after.Resource)
+	}
+}
+
 func TestHandbackIsAllowedOnceThenRefused(t *testing.T) {
 	e, _, c := newTestEngine(t)
 	ctx := context.Background()

@@ -11,6 +11,7 @@ import (
 	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
 	"agenthub/internal/hub"
+	"agenthub/internal/registry"
 	"agenthub/internal/router"
 	"agenthub/internal/threads"
 )
@@ -142,11 +143,38 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The thread body carries "@handle" tokens because that is how a human
-	// addresses an agent, but the run itself must receive the instruction: strip
-	// the handles that name a mentioned resource. The stored message keeps the
-	// text as typed, so the transcript still shows who was addressed.
-	prompt := stripMentionTokens(body.Body, d.mentionTokens(body.Mentions))
+	// The @handle a person typed is the authoritative statement of who should
+	// answer. The console also sends resource ids, but its picker can lag behind
+	// the registry or miss an agent entirely and then fall back to a default
+	// worker; trusting that id is how "@google-adk hi" came back from an
+	// unrelated offline mock with a digest instead of the agent's answer.
+	// Resolve the handles here, against the catalogue this caller may actually
+	// invoke, and only keep the ids the console sent when the body names nobody.
+	handles := mentionHandles(body.Body)
+	mentions := body.Mentions
+	fromHandle := false
+	if len(handles) > 0 {
+		if resolved := d.resolveMentionHandles(r, handles); len(resolved) > 0 {
+			mentions = resolved
+			fromHandle = true
+		} else if len(mentions) == 0 {
+			// An address to an agent that is not registered must not be served
+			// by a default worker: that run would fabricate a digest instead of
+			// the content the person asked for. The message is still posted.
+			httputil.WriteJSON(w, http.StatusCreated, map[string]any{
+				"message":   userMsg,
+				"delegated": []string{},
+				"failed":    handles,
+				"routed":    false,
+			})
+			return
+		}
+	}
+
+	// The run receives the instruction, not the addressing: strip the handles
+	// that name a mentioned resource. The stored message keeps the text as
+	// typed, so the transcript still shows who was addressed.
+	prompt := stripMentionTokens(body.Body, d.mentionTokens(mentions))
 
 	// With the scheduler on, the message becomes a trigger instead of a direct
 	// send. The router decides: an @mention is an explicit request, so it opens a
@@ -162,12 +190,18 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 			ActorKind: router.ActorHuman,
 			Kind:      "message",
 			Body:      prompt,
-			Explicit:  len(body.Mentions) > 0,
+			Explicit:  len(mentions) > 0,
 			At:        time.Now().UTC(),
 			DueAt:     time.Now().UTC(),
 		}
-		if len(body.Mentions) > 0 {
-			trig.Meta = map[string]any{"mentions": body.Mentions, "resource": body.Mentions[0]}
+		if len(mentions) > 0 {
+			trig.Meta = map[string]any{"mentions": mentions, "resource": mentions[0]}
+			// Only a real @handle re-targets a ticket that already owns this
+			// thread. A plain message carries the default worker too, and that
+			// must not undo a re-target made by an earlier mention.
+			if fromHandle {
+				trig.Meta["mention"] = true
+			}
 		}
 		created, _, rerr := d.Router.Inject(r.Context(), trig)
 		if rerr != nil {
@@ -183,9 +217,9 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	delegated := make([]string, 0, len(body.Mentions))
+	delegated := make([]string, 0, len(mentions))
 	failed := make([]string, 0)
-	for _, rid := range body.Mentions {
+	for _, rid := range mentions {
 		params := a2a.MessageSendParams{Message: a2a.NewMessage(a2a.RoleUser, a2a.NewTextPart(prompt))}
 		// The hub resolves the run target from the params metadata; the message
 		// metadata is kept too so the history records which agent was addressed.
@@ -344,6 +378,64 @@ func subscribeMerged(b *hub.Broker, taskIDs []string) (<-chan hub.Event, func())
 		close(out)
 	}
 	return out, done
+}
+
+// mentionHandles returns the @handles a person typed, in first-seen order and
+// without the '@'. A handle starts at the beginning of the body or after
+// whitespace and ends at the next whitespace: the same rule stripMentionTokens
+// uses, so every token found here is one it can remove. An '@' inside a word
+// (an email address, for instance) is not an address to an agent.
+func mentionHandles(body string) []string {
+	out := make([]string, 0)
+	seen := make(map[string]bool)
+	for i := 0; i < len(body); {
+		if (i == 0 || isTokenSpace(body[i-1])) && body[i] == '@' {
+			j := i + 1
+			for j < len(body) && !isTokenSpace(body[j]) {
+				j++
+			}
+			if j > i+1 {
+				token := body[i+1 : j]
+				key := strings.ToLower(token)
+				if !seen[key] {
+					seen[key] = true
+					out = append(out, token)
+				}
+			}
+			i = j
+			continue
+		}
+		i++
+	}
+	return out
+}
+
+// resolveMentionHandles maps @handles to resource ids using the catalogue the
+// console itself reads: only entries this caller may see and that A2A may
+// discover. A handle may be an id, a registry name or a display label, and
+// matching ignores case because a hand-typed handle does. Unresolvable handles
+// contribute nothing; the caller decides what to do when none resolve.
+func (d Deps) resolveMentionHandles(r *http.Request, handles []string) []string {
+	out := make([]string, 0, len(handles))
+	seen := make(map[string]bool)
+	if d.Reg == nil {
+		return out
+	}
+	entries := registry.Discoverable(d.visibleEntries(r, d.Reg.Snapshot()))
+	for _, handle := range handles {
+		for _, e := range entries {
+			if !strings.EqualFold(e.ID, handle) && !strings.EqualFold(e.Name, handle) &&
+				!(e.DisplayName != "" && strings.EqualFold(e.DisplayName, handle)) {
+				continue
+			}
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				out = append(out, e.ID)
+			}
+			break
+		}
+	}
+	return out
 }
 
 // mentionTokens collects every spelling a thread body may use for the resources it
