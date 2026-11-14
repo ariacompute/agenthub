@@ -247,7 +247,7 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/workspace` | `resources:read` — 查看资源 | 可见 agent 与近期任务活动的聚合视图。 | — | `{ agents: [Entry], activity: [{ id, resourceId, state, updatedAt }] }` |
+| `GET` | `/api/workspace` | `resources:read` — 查看资源 | 已审批（可发现）agent 与近期任务活动的聚合视图。 | — | `{ agents: [Entry], activity: [{ id, resourceId, state, updatedAt }] }` |
 | `GET` | `/api/threads` | `tasks:read` — 查看任务 | 列出调用者拥有的线程。 | — | `{ threads: [Thread] }` |
 | `POST` | `/api/threads` | `tasks:write` — 取消与恢复任务 | 创建调用者拥有的线程。 | `{ title?, participants?: [resourceId] }` | `Thread — 201` |
 | `GET` | `/api/threads/{id}` | `tasks:read` — 查看任务 | 读取线程及其消息历史。 | — | `{ thread, messages: [Message] }` |
