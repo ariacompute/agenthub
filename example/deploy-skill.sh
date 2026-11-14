@@ -5,7 +5,7 @@
 #   ./deploy-skill.sh <skill> [command] [options]
 #
 # Skills (from resources/skill-<skill>-ubuntu.json):
-#   anthropics-pdf        git clone anthropics/skills, take the pdf/ directory
+#   anthropics-pdf        git clone anthropics/skills, take the skills/pdf/ directory
 #   skillssh-find-skills  npx skills add vercel-labs/skills into the project
 #
 # Commands (default: start):
@@ -292,7 +292,16 @@ acquire_skill() {
     git)
       require git
       require timeout
+      # $PACKAGE is the skill's path inside the repository (e.g. skills/pdf).
+      # Clone into the directory before that path so the checkout puts SKILL.md
+      # exactly at $TARGET; a bare dirname($TARGET) would nest one level too
+      # deep for repositories that keep their skills under a skills/ directory.
       parent="$(dirname "$TARGET")"
+      if [ -n "$PACKAGE" ]; then
+        case "$TARGET" in
+          */"$PACKAGE") parent="${TARGET%/"$PACKAGE"}" ;;
+        esac
+      fi
       if [ -e "$parent" ] && [ -n "$(ls -A "$parent" 2>/dev/null || true)" ]; then
         echo "$parent already exists and is not empty; refusing to clone into it" >&2
         echo "remove it, or point --path at a free directory" >&2
