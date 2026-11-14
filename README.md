@@ -102,12 +102,22 @@ travels back the same path.
 
 </div>
 
-## 📸 Snapshot
+## 📸 Screenshots
 
-![agenthub console — Registry screen](registry.png)
+The console is one SPA with ten screens.
 
-The Registry screen: ten screens in one console (registry, registries, sources, task trace,
-topology, playground, sign-in, administration, audit and a built-in documentation page).
+| Screen | Capture |
+| --- | --- |
+| Sign in (`/login`) | ![Sign in](screenshots/en/01_Sign_in.png) |
+| Registry (`/registry`) | ![Registry](screenshots/en/02_Registry.png) |
+| Task trace (`/trace`) | ![Task trace](screenshots/en/03_Task_trace.png) |
+| Topology (`/topology`) | ![Topology](screenshots/en/04_Topology.png) |
+| Namespaces (`/registries`) | ![Namespaces](screenshots/en/05_Namespaces.png) |
+| Sources (`/sources`) | ![Sources](screenshots/en/06_Sources.png) |
+| Playground (`/playground`) | ![Playground](screenshots/en/07_Playground.png) |
+| Audit trail (`/audit`) | ![Audit trail](screenshots/en/08_Audit_trail.png) |
+| Administration (`/admin`) | ![Administration](screenshots/en/09_Administration.png) |
+| Docs (`/docs`) | ![Docs](screenshots/en/10_Docs.png) |
 
 <div align="right">
 

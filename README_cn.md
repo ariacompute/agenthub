@@ -100,10 +100,20 @@ model / agent / mcp / skill / cli 五类资产统一注册、发现与编排，<
 
 ## 📸 快照
 
-![agenthub 控制台 —— 注册中心](registry_cn.png)
+控制台是一个单页应用，共十块屏。
 
-注册中心屏：一个控制台十种屏（注册中心、命名空间、上游源、任务追踪、拓扑视图、试跑台、登录注册、
-管理、审计，文档）。
+| 屏幕 | 截图 |
+| --- | --- |
+| 登录（`/login`） | ![登录](screenshots/zh/01_登录.png) |
+| 注册中心（`/registry`） | ![注册中心](screenshots/zh/02_注册中心.png) |
+| 任务追踪（`/trace`） | ![任务追踪](screenshots/zh/03_任务追踪.png) |
+| 拓扑视图（`/topology`） | ![拓扑视图](screenshots/zh/04_拓扑视图.png) |
+| 命名空间（`/registries`） | ![命名空间](screenshots/zh/05_命名空间.png) |
+| 上游注册中心（`/sources`） | ![上游注册中心](screenshots/zh/06_上游注册中心.png) |
+| 演练场（`/playground`） | ![演练场](screenshots/zh/07_演练场.png) |
+| 审计轨迹（`/audit`） | ![审计轨迹](screenshots/zh/08_审计轨迹.png) |
+| 管理（`/admin`） | ![管理](screenshots/zh/09_管理.png) |
+| 文档（`/docs`） | ![文档](screenshots/zh/10_文档.png) |
 
 <div align="right">
 
