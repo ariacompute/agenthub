@@ -124,3 +124,64 @@ func TestSafeClientDefaultsAndDialGuards(t *testing.T) {
 		t.Fatal("an unresolvable host must fail")
 	}
 }
+
+func TestSafeClientWithAllowlistAllowsListedLoopback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := SafeClientWithAllowlist(0, 0, []string{"127.0.0.1"})
+	resp, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("a loopback destination in the allowlist must be reachable: %v", err)
+	}
+	defer resp.Body.Close()
+}
+
+func TestSafeClientWithAllowlistBlocksUnlistedPrivate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// A private destination NOT in the allowlist stays blocked even when another
+	// entry is listed: the list narrows the guard instead of disabling it.
+	c := SafeClientWithAllowlist(0, 0, []string{"10.0.0.5"})
+	if _, err := c.Get(srv.URL); err == nil {
+		t.Fatal("an unlisted loopback destination must be refused")
+	}
+}
+
+func TestSafeClientWithAllowlistBlocksWhenEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := SafeClientWithAllowlist(0, 0, nil)
+	if _, err := c.Get(srv.URL); err == nil {
+		t.Fatal("an empty allowlist must keep the strict default")
+	}
+}
+
+func TestAllowMatchHelpers(t *testing.T) {
+	if !allowContainsHost([]string{"localhost"}, "LOCALHOST") {
+		t.Fatal("host match must be case-insensitive")
+	}
+	if allowContainsHost([]string{"example.com"}, "localhost") {
+		t.Fatal("host must not match an unrelated entry")
+	}
+	if !allowContainsIP([]string{"10.0.0.0/8"}, net.ParseIP("10.1.2.3")) {
+		t.Fatal("CIDR must contain the address")
+	}
+	if allowContainsIP([]string{"10.0.0.0/8"}, net.ParseIP("192.168.0.1")) {
+		t.Fatal("CIDR must not contain an outside address")
+	}
+	if !allowContainsIP([]string{"127.0.0.1"}, net.ParseIP("127.0.0.1")) {
+		t.Fatal("exact IP must match")
+	}
+	if !allowContainsIP([]string{"[::1]"}, net.ParseIP("::1")) {
+		t.Fatal("bracketed IPv6 literal must match")
+	}
+}

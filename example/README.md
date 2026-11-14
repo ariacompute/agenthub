@@ -74,7 +74,7 @@ Open the console and you will find three namespaces: `example` (model), `example
 | skill | `skill-{anthropics-pdf,skillssh-find-skills}-{ubuntu,windows}.json` | `example-*` | 2 × 2 |
 | cli | `cli-{gh,huggingface,modelscope}-{ubuntu,windows}.json` | `example-*` | 3 × 2 |
 | — | `deploy-agent.sh` | — | deployment script: stands one agent up on WSL2 / Ubuntu (`google-adk` today), see §7 |
-| — | `deploy-mcp.sh` | — | serves one stdio MCP server over a FIFO, see §8 |
+| — | `deploy-mcp.sh` | — | bridges one stdio MCP server to a Streamable HTTP endpoint, see §8 |
 | — | `deploy-skill.sh` | — | acquires one skill directory at its `file://` endpoint, see §8 |
 | — | `deploy-cli.sh` | — | preflights one CLI against PATH + `AGENTHUB_CLI_ALLOWLIST`, see §8 |
 
@@ -138,8 +138,13 @@ Notes:
 
 | Source | How to obtain | Ubuntu endpoint | Windows endpoint |
 | --- | --- | --- | --- |
-| `anthropics/skills` (sample: `pdf`) | `git clone https://github.com/anthropics/skills` | `file:///home/<user>/skills/pdf` | `file:///C:/Users/<user>/skills/pdf` |
+| `anthropics/skills` (sample: `pdf`) | `git clone https://github.com/anthropics/skills /home/<user>/skills` | `file:///home/<user>/skills/skills/pdf` | `file:///C:/Users/<user>/skills/skills/pdf` |
 | skills.sh (sample: `find-skills`) | `npx skills add vercel-labs/skills` | `file:///home/<user>/<project>/.agents/skills/find-skills` | `file:///C:/Users/<user>/<project>/.agents/skills/find-skills` |
+
+`anthropics/skills` keeps each skill under `skills/<name>/` in the repository, hence the doubled
+`skills/` in the endpoint: the clone target followed by the directory inside the checkout.
+`deploy-skill.sh` derives the clone root from the endpoint by stripping
+`kind_config.skill.package` (`skills/pdf`) off its tail.
 
 Both use the same skill format (a directory containing `SKILL.md`); only the acquisition differs —
 `git clone` versus installing from the registry. skills.sh is maintained by Vercel Labs
@@ -285,20 +290,22 @@ WSL2 / Ubuntu and takes the agent as its first argument:
 ## 8. Deploying MCP / skill / CLI assets on Ubuntu
 
 `load.sh` registers what an asset *is*; §7's `deploy-agent.sh` makes one A2A agent answer. The
-other three scripts materialise assets that are not services. All four share the same shape —
+other three scripts materialise local assets; the MCP one also publishes an HTTP endpoint. All four
+share the same shape —
 `set -euo pipefail`, a usage block with `--help`, a parsed (not sourced) root `.env`, the matching
 `resources/*-ubuntu.json` as the single source of truth, `start|stop|restart|status|smoke`, a
 workdir under `$HOME/.local/share`, `--dry-run`, and no agenthub login, `load.sh` or `/probe`.
 
 | Script | Selectors | `start` | `smoke` |
 | --- | --- | --- | --- |
-| `deploy-mcp.sh` | 10 servers: `filesystem`, `github`, `google-drive`, `google-docs`, `gmail`, `slack`, `stripe`, `wechat`, `dingtalk`, `feishu` | resolves `kind_config.mcp.command` + `args`, expands `<user>` / `<project>` / `<app_id>` / `<app_secret>`, serves the stdio process with a FIFO held open on stdin | sends MCP `initialize` / `notifications/initialized` / `tools/list` and prints the tools parsed from the log |
+| `deploy-mcp.sh` | 10 servers: `filesystem`, `github`, `google-drive`, `google-docs`, `gmail`, `slack`, `stripe`, `wechat`, `dingtalk`, `feishu` | resolves `kind_config.mcp.command` + `args`, expands `<user>` / `<project>` / `<app_id>` / `<app_secret>`, wraps it with `npx supergateway@latest --outputTransport streamableHttp` (stateless) and serves `POST http://127.0.0.1:8002/mcp` in the background | POSTs MCP `initialize` / `notifications/initialized` / `tools/list` over HTTP (the last one without a session, as agenthub's connector does) and prints the tools from the JSON-RPC reply |
 | `deploy-skill.sh` | `anthropics-pdf`, `skillssh-find-skills` | acquires the directory at the registered `file://` endpoint (`git clone --depth 1` or `npx skills add`) and publishes a stable symlink | reads `SKILL.md`, prints its front matter, triggers and tools |
 | `deploy-cli.sh` | `gh`, `huggingface`, `modelscope` | resolves the command the way `entryCommand` does, checks PATH and `AGENTHUB_CLI_ALLOWLIST` (whole-string `EqualFold`), writes the deployment state | runs only `--version` / `--help` / `version` |
 
 ```sh
-./example/deploy-mcp.sh filesystem start --dry-run  # print the resolved command, start nothing
-./example/deploy-mcp.sh filesystem start
+./example/deploy-mcp.sh filesystem start --dry-run   # print the resolved plan, start nothing
+./example/deploy-mcp.sh filesystem start --wait 120  # first run also downloads supergateway
+./example/deploy-mcp.sh filesystem status            # HTTP endpoint, bridge command, log tail
 ./example/deploy-mcp.sh filesystem smoke
 ./example/deploy-mcp.sh filesystem stop
 
@@ -319,6 +326,60 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   `LARK_APP_ID` / `LARK_APP_SECRET`; the secret is masked in every printed command line, but
   Feishu's server takes `-a` / `-s` as argv, so that value is visible in `ps`. Every other
   credential is inherited from the process environment, never written to a pid file or the log.
+- `deploy-mcp.sh` deploys the catalogue's **stdio** command through a stateless stdio→Streamable
+  HTTP bridge (`supergateway@latest`, `POST /mcp`): agenthub's mcp connector POSTs `tools/list`
+  directly, with no `initialize` or `Mcp-Session-Id`. The JSON files keep declaring `stdio`
+  because that is what the upstream server speaks; to use the deployed endpoint, register a record
+  with `transport=streamable-http` and `endpoint=http://127.0.0.1:8002/mcp`. `--host` / `--port`
+  (or `AGENTHUB_EXAMPLE_MCP_HOST` / `AGENTHUB_EXAMPLE_MCP_PORT` in the root `.env`) move the
+  listener; the default bind is loopback only, and a non-loopback bind needs an authenticating
+  reverse proxy. `stop` signals the whole bridge process group, so neither `npx` nor the stdio
+  child is left behind. A leftover FIFO/stdio deployment is detected by `start` / `status` and
+  is replaced with `restart`.
+- **Multiple MCP servers on one host.** Each server gets its own workdir, pid
+  file and process group, so the only thing that collides is the listen port.
+  The root `.env`'s `AGENTHUB_EXAMPLE_MCP_HOST` / `AGENTHUB_EXAMPLE_MCP_PORT` are
+  global defaults and cannot differ per server, so pass `--port` per server:
+  ```sh
+  ./example/deploy-mcp.sh filesystem start --port 8002
+  ./example/deploy-mcp.sh github     start --port 8003
+  ./example/deploy-mcp.sh slack      start --port 8004
+  ```
+  `--port auto` scans upward from 8002 for a free loopback port, so you can bring
+  up several without tracking numbers by hand. The resolved port is recorded in
+  the workdir; later `status` / `smoke` / `stop` without `--port` still name the
+  right endpoint.
+- **Same port, many paths, behind a reverse proxy.** Give each bridge a distinct
+  `--http-path` (default `/mcp`) and let a proxy route by path to the right
+  backend port, exposing a single 443 with authentication:
+  ```sh
+  ./example/deploy-mcp.sh filesystem start --port 8002 --http-path /mcp/filesystem
+  ./example/deploy-mcp.sh github     start --port 8003 --http-path /mcp/github
+  ```
+  (Two `supergateway` instances cannot bind the same `127.0.0.1:port`; the script
+  refuses to touch an already-listening port it does not own.)
+- **agenthub must be told the bridge is safe to call.** agenthub's mcp connector
+  uses an SSRF-hardened HTTP client that refuses loopback / private addresses by
+  default, so a local bridge on `127.0.0.1` is rejected unless the resource record
+  narrows the guard with `egress_allowlist`. Register the endpoint as
+  `transport=streamable-http` and list the bridge host there:
+  ```json
+  {
+    "id": "local-filesystem",
+    "kind": "mcp",
+    "kind_config": {
+      "mcp": {
+        "transport": "streamable-http",
+        "url": "http://127.0.0.1:8002/mcp",
+        "egress_allowlist": ["127.0.0.1"]
+      }
+    }
+  }
+  ```
+  Without `egress_allowlist`, the connector refuses `127.0.0.1` (and any private
+  IP / CIDR). The field accepts exact IPs, CIDRs and hostnames only — a wildcard
+  or a URL-shaped value is rejected at load time, so it can only narrow the guard,
+  never reopen it to caller-supplied URLs.
 - `deploy-cli.sh` reads `AGENTHUB_CLI_ALLOWLIST` from the root `.env` / `.env.example` and mirrors
   the server's whole-string comparison. The server reads it once at startup, so restart the server
   after changing it; `--allowlist` overrides the preflight and `--skip-allowlist` records anyway.

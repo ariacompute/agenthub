@@ -132,8 +132,8 @@ func (c *mcpConnector) invokeHTTP(ctx context.Context, req InvokeRequest, cfg *r
 	if url == "" {
 		return mockMCPInvoke(req, cfg, transport), nil
 	}
-	allowPrivate := len(egressAllow(&req.Entry)) > 0
-	client := netutil.SafeClient(30*time.Second, 2<<20, allowPrivate)
+	allow := egressAllow(&req.Entry)
+	client := netutil.SafeClientWithAllowlist(30*time.Second, 2<<20, allow)
 
 	tools := []map[string]any{}
 	toolsFrame, err := mcpPost(ctx, client, url, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
@@ -304,10 +304,17 @@ func pickAllowedTool(tools []map[string]any, allowlist []string) (string, bool) 
 }
 
 func egressAllow(e *registry.Entry) []string {
-	if e != nil && e.KindConfig != nil && e.KindConfig.Agent != nil {
-		return e.KindConfig.Agent.EgressAllowlist
+	if e == nil || e.KindConfig == nil {
+		return nil
 	}
-	return nil
+	var out []string
+	if a := e.KindConfig.Agent; a != nil {
+		out = append(out, a.EgressAllowlist...)
+	}
+	if m := e.KindConfig.MCP; m != nil {
+		out = append(out, m.EgressAllowlist...)
+	}
+	return out
 }
 
 func resProvider(lease *sandbox.Lease) string {

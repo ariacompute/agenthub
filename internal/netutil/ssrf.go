@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -81,6 +82,98 @@ func isDangerous(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return true
+	}
+	return false
+}
+
+// SafeClientWithAllowlist behaves like SafeClient but, instead of a blanket
+// "allow private" switch, relaxes the SSRF blocklist only for destinations an
+// operator enumerated in allow. Public addresses are always reachable; a
+// dangerous address (loopback, private, link-local, …) is permitted only when
+// it matches allow — by exact IP, by CIDR, or by the literal hostname. An empty
+// allow keeps the strict default, so a caller-supplied URL still cannot pivot
+// into the internal network.
+func SafeClientWithAllowlist(timeout time.Duration, maxBytes int64, allow []string) *http.Client {
+	if timeout <= 0 {
+		timeout = DefaultSafeTimeout
+	}
+	if maxBytes <= 0 {
+		maxBytes = DefaultSafeMaxBytes
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if network != "tcp" && network != "tcp4" && network != "tcp6" {
+					return nil, fmt.Errorf("ssrf: unsupported network %q", network)
+				}
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, err
+				}
+				hostAllowed := allowContainsHost(allow, host)
+				var safe net.IP
+				for _, ipa := range ips {
+					if !isDangerous(ipa.IP) {
+						safe = ipa.IP
+						break
+					}
+					if hostAllowed || allowContainsIP(allow, ipa.IP) {
+						safe = ipa.IP
+						break
+					}
+				}
+				if safe == nil {
+					return nil, fmt.Errorf("ssrf: every address for %q is blocked", host)
+				}
+				return dialer.DialContext(ctx, network, net.JoinHostPort(safe.String(), port))
+			},
+			MaxIdleConns:    20,
+			IdleConnTimeout: 90 * time.Second,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// allowContainsHost reports whether host matches an allow entry verbatim, so a
+// hostname such as "localhost" covers its loopback resolution.
+func allowContainsHost(allow []string, host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	for _, a := range allow {
+		if strings.EqualFold(strings.TrimSpace(a), h) {
+			return true
+		}
+	}
+	return false
+}
+
+// allowContainsIP reports whether ip is listed verbatim or falls inside a CIDR in
+// allow. Bracketed IPv6 literals are accepted.
+func allowContainsIP(allow []string, ip net.IP) bool {
+	for _, a := range allow {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if strings.HasPrefix(a, "[") && strings.HasSuffix(a, "]") {
+			a = a[1 : len(a)-1]
+		}
+		if _, cidr, err := net.ParseCIDR(a); err == nil {
+			if cidr.Contains(ip) {
+				return true
+			}
+			continue
+		}
+		if got := net.ParseIP(a); got != nil && got.Equal(ip) {
+			return true
+		}
 	}
 	return false
 }

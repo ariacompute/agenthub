@@ -113,6 +113,35 @@ func TestEgressAndProviderAreReadFromTheEntry(t *testing.T) {
 	}
 }
 
+func TestMCPEgressAllowlistReachesTheTransport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read"}]}}`))
+	}))
+	defer server.Close()
+
+	entry := &registry.Entry{
+		Name: "local",
+		KindConfig: &registry.KindConfig{
+			MCP: &registry.MCPConfig{URL: server.URL, ToolAllowlist: []string{"read"}, EgressAllowlist: []string{"127.0.0.1"}},
+		},
+	}
+	conn := &mcpConnector{}
+	if _, err := conn.invokeHTTP(context.Background(), InvokeRequest{Entry: *entry, Prompt: "x"}, entry.KindConfig.MCP, string(registry.TransportStreamableHTTP), server.URL); err != nil {
+		t.Fatalf("MCP egress_allowlist must let the connector reach a loopback server: %v", err)
+	}
+
+	// Without the allowlist the same loopback server stays blocked.
+	blocked := &registry.Entry{
+		Name: "local",
+		KindConfig: &registry.KindConfig{
+			MCP: &registry.MCPConfig{URL: server.URL, ToolAllowlist: []string{"read"}},
+		},
+	}
+	if _, err := conn.invokeHTTP(context.Background(), InvokeRequest{Entry: *blocked, Prompt: "x"}, blocked.KindConfig.MCP, string(registry.TransportStreamableHTTP), server.URL); err == nil {
+		t.Fatal("a loopback MCP server must be unreachable without egress_allowlist")
+	}
+}
+
 func TestTheEnvironmentOfAJobIsBothDeclaredAndAllowed(t *testing.T) {
 	if got := envForJob(nil); got != nil {
 		t.Fatalf("a nil entry has no environment, got %v", got)

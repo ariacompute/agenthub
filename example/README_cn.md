@@ -67,7 +67,7 @@ cp .env.example .env                  # 然后把 AGENTHUB_EXAMPLE_ENABLED 改�
 | skill | `skill-{anthropics-pdf,skillssh-find-skills}-{ubuntu,windows}.json` | `example-*` | 2 × 2 |
 | cli | `cli-{gh,huggingface,modelscope}-{ubuntu,windows}.json` | `example-*` | 3 × 2 |
 | — | `deploy-agent.sh` | — | 部署脚本：在 WSL2 / Ubuntu 上把某个 agent 跑起来（当前支持 `google-adk`），见第 7 节 |
-| — | `deploy-mcp.sh` | — | 用 FIFO 起一个 stdio MCP server，见第 8 节 |
+| — | `deploy-mcp.sh` | — | 把 stdio MCP server 桥接成 Streamable HTTP 端点，见第 8 节 |
 | — | `deploy-skill.sh` | — | 按 `file://` endpoint 落地 skill 目录，见第 8 节 |
 | — | `deploy-cli.sh` | — | 预检 CLI 的 PATH 与 `AGENTHUB_CLI_ALLOWLIST`，见第 8 节 |
 
@@ -125,9 +125,12 @@ ADK 的 `run`、LangGraph 的 `threads/runs` 这类业务动作写在**顶层 `c
 
 | 来源 | 获取方式 | Ubuntu endpoint | Windows endpoint |
 | --- | --- | --- | --- |
-| `anthropics/skills`（示例取 `pdf`） | `git clone https://github.com/anthropics/skills` | `file:///home/<user>/skills/pdf` | `file:///C:/Users/<user>/skills/pdf` |
+| `anthropics/skills`（示例取 `pdf`） | `git clone https://github.com/anthropics/skills /home/<user>/skills` | `file:///home/<user>/skills/skills/pdf` | `file:///C:/Users/<user>/skills/skills/pdf` |
 | skills.sh（示例取 `find-skills`） | `npx skills add vercel-labs/skills` | `file:///home/<user>/<project>/.agents/skills/find-skills` | `file:///C:/Users/<user>/<project>/.agents/skills/find-skills` |
 
+`anthropics/skills` 仓库把各个 skill 放在根下的 `skills/<name>/`，所以 endpoint 里的 `skills/` 出现两次：
+前者是 clone 目标目录，后者是仓库内的目录；`deploy-skill.sh` 按 `kind_config.skill.package`
+（`skills/pdf`）从 endpoint 末尾反推出 clone 根目录。
 两者的 skill 格式相同（含 `SKILL.md` 的目录），差别只在获取方式：git clone vs registry 安装。
 skills.sh 由 Vercel Labs 维护（源码 `vercel-labs/skills`），`npx skills find` 发现、`npx skills add <owner/repo>` 安装，
 多数 agent 读共享目录 `.agents/skills/`，CLI 负责抹平各 agent 的目录差异；Windows 同样需要 `cmd /c`。
@@ -251,20 +254,22 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
 ## 8. 在 Ubuntu 上部署 MCP / skill / CLI 资产
 
 `load.sh` 登记的是资产「是什么」，第 7 节的 `deploy-agent.sh` 让一个 A2A agent 真应答；其余三个脚本
-落地的是**不是服务**的资产。四个脚本形态一致：`set -euo pipefail`、带 `--help` 的 usage 注释块、
+落地本地资产，其中 MCP 还会额外发布一个 HTTP 端点。四个脚本形态一致：`set -euo pipefail`、
+带 `--help` 的 usage 注释块、
 解析（而非 source）根目录 `.env`、以对应的 `resources/*-ubuntu.json` 为唯一配置源、
 `start|stop|restart|status|smoke`、`$HOME/.local/share` 下的 workdir、`--dry-run`，
 以及一律不登录 agenthub、不调 `load.sh`、不调 `/probe`。
 
 | 脚本 | 可选项 | `start` | `smoke` |
 | --- | --- | --- | --- |
-| `deploy-mcp.sh` | 10 个 server：`filesystem`、`github`、`google-drive`、`google-docs`、`gmail`、`slack`、`stripe`、`wechat`、`dingtalk`、`feishu` | 解析 `kind_config.mcp.command` + `args`，展开 `<user>` / `<project>` / `<app_id>` / `<app_secret>`，用 FIFO 托住 stdin 并后台起 stdio 进程 | 发送 MCP `initialize` / `notifications/initialized` / `tools/list`，打印从日志解析出的工具列表 |
+| `deploy-mcp.sh` | 10 个 server：`filesystem`、`github`、`google-drive`、`google-docs`、`gmail`、`slack`、`stripe`、`wechat`、`dingtalk`、`feishu` | 解析 `kind_config.mcp.command` + `args`，展开 `<user>` / `<project>` / `<app_id>` / `<app_secret>`，用 `npx supergateway@latest --outputTransport streamableHttp` 包一层（无状态），后台提供 `POST http://127.0.0.1:8002/mcp` | 经 HTTP 发送 MCP `initialize` / `notifications/initialized` / `tools/list`（最后一个不带会话，与 agenthub connector 一致），打印 JSON-RPC 响应里的工具列表 |
 | `deploy-skill.sh` | `anthropics-pdf`、`skillssh-find-skills` | 按登记的 `file://` endpoint 落地目录（`git clone --depth 1` 或 `npx skills add`），并发布固定软链 | 读取 `SKILL.md`，打印 front matter、triggers 与 tools |
 | `deploy-cli.sh` | `gh`、`huggingface`、`modelscope` | 按 `entryCommand` 的顺序解析命令，检查 PATH 与 `AGENTHUB_CLI_ALLOWLIST`（整串 `EqualFold`），写入部署状态 | 只跑 `--version` / `--help` / `version` |
 
 ```sh
-./example/deploy-mcp.sh filesystem start --dry-run  # 打印解析出的命令，不起任何东西
-./example/deploy-mcp.sh filesystem start
+./example/deploy-mcp.sh filesystem start --dry-run   # 打印部署计划，不起任何东西
+./example/deploy-mcp.sh filesystem start --wait 120  # 首次运行还要下载 supergateway
+./example/deploy-mcp.sh filesystem status            # HTTP 端点、桥接命令与日志尾部
 ./example/deploy-mcp.sh filesystem smoke
 ./example/deploy-mcp.sh filesystem stop
 
@@ -283,6 +288,48 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
 - `deploy-mcp.sh` 绝不执行未解析的占位符。`<app_id>` / `<app_secret>` 来自
   `LARK_APP_ID` / `LARK_APP_SECRET`；密钥在每条打印的命令行里都脱敏，但飞书 server 把 `-a` / `-s`
   放在 argv 上，因此该值会出现在 `ps` 里。其余凭据一律从进程环境继承，不写进 pid 文件与日志。
+- `deploy-mcp.sh` 用无状态桥接（`supergateway@latest` 的 `POST /mcp`）把目录里登记的 **stdio**
+  命令暴露成 Streamable HTTP：agenthub 的 mcp connector 直接 POST `tools/list`，不带 `initialize`
+  与 `Mcp-Session-Id`。JSON 仍写 `stdio`（那是上游 server 的协议）；要用部署出来的端点，请另登记
+  `transport=streamable-http`、`endpoint=http://127.0.0.1:8002/mcp` 的记录。`--host` / `--port`
+  （或根目录 `.env` 的 `AGENTHUB_EXAMPLE_MCP_HOST` / `AGENTHUB_EXAMPLE_MCP_PORT`）可改监听地址；
+  默认只绑环回，绑到其它地址必须加带鉴权的反向代理。`stop` 终止整个桥接进程组，不留 `npx` 或
+  stdio 子进程；旧的 FIFO/stdio 部署会被 `start` / `status` 识别，用 `restart` 切换。
+- **一台主机跑多个 MCP。** 每个 server 各有独立 workdir、pid 文件与进程组，唯一会撞的只有监听端口。根目录
+  `.env` 的 `AGENTHUB_EXAMPLE_MCP_HOST` / `AGENTHUB_EXAMPLE_MCP_PORT` 是全局默认值，无法按 server 区分，
+  所以按 server 显式传 `--port`：
+  ```sh
+  ./example/deploy-mcp.sh filesystem start --port 8002
+  ./example/deploy-mcp.sh github     start --port 8003
+  ./example/deploy-mcp.sh slack      start --port 8004
+  ```
+  `--port auto` 从 8002 起向上扫描空闲端口，可免记编号地一次起多个；解析出的端口会记进 workdir，
+  之后不带 `--port` 的 `status` / `smoke` / `stop` 也能指到正确的端点。
+- **同端口多 path、走反向代理。** 给每个桥接不同的 `--http-path`（默认 `/mcp`），再用反代按 path 路由到对应
+  后端端口，对外只暴露一个 443 并附带鉴权：
+  ```sh
+  ./example/deploy-mcp.sh filesystem start --port 8002 --http-path /mcp/filesystem
+  ./example/deploy-mcp.sh github     start --port 8003 --http-path /mcp/github
+  ```
+  （两个 `supergateway` 实例不能绑同一个 `127.0.0.1:port`；脚本会拒绝触碰不属于自己的已监听端口。）
+- **必须告诉 agenthub 这个 bridge 可安全调用。** agenthub 的 mcp connector 用的是带 SSRF 防护的 HTTP 客户端，
+  默认拒绝环回 / 私有地址，因此 `127.0.0.1` 上的本地 bridge 会被拒绝，除非资源记录用 `egress_allowlist`
+  收窄这道闸。把端点登记为 `transport=streamable-http` 并在其中列出 bridge 主机：
+  ```json
+  {
+    "id": "local-filesystem",
+    "kind": "mcp",
+    "kind_config": {
+      "mcp": {
+        "transport": "streamable-http",
+        "url": "http://127.0.0.1:8002/mcp",
+        "egress_allowlist": ["127.0.0.1"]
+      }
+    }
+  }
+  ```
+  没有 `egress_allowlist` 时，connector 会拒绝 `127.0.0.1`（以及任何私有 IP / CIDR）。该字段只接受精确 IP、
+  CIDR 与主机名——通配符或类 URL 的值会在加载时被拒，所以它只能收窄防护，绝不会向 caller 提供的 URL 重新敞开。
 - `deploy-cli.sh` 从根目录 `.env` / `.env.example` 读 `AGENTHUB_CLI_ALLOWLIST`，并复刻服务端的整串比对。
   服务端只在启动时读一次，改完要重启服务端；`--allowlist` 覆盖预检，`--skip-allowlist` 则照样记录。
 - 这三个脚本都不改变第 6 节所述的 connector 现状：服务端 mcp / skill / cli connector 仍是

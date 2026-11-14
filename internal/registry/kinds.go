@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -142,13 +143,14 @@ type AgentConfig struct {
 // MCPConfig is the MCP server descriptor: transport decides whether the server
 // is reached through a stdio command or over HTTP.
 type MCPConfig struct {
-	Transport     string            `json:"transport,omitempty"`
-	Command       string            `json:"command,omitempty"`
-	Args          []string          `json:"args,omitempty"`
-	URL           string            `json:"url,omitempty"`
-	ToolAllowlist []string          `json:"tool_allowlist,omitempty"`
-	AuthSchemes   []string          `json:"auth_schemes,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
+	Transport       string            `json:"transport,omitempty"`
+	Command         string            `json:"command,omitempty"`
+	Args            []string          `json:"args,omitempty"`
+	URL             string            `json:"url,omitempty"`
+	ToolAllowlist   []string          `json:"tool_allowlist,omitempty"`
+	AuthSchemes     []string          `json:"auth_schemes,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	EgressAllowlist []string          `json:"egress_allowlist,omitempty"`
 }
 
 // SkillConfig is the "job manual" descriptor: what triggers it, which steps it
@@ -425,6 +427,39 @@ func validateMCP(c *MCPConfig, e *Entry) error {
 	for _, tool := range c.ToolAllowlist {
 		if strings.TrimSpace(tool) == "" {
 			return kindConfigErr("tool_allowlist")
+		}
+	}
+	if err := validateEgressAllowlist(c.EgressAllowlist); err != nil {
+		return err
+	}
+	return nil
+}
+
+// egressHostPattern matches a bare hostname (no scheme, path or port), the shape
+// an operator lists in egress_allowlist. IPs and CIDRs are parsed separately.
+var egressHostPattern = regexp.MustCompile(`^[\w.-]+$`)
+
+// validateEgressAllowlist bounds what an operator may list as an egress target:
+// an exact IP, a CIDR, or a hostname. A bare wildcard or anything that looks like
+// a URL/scheme is refused, so the field can only narrow the SSRF guard, never
+// open it back up.
+func validateEgressAllowlist(allow []string) error {
+	for _, raw := range allow {
+		a := strings.TrimSpace(raw)
+		if a == "" || a == "*" || strings.ContainsAny(a, " /\t") {
+			return kindConfigErr("egress_allowlist")
+		}
+		if strings.HasPrefix(a, "[") && strings.HasSuffix(a, "]") {
+			a = a[1 : len(a)-1]
+		}
+		if _, _, err := net.ParseCIDR(a); err == nil {
+			continue
+		}
+		if net.ParseIP(a) != nil {
+			continue
+		}
+		if !egressHostPattern.MatchString(a) {
+			return kindConfigErr("egress_allowlist")
 		}
 	}
 	return nil
