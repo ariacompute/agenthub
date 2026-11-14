@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-ubuntu",
   "name": "feishu",
-  "display_name": "飞书 OpenAPI MCP（Ubuntu）",
-  "description": "飞书开放平台官方 @larksuiteoapi/lark-mcp：把飞书 OpenAPI 封装成 MCP 工具，--oauth 走应用授权。Lark 海外版另加 -d https://open.larksuite.com/。",
+  "display_name": "Feishu OpenAPI MCP (Ubuntu)",
+  "description": "Official @larksuiteoapi/lark-mcp from the Feishu Open Platform: exposes Feishu OpenAPI as MCP tools, with --oauth for app authorization. For the international Lark edition add -d https://open.larksuite.com/.",
   "endpoint": "stdio://lark",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "无需安装（npx 现取现用）；也可 npm install @larksuiteoapi/lark-mcp -g",
-    "env_hint": "应用凭证以 -a <app_id> -s <app_secret> 传入，示例用占位符，真实值见 README",
+    "install": "No installation needed (npx fetches on demand); alternatively npm install @larksuiteoapi/lark-mcp -g",
+    "env_hint": "App credentials are passed with -a <app_id> -s <app_secret>; this example uses placeholders, see README for real values",
     "docs": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_installation"
   },
   "kind_config": {

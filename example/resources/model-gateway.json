@@ -3,8 +3,8 @@
   "kind": "model",
   "namespace": "example",
   "name": "aria-gateway",
-  "display_name": "Aria Gateway（OpenAI 兼容）",
-  "description": "Aria 网关的 OpenAI 兼容 chat completions 端点。base url 必须带 /v1：适配器只会给不以 /chat/completions 结尾的地址补 /chat/completions，不带前缀的请求会打到网关的 405。凭证只以环境变量名出现：api_key_env 指向服务端进程环境里的 AGENTHUB_EXAMPLE_API_KEY，真实 key 既不进这份 JSON 也不进库。",
+  "display_name": "Aria Gateway (OpenAI compatible)",
+  "description": "The Aria gateway's OpenAI-compatible chat completions endpoint. The base URL must include /v1: the adapter only appends /chat/completions to addresses that do not already end with /chat/completions, so requests without the prefix hit the gateway's 405. Credentials appear only as an environment variable name: api_key_env points to AGENTHUB_EXAMPLE_API_KEY on the server process; the real key is neither in this JSON nor in the database.",
   "endpoint": "https://gateway.ariacompute.com/v1",
   "version": "1.0.0",
   "repository": "https://gateway.ariacompute.com",
@@ -13,7 +13,7 @@
   "auth_schemes": ["bearer"],
   "metadata": {
     "docs": "https://gateway.ariacompute.com",
-    "env_hint": "AGENTHUB_EXAMPLE_API_KEY（服务端进程环境变量，见 README）"
+    "env_hint": "AGENTHUB_EXAMPLE_API_KEY (environment variable on the server process, see README)"
   },
   "kind_config": {
     "model": {

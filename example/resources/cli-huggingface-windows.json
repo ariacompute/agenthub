@@ -3,8 +3,8 @@
   "kind": "cli",
   "namespace": "example-windows",
   "name": "hf",
-  "display_name": "HuggingFace CLI（Windows）",
-  "description": "huggingface_hub 自带的 CLI，新版命令名是 hf。Windows 下控制台脚本落在 Scripts\\hf.exe；若 command 写成绝对路径，AGENTHUB_CLI_ALLOWLIST 要写成同样的整串。",
+  "display_name": "HuggingFace CLI (Windows)",
+  "description": "huggingface_hub's bundled CLI; the current command name is hf. On Windows the console script lands in Scripts\\hf.exe; if command is set to an absolute path, AGENTHUB_CLI_ALLOWLIST must contain the exact same whole string.",
   "version": "1.0.0",
   "repository": "https://github.com/huggingface/huggingface_hub",
   "tags": ["cli"],
@@ -12,8 +12,8 @@
   "metadata": {
     "command": "hf",
     "install": "python -m venv .venv && .venv\\Scripts\\activate && pip install -U \"huggingface_hub[cli]\"",
-    "path_hint": "%APPDATA%\\Python\\Python<ver>\\Scripts\\hf.exe 或 .venv\\Scripts\\hf.exe",
-    "env_hint": "HF_TOKEN（服务端进程环境变量）",
+    "path_hint": "%APPDATA%\\Python\\Python<ver>\\Scripts\\hf.exe or .venv\\Scripts\\hf.exe",
+    "env_hint": "HF_TOKEN (environment variable on the server process)",
     "docs": "https://huggingface.co/docs/huggingface_hub/guides/cli"
   },
   "kind_config": {

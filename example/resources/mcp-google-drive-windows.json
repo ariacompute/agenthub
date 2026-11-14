@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "google-drive",
-  "display_name": "Google Drive MCP（Windows）",
-  "description": "workspace-mcp 限定 --tools drive。Windows 命令与 Ubuntu 完全相同，差异只在 OAuth 凭据与 token 缓存路径（%USERPROFILE%\\.config\\...）。",
+  "display_name": "Google Drive MCP (Windows)",
+  "description": "workspace-mcp restricted with --tools drive. The Windows command is identical to the Ubuntu variant; only the OAuth credentials and token cache paths differ (%USERPROFILE%\\.config\\...).",
   "endpoint": "stdio://gdrive",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "winget install astral-sh.uv；uvx workspace-mcp --help",
-    "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET（凭据与 token 缓存落在 %USERPROFILE%\\.config\\ 下）",
+    "install": "winget install astral-sh.uv; uvx workspace-mcp --help",
+    "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET (credentials and token cache under %USERPROFILE%\\.config\\)",
     "docs": "https://workspacemcp.com/quick-start"
   },
   "kind_config": {

@@ -3,8 +3,8 @@
   "kind": "skill",
   "namespace": "example-windows",
   "name": "pdf",
-  "display_name": "Anthropic 官方 pdf skill（Windows）",
-  "description": "anthropics/skills 仓库里的 pdf skill：一个 skill 就是含 SKILL.md 的目录。Windows 下 endpoint 用盘符形式 file:///C:/...；仓库内 skill 位于 skills/pdf/。",
+  "display_name": "Anthropic official pdf skill (Windows)",
+  "description": "The pdf skill from the anthropics/skills repository: a skill is a directory containing SKILL.md. On Windows the endpoint uses drive-letter form file:///C:/...; the skill lives at skills/pdf/ inside the repository.",
   "endpoint": "file:///C:/Users/<user>/skills/skills/pdf",
   "version": "1.0.0",
   "repository": "https://github.com/anthropics/skills",
@@ -12,7 +12,7 @@
   "capabilities": ["extract_text", "fill_form"],
   "metadata": {
     "install": "git clone https://github.com/anthropics/skills C:\\Users\\<user>\\skills",
-    "path_hint": "C:\\Users\\<user>\\skills\\skills\\pdf\\SKILL.md（用户名换成你自己的）",
+    "path_hint": "C:\\Users\\<user>\\skills\\skills\\pdf\\SKILL.md (replace <user> with your own username)",
     "docs": "https://github.com/anthropics/skills"
   },
   "kind_config": {
@@ -20,8 +20,8 @@
       "version": "1.0.0",
       "repository": "https://github.com/anthropics/skills",
       "package": "skills/pdf",
-      "triggers": ["pdf", "表单填写"],
-      "steps": ["读 SKILL.md", "extract_text", "fill_form"],
+      "triggers": ["pdf", "form filling"],
+      "steps": ["read SKILL.md", "extract_text", "fill_form"],
       "tools": ["extract_text", "fill_form"],
       "docs": "SKILL.md"
     }

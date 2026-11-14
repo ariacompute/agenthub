@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-ubuntu",
   "name": "wechat",
-  "display_name": "微信 MCP（Ubuntu，iLink 协议）",
-  "description": "微信没有官方发布的 MCP server；腾讯 2026 开放的是 iLink / ClawBot 个人 Bot 协议（ilinkai.weixin.qq.com）。本例采用基于该协议的社区封装 wechat-mcp（Go 静态二进制、纯标准库、MIT、stdio）：扫码绑定后收发消息。",
+  "display_name": "WeChat MCP (Ubuntu, iLink protocol)",
+  "description": "WeChat has no officially published MCP server; Tencent opened the iLink / ClawBot personal Bot protocol (ilinkai.weixin.qq.com) in 2026. This example uses the community wrapper wechat-mcp built on that protocol (static Go binary, standard library only, MIT, stdio): scan a QR code to bind, then send and receive messages.",
   "endpoint": "stdio://wechat",
   "transport": "stdio",
   "version": "1.0.0",
@@ -13,9 +13,9 @@
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
     "install": "git clone https://github.com/JingxuanC/wechat-mcp && cd wechat-mcp && make build",
-    "start": "./bin/wechat-mcp（扫码页面默认 http://127.0.0.1:9765，--web off 可关闭）",
-    "env_hint": "WECHAT_MCP_STATE（可选，覆盖状态文件路径；默认 $XDG_CONFIG_HOME/wechat-mcp/state.json）",
-    "path_hint": "/home/<user>/wechat-mcp/bin/wechat-mcp（用户名换成你自己的）",
+    "start": "./bin/wechat-mcp (QR page defaults to http://127.0.0.1:9765; --web off disables it)",
+    "env_hint": "WECHAT_MCP_STATE (optional; overrides the state file path, default $XDG_CONFIG_HOME/wechat-mcp/state.json)",
+    "path_hint": "/home/<user>/wechat-mcp/bin/wechat-mcp (replace <user> with your own username)",
     "docs": "https://github.com/JingxuanC/wechat-mcp"
   },
   "kind_config": {

@@ -3,8 +3,8 @@
   "kind": "agent",
   "namespace": "example-ubuntu",
   "name": "pi",
-  "display_name": "Pi（Ubuntu，非 A2A 对照组）",
-  "description": "pi：极简、可扩展的 agent harness（统一 LLM API / agent loop / TUI / 编码 agent CLI），以扩展、skills、提示模板与主题定制，打包为 Pi 包经 npm 或 git 分发。官方不实现 A2A，也不发布 Agent Card；程序化集成走 RPC 模式（stdin/stdout 上的 JSONL 记录），故 endpoint 用 stdio://pi 表达接入意图。本例作为「非 A2A 资产如何登记」的对照组保留。",
+  "display_name": "Pi (Ubuntu, non-A2A control group)",
+  "description": "pi: a minimal, extensible agent harness (unified LLM API / agent loop / TUI / coding agent CLI), customized with extensions, skills, prompt templates and themes, and distributed as Pi packages over npm or git. It does not implement A2A or publish an Agent Card; programmatic integration uses RPC mode (JSONL records over stdin/stdout), so the endpoint is expressed as stdio://pi to convey that intent. This entry is kept as a control group showing how a non-A2A asset is registered.",
   "endpoint": "stdio://pi",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,11 +12,11 @@
   "tags": ["agent", "non-a2a"],
   "capabilities": ["rpc.prompt", "session/new", "session/fork"],
   "metadata": {
-    "install": "curl -fsSL https://pi.dev/install.sh | sh（或用 nvm 装 Node.js 22.19+）",
+    "install": "curl -fsSL https://pi.dev/install.sh | sh (or install Node.js 22.19+ with nvm)",
     "start": "cd /path/to/project && pi --mode rpc --no-session",
     "docs": "https://pi.dev/docs/latest",
     "a2a": "unsupported — no Agent Card is published; see example/README_cn.md for how the control group is marked",
-    "env_hint": "provider 凭据在 Pi 内用 /login 配置，不写进 JSON"
+    "env_hint": "Provider credentials are configured inside Pi with /login, not written into this JSON"
   },
   "kind_config": {
     "agent": {

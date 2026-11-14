@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "slack",
-  "display_name": "Slack MCP（Windows）",
-  "description": "Anthropic 官方 Slack MCP server。Windows 上 npx 必须包一层 cmd /c（官方 MCP README 明文要求）。",
+  "display_name": "Slack MCP (Windows)",
+  "description": "Anthropic's official Slack MCP server. On Windows npx must be wrapped in cmd /c (explicitly required by the official MCP README).",
   "endpoint": "stdio://slack",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "无需安装（npx 现取现用）",
-    "env_hint": "SLACK_BOT_TOKEN, SLACK_TEAM_ID（服务端进程环境变量，不要写进 JSON）",
+    "install": "No installation needed (npx fetches on demand)",
+    "env_hint": "SLACK_BOT_TOKEN, SLACK_TEAM_ID (environment variables on the server process; do not put them in this JSON)",
     "docs": "https://www.npmjs.com/package/@modelcontextprotocol/server-slack"
   },
   "kind_config": {

@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-ubuntu",
   "name": "github",
-  "display_name": "GitHub MCP Server（Ubuntu，Docker stdio）",
-  "description": "GitHub 官方 MCP server 的本地 Docker 形态：docker run -i --rm 起 stdio server，token 经 -e 透传。",
+  "display_name": "GitHub MCP Server (Ubuntu, Docker stdio)",
+  "description": "Local Docker form of GitHub's official MCP server: docker run -i --rm starts the stdio server and the token is passed through with -e.",
   "endpoint": "stdio://github",
   "transport": "stdio",
   "version": "1.0.0",
@@ -13,7 +13,7 @@
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
     "install": "docker pull ghcr.io/github/github-mcp-server",
-    "env_hint": "GITHUB_PERSONAL_ACCESS_TOKEN（服务端进程环境变量，不要写进 JSON）",
+    "env_hint": "GITHUB_PERSONAL_ACCESS_TOKEN (environment variable on the server process; do not put it in this JSON)",
     "docs": "https://github.com/github/github-mcp-server"
   },
   "kind_config": {

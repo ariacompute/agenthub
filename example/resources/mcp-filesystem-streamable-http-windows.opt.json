@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "filesystem-streamable-http",
-  "display_name": "MCP Filesystem（本地桥接 streamable-http，Windows）",
-  "description": "deploy-mcp.sh 把官方 filesystem stdio server 桥接成的本地 Streamable-HTTP 端点。需先运行 './example/deploy-mcp.sh filesystem start --path <dir>'（默认监听 127.0.0.1:8002/mcp/filesystem），且本记录凭 egress_allowlist 放行环回地址，agenthub 才能探活与调用。可选种子条目：由 load.sh 默认加载。",
+  "display_name": "MCP Filesystem (local streamable-http bridge, Windows)",
+  "description": "A local Streamable-HTTP endpoint produced by deploy-mcp.sh bridging the official filesystem stdio server. Start it first with './example/deploy-mcp.sh filesystem start --path <dir>' (listens on 127.0.0.1:8002/mcp/filesystem by default); this record also needs egress_allowlist to permit the loopback address before agenthub can probe and call it. Optional seed entry: loaded by default from load.sh.",
   "endpoint": "http://127.0.0.1:8002/mcp/filesystem",
   "transport": "streamable-http",
   "version": "1.0.0",
@@ -12,7 +12,7 @@
   "tags": ["mcp", "local-bridge"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "先 ./example/deploy-mcp.sh filesystem start --path <dir>（默认端口 8002，路径 /mcp/filesystem）",
+    "install": "Run ./example/deploy-mcp.sh filesystem start --path <dir> first (default port 8002, path /mcp/filesystem)",
     "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
   },
   "kind_config": {

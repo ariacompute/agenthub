@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "feishu",
-  "display_name": "飞书 OpenAPI MCP（Windows）",
-  "description": "飞书开放平台官方 @larksuiteoapi/lark-mcp。Windows 上 npx 必须包一层 cmd /c（官方 MCP README 明文要求）。",
+  "display_name": "Feishu OpenAPI MCP (Windows)",
+  "description": "Official @larksuiteoapi/lark-mcp from the Feishu Open Platform. On Windows npx must be wrapped in cmd /c (explicitly required by the official MCP README).",
   "endpoint": "stdio://lark",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "无需安装（npx 现取现用）",
-    "env_hint": "应用凭证以 -a <app_id> -s <app_secret> 传入，示例用占位符，真实值见 README",
+    "install": "No installation needed (npx fetches on demand)",
+    "env_hint": "App credentials are passed with -a <app_id> -s <app_secret>; this example uses placeholders, see README for real values",
     "docs": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_installation"
   },
   "kind_config": {

@@ -3,8 +3,8 @@
   "kind": "agent",
   "namespace": "example-windows",
   "name": "pi",
-  "display_name": "Pi（Windows，非 A2A 对照组）",
-  "description": "pi：极简、可扩展的 agent harness。Windows 用官方 PowerShell 安装器（irm https://pi.dev/install.ps1 | iex），需 Node.js 22.19+。官方不实现 A2A、不发 Agent Card；程序化集成走 --mode rpc（stdin/stdout 上的 JSONL）。本例作为「非 A2A 资产如何登记」的对照组保留。",
+  "display_name": "Pi (Windows, non-A2A control group)",
+  "description": "pi: a minimal, extensible agent harness. On Windows use the official PowerShell installer (irm https://pi.dev/install.ps1 | iex); requires Node.js 22.19+. It does not implement A2A or publish an Agent Card; programmatic integration uses --mode rpc (JSONL over stdin/stdout). This entry is kept as a control group showing how a non-A2A asset is registered.",
   "endpoint": "stdio://pi",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,11 +12,11 @@
   "tags": ["agent", "non-a2a"],
   "capabilities": ["rpc.prompt", "session/new", "session/fork"],
   "metadata": {
-    "install": "powershell -c \"irm https://pi.dev/install.ps1 | iex\"（或用 winget 装 Node.js 22.19+）",
+    "install": "powershell -c \"irm https://pi.dev/install.ps1 | iex\" (or install Node.js 22.19+ with winget)",
     "start": "cd /path/to/project && pi --mode rpc --no-session",
     "docs": "https://pi.dev/docs/latest",
     "a2a": "unsupported — no Agent Card is published; see example/README_cn.md for how the control group is marked",
-    "env_hint": "provider 凭据在 Pi 内用 /login 配置，不写进 JSON"
+    "env_hint": "Provider credentials are configured inside Pi with /login, not written into this JSON"
   },
   "kind_config": {
     "agent": {

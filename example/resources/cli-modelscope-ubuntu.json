@@ -3,17 +3,17 @@
   "kind": "cli",
   "namespace": "example-ubuntu",
   "name": "modelscope",
-  "display_name": "ModelScope CLI（Ubuntu）",
-  "description": "魔搭 ModelScope CLI：pip install modelscope 后即用 modelscope 命令。子命令：login / download / upload / create / scan-cache / clear-cache / llamafile / server / plugin / skills / modelcard / pipeline。上传还需 git 与 git-lfs。",
+  "display_name": "ModelScope CLI (Ubuntu)",
+  "description": "ModelScope CLI: pip install modelscope provides the modelscope command. Subcommands: login / download / upload / create / scan-cache / clear-cache / llamafile / server / plugin / skills / modelcard / pipeline. Uploading additionally requires git and git-lfs.",
   "version": "1.0.0",
   "repository": "https://github.com/modelscope/modelscope",
   "tags": ["cli"],
   "capabilities": ["download", "upload", "server"],
   "metadata": {
     "command": "modelscope",
-    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install modelscope（上传另需 git + git-lfs）",
+    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install modelscope (uploads also need git + git-lfs)",
     "path_hint": "~/.local/bin/modelscope",
-    "env_hint": "MODELSCOPE_API_TOKEN（modelscope login 后写入，或服务端进程环境变量）",
+    "env_hint": "MODELSCOPE_API_TOKEN (written by modelscope login, or an environment variable on the server process)",
     "docs": "https://www.modelscope.cn/docs/sdk/cli"
   },
   "kind_config": {

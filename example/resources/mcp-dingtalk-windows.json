@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "dingtalk",
-  "display_name": "钉钉 MCP（Windows）",
-  "description": "钉钉开放平台官方 dingtalk-mcp。Windows 上 npx 必须包一层 cmd /c（官方 MCP README 明文要求）。",
+  "display_name": "DingTalk MCP (Windows)",
+  "description": "Official dingtalk-mcp from the DingTalk Open Platform. On Windows npx must be wrapped in cmd /c (explicitly required by the official MCP README).",
   "endpoint": "stdio://dingtalk",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "无需安装（npx 现取现用）",
-    "env_hint": "DINGTALK_Client_ID, DINGTALK_Client_Secret, ACTIVE_PROFILES（如 dingtalk-contacts,dingtalk-calendar）",
+    "install": "No installation needed (npx fetches on demand)",
+    "env_hint": "DINGTALK_Client_ID, DINGTALK_Client_Secret, ACTIVE_PROFILES (e.g. dingtalk-contacts,dingtalk-calendar)",
     "docs": "https://open.dingtalk.com/document/aipass/install-and-use-the-dingtalk-calendar-mcp"
   },
   "kind_config": {

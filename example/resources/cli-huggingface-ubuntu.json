@@ -3,17 +3,17 @@
   "kind": "cli",
   "namespace": "example-ubuntu",
   "name": "hf",
-  "display_name": "HuggingFace CLI（Ubuntu）",
-  "description": "huggingface_hub 自带的 CLI，新版命令名是 hf（旧名 huggingface-cli 仍可用）。子命令：auth / download / upload / repo / repo-files / cache / jobs / env / version。hf 不在默认 allowlist 里，需加入 AGENTHUB_CLI_ALLOWLIST。",
+  "display_name": "HuggingFace CLI (Ubuntu)",
+  "description": "huggingface_hub's bundled CLI; the current command name is hf (the old huggingface-cli still works). Subcommands: auth / download / upload / repo / repo-files / cache / jobs / env / version. hf is not in the default allowlist, so add it to AGENTHUB_CLI_ALLOWLIST.",
   "version": "1.0.0",
   "repository": "https://github.com/huggingface/huggingface_hub",
   "tags": ["cli"],
   "capabilities": ["auth", "download", "upload"],
   "metadata": {
     "command": "hf",
-    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install -U \"huggingface_hub[cli]\"（或 pipx install huggingface_hub）",
-    "path_hint": "~/.local/bin/hf 或 ~/.venv/bin/hf",
-    "env_hint": "HF_TOKEN（hf auth login 或服务端进程环境变量）",
+    "install": "python3 -m venv .venv && source .venv/bin/activate && pip install -U \"huggingface_hub[cli]\" (or pipx install huggingface_hub)",
+    "path_hint": "~/.local/bin/hf or ~/.venv/bin/hf",
+    "env_hint": "HF_TOKEN (hf auth login, or an environment variable on the server process)",
     "docs": "https://huggingface.co/docs/huggingface_hub/guides/cli"
   },
   "kind_config": {

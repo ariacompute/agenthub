@@ -3,15 +3,15 @@
   "kind": "cli",
   "namespace": "example-ubuntu",
   "name": "gh",
-  "display_name": "GitHub CLI（Ubuntu）",
-  "description": "GitHub CLI（cli/cli，MIT）。CLI 适配器运行期只读 metadata.command；真正放行靠服务端 AGENTHUB_CLI_ALLOWLIST（整串 EqualFold 匹配），gh 不在默认值里，需显式加入。CLI 资源没有 endpoint，示例不自我声明健康：不写 health、也不写 metadata.mock_health，加载后为 unknown，探测后按无 endpoint 判 degraded。",
+  "display_name": "GitHub CLI (Ubuntu)",
+  "description": "GitHub CLI (cli/cli, MIT). The CLI adapter reads only metadata.command at runtime; actual authorization is granted by the server's AGENTHUB_CLI_ALLOWLIST (whole-string EqualFold match). gh is not in the default list and must be added explicitly. A CLI resource has no endpoint, and this example does not declare its own health: it omits both health and metadata.mock_health, so it loads as unknown and is reported degraded after a probe finds no endpoint.",
   "version": "1.0.0",
   "repository": "https://github.com/cli/cli",
   "tags": ["cli"],
   "capabilities": ["status", "log"],
   "metadata": {
     "command": "gh",
-    "install": "sudo apt install gh（官方 apt 源）",
+    "install": "sudo apt install gh (from the official apt repository)",
     "path_hint": "/usr/bin/gh",
     "docs": "https://cli.github.com/"
   },

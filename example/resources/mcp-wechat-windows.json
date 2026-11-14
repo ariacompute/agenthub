@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "wechat",
-  "display_name": "微信 MCP（Windows，iLink 协议）",
-  "description": "微信没有官方发布的 MCP server；腾讯 2026 开放的是 iLink / ClawBot 个人 Bot 协议（ilinkai.weixin.qq.com）。本例采用基于该协议的社区封装 wechat-mcp（Go 静态二进制、纯标准库、MIT、stdio）。Windows 构建出 wechat-mcp.exe，并用 WECHAT_MCP_STATE 覆盖状态文件路径。",
+  "display_name": "WeChat MCP (Windows, iLink protocol)",
+  "description": "WeChat has no officially published MCP server; Tencent opened the iLink / ClawBot personal Bot protocol (ilinkai.weixin.qq.com) in 2026. This example uses the community wrapper wechat-mcp built on that protocol (static Go binary, standard library only, MIT, stdio). On Windows it builds wechat-mcp.exe and WECHAT_MCP_STATE overrides the state file path.",
   "endpoint": "stdio://wechat",
   "transport": "stdio",
   "version": "1.0.0",
@@ -13,8 +13,8 @@
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
     "install": "git clone https://github.com/JingxuanC/wechat-mcp && cd wechat-mcp && go build -o bin\\wechat-mcp.exe .\\cmd\\wechat-mcp",
-    "env_hint": "WECHAT_MCP_STATE（Windows 无 XDG 约定，建议显式指定）",
-    "path_hint": "C:\\Users\\<user>\\wechat-mcp\\bin\\wechat-mcp.exe（用户名换成你自己的）",
+    "env_hint": "WECHAT_MCP_STATE (Windows has no XDG convention; set it explicitly)",
+    "path_hint": "C:\\Users\\<user>\\wechat-mcp\\bin\\wechat-mcp.exe (replace <user> with your own username)",
     "docs": "https://github.com/JingxuanC/wechat-mcp"
   },
   "kind_config": {

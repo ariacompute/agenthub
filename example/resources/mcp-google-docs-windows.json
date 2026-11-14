@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-windows",
   "name": "google-docs",
-  "display_name": "Google Docs MCP（Windows）",
-  "description": "workspace-mcp 限定 --tools docs。Windows 命令与 Ubuntu 相同，差异只在 OAuth 凭据与 token 缓存路径。",
+  "display_name": "Google Docs MCP (Windows)",
+  "description": "workspace-mcp restricted with --tools docs. The Windows command matches the Ubuntu variant; only the OAuth credentials and token cache paths differ.",
   "endpoint": "stdio://gdocs",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,7 +12,7 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "winget install astral-sh.uv；uvx workspace-mcp --help",
+    "install": "winget install astral-sh.uv; uvx workspace-mcp --help",
     "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET",
     "docs": "https://workspacemcp.com/quick-start"
   },

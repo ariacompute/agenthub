@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-ubuntu",
   "name": "google-drive",
-  "display_name": "Google Drive MCP（Ubuntu）",
-  "description": "workspace-mcp（Google Workspace MCP server，MIT）限定 --tools drive。uvx 现取现用，Python 3.10+；uvx 类命令在 Windows 不需要 cmd /c 包裹。",
+  "display_name": "Google Drive MCP (Ubuntu)",
+  "description": "workspace-mcp (Google Workspace MCP server, MIT) restricted with --tools drive. uvx fetches on demand; Python 3.10+; uvx-style commands do not need a cmd /c wrapper on Windows.",
   "endpoint": "stdio://gdrive",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "pip install -U uv 或用 astral 安装脚本；uvx workspace-mcp --help",
-    "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET（凭据与 token 缓存默认落在 ~/.config/ 下）",
+    "install": "pip install -U uv or use the Astral installer; uvx workspace-mcp --help",
+    "env_hint": "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET (credentials and token cache default to ~/.config/)",
     "docs": "https://workspacemcp.com/quick-start"
   },
   "kind_config": {

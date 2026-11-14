@@ -3,8 +3,8 @@
   "kind": "mcp",
   "namespace": "example-ubuntu",
   "name": "slack",
-  "display_name": "Slack MCP（Ubuntu）",
-  "description": "Anthropic 官方 npm 包 @modelcontextprotocol/server-slack（MIT）：列频道、发消息、读历史。需要 Slack bot token 与 team id。",
+  "display_name": "Slack MCP (Ubuntu)",
+  "description": "Anthropic's official npm package @modelcontextprotocol/server-slack (MIT): list channels, post messages, read history. Requires a Slack bot token and team id.",
   "endpoint": "stdio://slack",
   "transport": "stdio",
   "version": "1.0.0",
@@ -12,8 +12,8 @@
   "tags": ["mcp"],
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
-    "install": "无需安装（npx 现取现用）",
-    "env_hint": "SLACK_BOT_TOKEN, SLACK_TEAM_ID（服务端进程环境变量，不要写进 JSON）",
+    "install": "No installation needed (npx fetches on demand)",
+    "env_hint": "SLACK_BOT_TOKEN, SLACK_TEAM_ID (environment variables on the server process; do not put them in this JSON)",
     "docs": "https://www.npmjs.com/package/@modelcontextprotocol/server-slack"
   },
   "kind_config": {
