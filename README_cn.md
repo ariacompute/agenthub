@@ -100,20 +100,29 @@ model / agent / mcp / skill / cli 五类资产统一注册、发现与编排，<
 
 ## 📸 快照
 
-控制台是一个单页应用，共十块屏。
+注册中心屏 —— 你可以在一个界面里注册、发现并治理全部五类资产：
 
-| 屏幕 | 截图 |
-| --- | --- |
-| 登录（`/login`） | ![登录](screenshots/zh/01_登录.png) |
-| 注册中心（`/registry`） | ![注册中心](screenshots/zh/02_注册中心.png) |
-| 任务追踪（`/trace`） | ![任务追踪](screenshots/zh/03_任务追踪.png) |
-| 拓扑视图（`/topology`） | ![拓扑视图](screenshots/zh/04_拓扑视图.png) |
-| 命名空间（`/registries`） | ![命名空间](screenshots/zh/05_命名空间.png) |
-| 上游注册中心（`/sources`） | ![上游注册中心](screenshots/zh/06_上游注册中心.png) |
-| 演练场（`/playground`） | ![演练场](screenshots/zh/07_演练场.png) |
-| 审计轨迹（`/audit`） | ![审计轨迹](screenshots/zh/08_审计轨迹.png) |
-| 管理（`/admin`） | ![管理](screenshots/zh/09_管理.png) |
-| 文档（`/docs`） | ![文档](screenshots/zh/10_文档.png) |
+![agenthub 控制台 —— 注册中心](screenshots/en/02_Registry.png)
+
+<details>
+<summary><kbd>全部 10 个界面 · English / 简体中文</kbd></summary>
+
+| # | 屏幕 | English | 简体中文 |
+| --- | --- | --- | --- |
+| 01 | 登录 | [PNG](screenshots/en/01_Sign_in.png) | [PNG](screenshots/zh/01_登录.png) |
+| 02 | 注册中心 | [PNG](screenshots/en/02_Registry.png) | [PNG](screenshots/zh/02_注册中心.png) |
+| 03 | 任务追踪 | [PNG](screenshots/en/03_Task_trace.png) | [PNG](screenshots/zh/03_任务追踪.png) |
+| 04 | 拓扑视图 | [PNG](screenshots/en/04_Topology.png) | [PNG](screenshots/zh/04_拓扑视图.png) |
+| 05 | 命名空间 | [PNG](screenshots/en/05_Namespaces.png) | [PNG](screenshots/zh/05_命名空间.png) |
+| 06 | 上游注册中心 | [PNG](screenshots/en/06_Sources.png) | [PNG](screenshots/zh/06_上游注册中心.png) |
+| 07 | 演练场 | [PNG](screenshots/en/07_Playground.png) | [PNG](screenshots/zh/07_演练场.png) |
+| 08 | 审计轨迹 | [PNG](screenshots/en/08_Audit_trail.png) | [PNG](screenshots/zh/08_审计轨迹.png) |
+| 09 | 管理 | [PNG](screenshots/en/09_Administration.png) | [PNG](screenshots/zh/09_管理.png) |
+| 10 | 文档 | [PNG](screenshots/en/10_Docs.png) | [PNG](screenshots/zh/10_文档.png) |
+
+</details>
+
+截图由 `screenshots/capture.mjs`（Playwright + Chromium）对着运行实例生成。
 
 <div align="right">
 
