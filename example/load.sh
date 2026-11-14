@@ -11,9 +11,9 @@
 #   ./load.sh                 # picks the platform from uname -s
 #   ./load.sh --platform windows | --platform ubuntu
 #   ./load.sh --all           # loads both platform namespaces
-#   ./load.sh --bridge        # also loads the optional local-bridge seed entries
-#                             # (streamable-http records pointing at a deploy-mcp.sh
-#                             # bridge, e.g. http://127.0.0.1:8002/mcp/filesystem)
+# Local-bridge seed entries (resources/*-bridge-<platform>.opt.json) are loaded by
+# default too — streamable-http records pointing at a deploy-mcp.sh bridge
+# (e.g. http://127.0.0.1:8002/mcp/filesystem). Run the bridge first so they probe healthy.
 #
 # Environment: read from the **repository-root** .env (gitignored; see the root
 # .env.example) or export any of these in the shell. The catalogue is opt-in —
@@ -80,11 +80,9 @@ ALLOW_REGISTER="${ALLOW_REGISTER:-0}"
 
 PLATFORM=""
 ALL=0
-BRIDGE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --all) ALL=1 ;;
-    --bridge) BRIDGE=1 ;;
     --platform)
       PLATFORM="${2:-}"
       shift
@@ -272,7 +270,11 @@ fi
 
 for platform in $PLATFORMS; do
   echo "loading $platform (namespace: example-$platform)"
-  for file in "$RES_DIR"/*-"$platform".json; do
+  # Regular entries plus the optional local-bridge seed entries
+  # (resources/*-bridge-<platform>.opt.json): streamable-http records pointing at a
+  # deploy-mcp.sh bridge (e.g. http://127.0.0.1:8002/mcp/filesystem). They load by
+  # default; run the bridge first so their Probe turns healthy.
+  for file in "$RES_DIR"/*-"$platform".json "$RES_DIR"/*-bridge-"$platform".opt.json; do
     [ -e "$file" ] || continue
     if load_one "$file"; then
       loaded=$((loaded + 1))
@@ -281,24 +283,6 @@ for platform in $PLATFORMS; do
     fi
   done
 done
-
-# Optional local-bridge seed entries (resources/*-bridge-<platform>.opt.json) are
-# skipped by the glob above on purpose. They describe a streamable-http record that
-# points at a deploy-mcp.sh bridge (e.g. http://127.0.0.1:8002/mcp/filesystem),
-# so they only make sense once the bridge is running — load them explicitly.
-if [ "$BRIDGE" = "1" ]; then
-  for platform in $PLATFORMS; do
-    echo "loading $platform bridge entries (local streamable-http bridges)"
-    for file in "$RES_DIR"/*-bridge-"$platform".opt.json; do
-      [ -e "$file" ] || continue
-      if load_one "$file"; then
-        loaded=$((loaded + 1))
-      else
-        failures=$((failures + 1))
-      fi
-    done
-  done
-fi
 
 echo "summary: $loaded ok, $failures failed"
 if [ "$failures" -ne 0 ]; then

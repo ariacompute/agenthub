@@ -384,13 +384,12 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   IP / CIDR).   The field accepts exact IPs, CIDRs and hostnames only — a wildcard
   or a URL-shaped value is rejected at load time, so it can only narrow the guard,
   never reopen it to caller-supplied URLs.
-- **Optional seed entry for the local bridge.** Instead of pasting the JSON above,
-  run `./example/load.sh --bridge` after `deploy-mcp.sh filesystem start`. It
-  registers a `streamable-http` record named `filesystem-bridge` whose URL is the
-  bridge's default `http://127.0.0.1:8002/mcp/filesystem` and which already carries
-  `egress_allowlist: ["127.0.0.1"]`, so its Probe turns healthy without further edits.
+- **Local-bridge seed entry (loaded by default).** After `deploy-mcp.sh filesystem start`,
+  `./example/load.sh` already registers a `streamable-http` record named `filesystem-bridge`
+  at the bridge default `http://127.0.0.1:8002/mcp/filesystem` with
+  `egress_allowlist: ["127.0.0.1"]`, so its Probe turns healthy with no further edits.
   (If you started the bridge on a different `--port` or `--http-path`, edit the
-  seed file's `url` first.)
+  seed file's `url` first.) Run the bridge before loading so the record probes healthy.
 - `deploy-cli.sh` reads `AGENTHUB_CLI_ALLOWLIST` from the root `.env` / `.env.example` and mirrors
   the server's whole-string comparison. The server reads it once at startup, so restart the server
   after changing it; `--allowlist` overrides the preflight and `--skip-allowlist` records anyway.

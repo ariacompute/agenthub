@@ -332,10 +332,11 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   ```
   没有 `egress_allowlist` 时，connector 会拒绝 `127.0.0.1`（以及任何私有 IP / CIDR）。该字段只接受精确 IP、
   CIDR 与主机名——通配符或类 URL 的值会在加载时被拒，所以它只能收窄防护，绝不会向 caller 提供的 URL 重新敞开。
-- **本地桥接的可选种子条目。** 不想手填上面的 JSON，可在 `deploy-mcp.sh filesystem start` 之后运行
-  `./example/load.sh --bridge`：它会登记一条名为 `filesystem-bridge` 的 `streamable-http` 记录，
-  URL 即桥接默认地址 `http://127.0.0.1:8002/mcp/filesystem`，并已带 `egress_allowlist: ["127.0.0.1"]`，
-  因此 Probe 直接变绿、无需再改。若你启动时改了 `--port` 或 `--http-path`，先改种子文件的 `url` 即可。
+- **本地桥接种子条目（默认加载）。** 在 `deploy-mcp.sh filesystem start` 之后直接运行
+  `./example/load.sh` 即可：它会自动登记一条名为 `filesystem-bridge` 的 `streamable-http` 记录，
+  URL 为桥接默认地址 `http://127.0.0.1:8002/mcp/filesystem`，并带 `egress_allowlist: ["127.0.0.1"]`，
+  因此 Probe 直接变绿、无需再改。若你启动时改了 `--port` 或 `--http-path`，先改种子文件的 `url`。
+  建议先起桥接再加载，记录才能探活。
 - `deploy-cli.sh` 从根目录 `.env` / `.env.example` 读 `AGENTHUB_CLI_ALLOWLIST`，并复刻服务端的整串比对。
   服务端只在启动时读一次，改完要重启服务端；`--allowlist` 覆盖预检，`--skip-allowlist` 则照样记录。
 - 这三个脚本都不改变第 6 节所述的 connector 现状：服务端 mcp / skill / cli connector 仍是
