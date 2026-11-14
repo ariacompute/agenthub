@@ -11,7 +11,7 @@
 #   ./load.sh                 # picks the platform from uname -s
 #   ./load.sh --platform windows | --platform ubuntu
 #   ./load.sh --all           # loads both platform namespaces
-# Local-bridge seed entries (resources/*-bridge-<platform>.opt.json) are loaded by
+# Local streamable-http seed entries (resources/*-streamable-http-<platform>.opt.json) are loaded by
 # default too — streamable-http records pointing at a deploy-mcp.sh bridge
 # (e.g. http://127.0.0.1:8002/mcp/filesystem). Run the bridge first so they probe healthy.
 #
@@ -270,11 +270,11 @@ fi
 
 for platform in $PLATFORMS; do
   echo "loading $platform (namespace: example-$platform)"
-  # Regular entries plus the optional local-bridge seed entries
-  # (resources/*-bridge-<platform>.opt.json): streamable-http records pointing at a
+  # Regular entries plus the optional local streamable-http seed entries
+  # (resources/*-streamable-http-<platform>.opt.json): streamable-http records pointing at a
   # deploy-mcp.sh bridge (e.g. http://127.0.0.1:8002/mcp/filesystem). They load by
   # default; run the bridge first so their Probe turns healthy.
-  for file in "$RES_DIR"/*-"$platform".json "$RES_DIR"/*-bridge-"$platform".opt.json; do
+  for file in "$RES_DIR"/*-"$platform".json "$RES_DIR"/*-streamable-http-"$platform".opt.json; do
     [ -e "$file" ] || continue
     if load_one "$file"; then
       loaded=$((loaded + 1))

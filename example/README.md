@@ -385,7 +385,7 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   or a URL-shaped value is rejected at load time, so it can only narrow the guard,
   never reopen it to caller-supplied URLs.
 - **Local-bridge seed entry (loaded by default).** After `deploy-mcp.sh filesystem start`,
-  `./example/load.sh` already registers a `streamable-http` record named `filesystem-bridge`
+  `./example/load.sh` already registers a `streamable-http` record named `filesystem-streamable-http`
   at the bridge default `http://127.0.0.1:8002/mcp/filesystem` with
   `egress_allowlist: ["127.0.0.1"]`, so its Probe turns healthy with no further edits.
   (If you started the bridge on a different `--port` or `--http-path`, edit the
