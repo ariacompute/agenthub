@@ -25,6 +25,10 @@ func (d Deps) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 			agents = append(agents, e)
 		}
 	}
+	// agentbuddy's landing view lists every agent the caller may reach and
+	// invoke; a resource still being curated (draft/pending) is not reachable,
+	// so it is hidden here just as it is from the playground and the A2A export.
+	agents = registry.Discoverable(agents)
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 
 	// TaskStore.List already returns newest first; cap to the eight most recent.

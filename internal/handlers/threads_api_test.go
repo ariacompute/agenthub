@@ -223,6 +223,28 @@ func TestWorkspaceAggregates(t *testing.T) {
 	}
 }
 
+// The agentbuddy landing view must only list agents the caller may reach: a
+// resource still being curated (draft/pending) is not discoverable, so it must
+// not appear alongside the approved ones.
+func TestWorkspaceHidesNonApproved(t *testing.T) {
+	approved := &registry.Entry{ID: "a-ok", Kind: registry.KindAgent, Name: "ok"}
+	pending := &registry.Entry{ID: "a-pending", Kind: registry.KindAgent, Name: "pending", Status: registry.StatusPending}
+	d := testDeps(t, openConfig(""), approved, pending)
+	h := Register(d)
+
+	w := do(t, h, http.MethodGet, "/api/workspace", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Agents []*registry.Entry `json:"agents"`
+	}
+	decodeJSON(t, w, &body)
+	if len(body.Agents) != 1 || body.Agents[0].ID != approved.ID {
+		t.Fatalf("agents = %+v, want only %s", body.Agents, approved.ID)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // threads: list / create / get
 // ---------------------------------------------------------------------------

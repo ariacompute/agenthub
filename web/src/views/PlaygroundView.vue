@@ -82,7 +82,14 @@ const STYLE_HINTS = { broadcast: 'styleBroadcastHint', relay: 'styleRelayHint', 
 const POLICY_KEYS = { limit: 'roundsLimit', manual: 'roundsManual', confirm: 'roundsConfirm' }
 
 const resources = computed(() => store.resources)
-const candidates = computed(() => chatCandidates(resources.value))
+// The playground only runs agents the caller may reach: a resource still being
+// curated (draft/pending) is not discoverable, so it is hidden from the picker
+// just as it is from agentbuddy and the A2A export. An empty status is read as
+// approved by the registry, so it stays listed.
+const approvedResources = computed(() =>
+  resources.value.filter((r) => !r.status || r.status === 'approved'),
+)
+const candidates = computed(() => chatCandidates(approvedResources.value))
 const flowCheck = computed(() => validateFlow(flowRaw.value))
 const canRun = computed(
   () =>
@@ -117,7 +124,7 @@ const statusText = computed(() => enumLabel('taskState', run.value.status || 'un
 
 onMounted(async () => {
   await store.refreshResources()
-  if (!resourceId.value && resources.value.length) resourceId.value = resources.value[0].id
+  if (!resourceId.value && candidates.value.length) resourceId.value = candidates.value[0].id
 })
 
 /** Task states are not health states, but the dot reads the same three values. */
@@ -450,7 +457,7 @@ function replyStatus(reply) {
         <div class="field">
           <label for="pg-resource">{{ t('resourceLabel') }}</label>
           <select id="pg-resource" v-model="resourceId">
-            <option v-for="resource in resources" :key="resource.id" :value="resource.id">
+            <option v-for="resource in approvedResources" :key="resource.id" :value="resource.id">
               {{ resource.name }} · {{ enumLabel('kind', resource.kind) }}
             </option>
           </select>
