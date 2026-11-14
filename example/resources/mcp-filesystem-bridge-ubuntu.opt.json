@@ -1,0 +1,26 @@
+{
+  "id": "example-mcp-filesystem-bridge-ubuntu",
+  "kind": "mcp",
+  "namespace": "example-ubuntu",
+  "name": "filesystem-bridge",
+  "display_name": "MCP Filesystem（本地桥接 streamable-http）",
+  "description": "deploy-mcp.sh 把官方 filesystem stdio server 桥接成的本地 Streamable-HTTP 端点。需先运行 './example/deploy-mcp.sh filesystem start --path <dir>'（默认监听 127.0.0.1:8002/mcp/filesystem），且本记录凭 egress_allowlist 放行环回地址，agenthub 才能探活与调用。可选种子条目：仅 load.sh --bridge 加载。",
+  "endpoint": "http://127.0.0.1:8002/mcp/filesystem",
+  "transport": "streamable-http",
+  "version": "1.0.0",
+  "repository": "https://github.com/modelcontextprotocol/servers",
+  "tags": ["mcp", "local-bridge"],
+  "capabilities": ["tools/list", "tools/call"],
+  "metadata": {
+    "install": "先 ./example/deploy-mcp.sh filesystem start --path <dir>（默认端口 8002，路径 /mcp/filesystem）",
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+  },
+  "kind_config": {
+    "mcp": {
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:8002/mcp/filesystem",
+      "egress_allowlist": ["127.0.0.1"],
+      "tool_allowlist": ["read_file", "write_file", "list_directory", "search_files"]
+    }
+  }
+}

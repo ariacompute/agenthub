@@ -13,7 +13,7 @@
   "capabilities": ["tools/list", "tools/call"],
   "metadata": {
     "install": "无需安装（npx 现取现用）",
-    "path_hint": "/home/<user>/docs（把 <user> 换成你的用户名）",
+    "path_hint": "/home/<user>/docs（用户名换成你自己的）",
     "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
   },
   "kind_config": {
