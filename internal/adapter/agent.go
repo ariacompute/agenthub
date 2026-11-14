@@ -356,7 +356,7 @@ func (c *agentConnector) Health(ctx context.Context, e *registry.Entry) (registr
 	if cardURL == "" {
 		return nothingMeasured, nil
 	}
-	health, err := probeHTTP(ctx, http.MethodGet, cardURL, nil, nil)
+	health, err := probeHTTP(ctx, http.DefaultClient, http.MethodGet, cardURL, nil, nil)
 	if err != nil {
 		return "", err
 	}

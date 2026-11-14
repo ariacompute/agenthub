@@ -73,7 +73,7 @@ func (c *skillConnector) Health(ctx context.Context, e *registry.Entry) (registr
 	}
 	endpoint := strings.TrimSpace(e.Endpoint)
 	if isHTTP(endpoint) {
-		return probeHTTP(ctx, http.MethodGet, httpEndpoint(endpoint), nil, nil)
+		return probeHTTP(ctx, http.DefaultClient, http.MethodGet, httpEndpoint(endpoint), nil, nil)
 	}
 	if strings.HasPrefix(endpoint, "file://") {
 		dir, err := localSkillDir(endpoint)

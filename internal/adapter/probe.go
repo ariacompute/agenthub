@@ -29,7 +29,7 @@ const nothingMeasured = registry.HealthUnknown
 // answered and simply will not serve us; any other answer is unhealthy; and a
 // request that never got an answer at all is an error, so the caller records
 // unhealthy instead of keeping a value the probe just disproved.
-func probeHTTP(ctx context.Context, method, url string, headers map[string]string, body io.Reader) (registry.Health, error) {
+func probeHTTP(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body io.Reader) (registry.Health, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultProbeTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
@@ -41,7 +41,7 @@ func probeHTTP(ctx context.Context, method, url string, headers map[string]strin
 			req.Header.Set(name, value)
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", &httputil.Error{Code: CodeResourceUnreachable}
 	}

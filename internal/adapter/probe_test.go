@@ -137,7 +137,7 @@ func TestMCPProbePostsInitialize(t *testing.T) {
 		Kind: registry.KindMCP,
 		Name: "remote-mcp",
 		KindConfig: &registry.KindConfig{
-			MCP: &registry.MCPConfig{Transport: string(registry.TransportStreamableHTTP), URL: srv.URL + "/mcp"},
+			MCP: &registry.MCPConfig{Transport: string(registry.TransportStreamableHTTP), URL: srv.URL + "/mcp", EgressAllowlist: []string{"127.0.0.1"}},
 		},
 	}
 	conn, _ := For(&e, options())

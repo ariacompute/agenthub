@@ -199,7 +199,7 @@ cp .env.example .env     # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
 四个部署脚本都刻意与装载脚本分开：不登录、不碰数据库、也不调 `/probe`。`deploy-agent.sh` 只负责
 安装、启动与校验某一个 agent——而这正是 `Try run` 与健康探测要报出「实测值」的前提；
 `deploy-mcp.sh` 用 supergateway 把目录里的 stdio 命令桥接成无状态 Streamable HTTP 端点
-（`127.0.0.1:8002/mcp`）并经 HTTP 核对工具列表，`deploy-skill.sh` 按 `file://` 落地目录并读取
+（`127.0.0.1:8002/mcp/<server>`）并经 HTTP 核对工具列表，`deploy-skill.sh` 按 `file://` 落地目录并读取
 `SKILL.md`，`deploy-cli.sh` 先检查 PATH 与 `AGENTHUB_CLI_ALLOWLIST` 再跑只读探测。
 服务端 mcp / skill / cli connector 仍是 `TODO(real)`，所以后三者只校验本地资产。
 

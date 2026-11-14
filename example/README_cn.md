@@ -262,7 +262,7 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
 
 | 脚本 | 可选项 | `start` | `smoke` |
 | --- | --- | --- | --- |
-| `deploy-mcp.sh` | 10 个 server：`filesystem`、`github`、`google-drive`、`google-docs`、`gmail`、`slack`、`stripe`、`wechat`、`dingtalk`、`feishu` | 解析 `kind_config.mcp.command` + `args`，展开 `<user>` / `<project>` / `<app_id>` / `<app_secret>`，用 `npx supergateway@latest --outputTransport streamableHttp` 包一层（无状态），后台提供 `POST http://127.0.0.1:8002/mcp` | 经 HTTP 发送 MCP `initialize` / `notifications/initialized` / `tools/list`（最后一个不带会话，与 agenthub connector 一致），打印 JSON-RPC 响应里的工具列表 |
+| `deploy-mcp.sh` | 10 个 server：`filesystem`、`github`、`google-drive`、`google-docs`、`gmail`、`slack`、`stripe`、`wechat`、`dingtalk`、`feishu` | 解析 `kind_config.mcp.command` + `args`，展开 `<user>` / `<project>` / `<app_id>` / `<app_secret>`，用 `npx supergateway@latest --outputTransport streamableHttp` 包一层（无状态），后台提供 `POST http://127.0.0.1:8002/mcp/<server>` | 经 HTTP 发送 MCP `initialize` / `notifications/initialized` / `tools/list`（最后一个不带会话，与 agenthub connector 一致），打印 JSON-RPC 响应里的工具列表 |
 | `deploy-skill.sh` | `anthropics-pdf`、`skillssh-find-skills` | 按登记的 `file://` endpoint 落地目录（`git clone --depth 1` 或 `npx skills add`），并发布固定软链 | 读取 `SKILL.md`，打印 front matter、triggers 与 tools |
 | `deploy-cli.sh` | `gh`、`huggingface`、`modelscope` | 按 `entryCommand` 的顺序解析命令，检查 PATH 与 `AGENTHUB_CLI_ALLOWLIST`（整串 `EqualFold`），写入部署状态 | 只跑 `--version` / `--help` / `version` |
 
@@ -288,10 +288,10 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
 - `deploy-mcp.sh` 绝不执行未解析的占位符。`<app_id>` / `<app_secret>` 来自
   `LARK_APP_ID` / `LARK_APP_SECRET`；密钥在每条打印的命令行里都脱敏，但飞书 server 把 `-a` / `-s`
   放在 argv 上，因此该值会出现在 `ps` 里。其余凭据一律从进程环境继承，不写进 pid 文件与日志。
-- `deploy-mcp.sh` 用无状态桥接（`supergateway@latest` 的 `POST /mcp`）把目录里登记的 **stdio**
+- `deploy-mcp.sh` 用无状态桥接（`supergateway@latest` 的 `POST /mcp/<server>`）把目录里登记的 **stdio**
   命令暴露成 Streamable HTTP：agenthub 的 mcp connector 直接 POST `tools/list`，不带 `initialize`
   与 `Mcp-Session-Id`。JSON 仍写 `stdio`（那是上游 server 的协议）；要用部署出来的端点，请另登记
-  `transport=streamable-http`、`endpoint=http://127.0.0.1:8002/mcp` 的记录。`--host` / `--port`
+  `transport=streamable-http`、`endpoint=http://127.0.0.1:8002/mcp/<server>` 的记录。`--host` / `--port`
   （或根目录 `.env` 的 `AGENTHUB_EXAMPLE_MCP_HOST` / `AGENTHUB_EXAMPLE_MCP_PORT`）可改监听地址；
   默认只绑环回，绑到其它地址必须加带鉴权的反向代理。`stop` 终止整个桥接进程组，不留 `npx` 或
   stdio 子进程；旧的 FIFO/stdio 部署会被 `start` / `status` 识别，用 `restart` 切换。
@@ -305,12 +305,14 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   ```
   `--port auto` 从 8002 起向上扫描空闲端口，可免记编号地一次起多个；解析出的端口会记进 workdir，
   之后不带 `--port` 的 `status` / `smoke` / `stop` 也能指到正确的端点。
-- **同端口多 path、走反向代理。** 给每个桥接不同的 `--http-path`（默认 `/mcp`），再用反代按 path 路由到对应
-  后端端口，对外只暴露一个 443 并附带鉴权：
+- **多桥接走同一个反向代理。** 每个桥接默认即为 `127.0.0.1:$PORT/mcp/<server>`，路径本身已带 server 名。
+  各桥接用不同端口，再让反代把它们统一到同一个带鉴权的 443：
   ```sh
-  ./example/deploy-mcp.sh filesystem start --port 8002 --http-path /mcp/filesystem
-  ./example/deploy-mcp.sh github     start --port 8003 --http-path /mcp/github
+  ./example/deploy-mcp.sh filesystem start --port 8002
+  ./example/deploy-mcp.sh github     start --port 8003
   ```
+  反代把 `https://hub.example.com/mcp/filesystem` 映射到 `http://127.0.0.1:8002/mcp/filesystem`、
+  `…/mcp/github` 映射到 `http://127.0.0.1:8003/mcp/github`。只有在想用与 server 名不符的路径时，才显式传 `--http-path`。
   （两个 `supergateway` 实例不能绑同一个 `127.0.0.1:port`；脚本会拒绝触碰不属于自己的已监听端口。）
 - **必须告诉 agenthub 这个 bridge 可安全调用。** agenthub 的 mcp connector 用的是带 SSRF 防护的 HTTP 客户端，
   默认拒绝环回 / 私有地址，因此 `127.0.0.1` 上的本地 bridge 会被拒绝，除非资源记录用 `egress_allowlist`
@@ -322,7 +324,7 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
     "kind_config": {
       "mcp": {
         "transport": "streamable-http",
-        "url": "http://127.0.0.1:8002/mcp",
+        "url": "http://127.0.0.1:8002/mcp/filesystem",
         "egress_allowlist": ["127.0.0.1"]
       }
     }

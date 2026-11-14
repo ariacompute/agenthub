@@ -25,7 +25,7 @@
 #   --port <port>      listen port, default AGENTHUB_EXAMPLE_MCP_PORT, else 8002
 #                      (the ADK example owns 8000 / 8001); `auto` scans upward
 #                      from 8002 for a free port, so several servers can share a host
-#   --http-path <p>    Streamable HTTP path on the bridge, default /mcp; set a
+#   --http-path <p>    Streamable HTTP path on the bridge, default /mcp/<server>; set a
 #                      distinct path per server when a reverse proxy routes by path
 #   --wait <sec>       startup and smoke handshake timeout, default 30
 #   --path <dir>       override /home/<user>/... style path arguments (must exist)
@@ -225,7 +225,7 @@ FIFO="$WORKDIR/stdin"
 KEEP_PID_FILE="$WORKDIR/$SERVER.keep.pid"
 
 HOST="${HOST_ARG:-${AGENTHUB_EXAMPLE_MCP_HOST:-127.0.0.1}}"
-HTTP_PATH="${HTTP_PATH_ARG:-/mcp}"
+HTTP_PATH="${HTTP_PATH_ARG:-/mcp/$SERVER}"
 
 # Like the port, a non-default --http-path is recorded at start so later
 # `status`/`smoke`/`stop` without the flag still describe the right endpoint.

@@ -147,7 +147,7 @@ func (c *modelConnector) Health(ctx context.Context, e *registry.Entry) (registr
 	headers := bearerHeaders(cfg.APIKeyEnv)
 
 	// Listing models is free and every OpenAI compatible router serves it.
-	health, err := probeHTTP(ctx, http.MethodGet, base+"/models", headers, nil)
+	health, err := probeHTTP(ctx, http.DefaultClient, http.MethodGet, base+"/models", headers, nil)
 	if err != nil {
 		return "", err
 	}
@@ -166,7 +166,7 @@ func (c *modelConnector) Health(ctx context.Context, e *registry.Entry) (registr
 		return "", &httputil.Error{Code: CodeProviderMalformed}
 	}
 	headers["Content-Type"] = "application/json"
-	return probeHTTP(ctx, http.MethodPost, base+"/chat/completions", headers, bytes.NewReader(payload))
+	return probeHTTP(ctx, http.DefaultClient, http.MethodPost, base+"/chat/completions", headers, bytes.NewReader(payload))
 }
 
 // modelConfigOf never returns nil: an entry that filled only the generic

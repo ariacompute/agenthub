@@ -211,7 +211,11 @@ func (c *mcpConnector) Health(ctx context.Context, e *registry.Entry) (registry.
 		return nothingMeasured, nil
 	}
 	initialize := `{"jsonrpc":"2.0","id":"agenthub-probe","method":"initialize","params":{"protocolVersion":"1.0","capabilities":{},"clientInfo":{"name":"agenthub","version":"1"}}}`
-	return probeHTTP(ctx, http.MethodPost, url, map[string]string{
+	// Probe through the same SSRF-hardened client as a real call, so a loopback /
+	// private bridge is measured honestly: unreachable without egress_allowlist.
+	allow := egressAllow(e)
+	client := netutil.SafeClientWithAllowlist(30*time.Second, 2<<20, allow)
+	return probeHTTP(ctx, client, http.MethodPost, url, map[string]string{
 		"Content-Type": "application/json",
 		"Accept":       "application/json, text/event-stream",
 	}, strings.NewReader(initialize))

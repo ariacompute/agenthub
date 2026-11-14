@@ -212,7 +212,7 @@ per platform, what each of the four deployment scripts does, and the two setting
 The deployment scripts are deliberately separate from the loader: none of them logs in, touches the
 database or calls `/probe`. `deploy-agent.sh` installs, serves and verifies one agent, which is what
 `Try run` and a health probe need before they can report anything measured; `deploy-mcp.sh` bridges
-the catalogue's stdio command to a stateless Streamable HTTP endpoint (`127.0.0.1:8002/mcp`) and
+the catalogue's stdio command to a stateless Streamable HTTP endpoint (`127.0.0.1:8002/mcp/<server>`) and
 checks its tool list over HTTP, `deploy-skill.sh` acquires the `file://`
 directory and reads `SKILL.md`, and `deploy-cli.sh` checks PATH plus `AGENTHUB_CLI_ALLOWLIST` before
 running a read-only probe. The server-side mcp / skill / cli connectors are still `TODO(real)`, so

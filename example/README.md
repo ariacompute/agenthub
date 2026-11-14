@@ -298,7 +298,7 @@ workdir under `$HOME/.local/share`, `--dry-run`, and no agenthub login, `load.sh
 
 | Script | Selectors | `start` | `smoke` |
 | --- | --- | --- | --- |
-| `deploy-mcp.sh` | 10 servers: `filesystem`, `github`, `google-drive`, `google-docs`, `gmail`, `slack`, `stripe`, `wechat`, `dingtalk`, `feishu` | resolves `kind_config.mcp.command` + `args`, expands `<user>` / `<project>` / `<app_id>` / `<app_secret>`, wraps it with `npx supergateway@latest --outputTransport streamableHttp` (stateless) and serves `POST http://127.0.0.1:8002/mcp` in the background | POSTs MCP `initialize` / `notifications/initialized` / `tools/list` over HTTP (the last one without a session, as agenthub's connector does) and prints the tools from the JSON-RPC reply |
+| `deploy-mcp.sh` | 10 servers: `filesystem`, `github`, `google-drive`, `google-docs`, `gmail`, `slack`, `stripe`, `wechat`, `dingtalk`, `feishu` | resolves `kind_config.mcp.command` + `args`, expands `<user>` / `<project>` / `<app_id>` / `<app_secret>`, wraps it with `npx supergateway@latest --outputTransport streamableHttp` (stateless) and serves `POST http://127.0.0.1:8002/mcp/<server>` in the background | POSTs MCP `initialize` / `notifications/initialized` / `tools/list` over HTTP (the last one without a session, as agenthub's connector does) and prints the tools from the JSON-RPC reply |
 | `deploy-skill.sh` | `anthropics-pdf`, `skillssh-find-skills` | acquires the directory at the registered `file://` endpoint (`git clone --depth 1` or `npx skills add`) and publishes a stable symlink | reads `SKILL.md`, prints its front matter, triggers and tools |
 | `deploy-cli.sh` | `gh`, `huggingface`, `modelscope` | resolves the command the way `entryCommand` does, checks PATH and `AGENTHUB_CLI_ALLOWLIST` (whole-string `EqualFold`), writes the deployment state | runs only `--version` / `--help` / `version` |
 
@@ -327,10 +327,10 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   Feishu's server takes `-a` / `-s` as argv, so that value is visible in `ps`. Every other
   credential is inherited from the process environment, never written to a pid file or the log.
 - `deploy-mcp.sh` deploys the catalogue's **stdio** command through a stateless stdio→Streamable
-  HTTP bridge (`supergateway@latest`, `POST /mcp`): agenthub's mcp connector POSTs `tools/list`
+  HTTP bridge (`supergateway@latest`, `POST /mcp/<server>`): agenthub's mcp connector POSTs `tools/list`
   directly, with no `initialize` or `Mcp-Session-Id`. The JSON files keep declaring `stdio`
   because that is what the upstream server speaks; to use the deployed endpoint, register a record
-  with `transport=streamable-http` and `endpoint=http://127.0.0.1:8002/mcp`. `--host` / `--port`
+  with `transport=streamable-http` and `endpoint=http://127.0.0.1:8002/mcp/<server>`. `--host` / `--port`
   (or `AGENTHUB_EXAMPLE_MCP_HOST` / `AGENTHUB_EXAMPLE_MCP_PORT` in the root `.env`) move the
   listener; the default bind is loopback only, and a non-loopback bind needs an authenticating
   reverse proxy. `stop` signals the whole bridge process group, so neither `npx` nor the stdio
@@ -349,13 +349,17 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   up several without tracking numbers by hand. The resolved port is recorded in
   the workdir; later `status` / `smoke` / `stop` without `--port` still name the
   right endpoint.
-- **Same port, many paths, behind a reverse proxy.** Give each bridge a distinct
-  `--http-path` (default `/mcp`) and let a proxy route by path to the right
-  backend port, exposing a single 443 with authentication:
+- **Several bridges behind one reverse proxy.** Each bridge defaults to
+  `127.0.0.1:$PORT/mcp/<server>`, so the path already names the server. Run each
+  on its own port and let a proxy unify them under a single authenticated 443:
   ```sh
-  ./example/deploy-mcp.sh filesystem start --port 8002 --http-path /mcp/filesystem
-  ./example/deploy-mcp.sh github     start --port 8003 --http-path /mcp/github
+  ./example/deploy-mcp.sh filesystem start --port 8002
+  ./example/deploy-mcp.sh github     start --port 8003
   ```
+  The proxy maps `https://hub.example.com/mcp/filesystem` →
+  `http://127.0.0.1:8002/mcp/filesystem` and `…/mcp/github` →
+  `http://127.0.0.1:8003/mcp/github`. Pass an explicit `--http-path` only to use a
+  path that does not match the server name.
   (Two `supergateway` instances cannot bind the same `127.0.0.1:port`; the script
   refuses to touch an already-listening port it does not own.)
 - **agenthub must be told the bridge is safe to call.** agenthub's mcp connector
@@ -370,7 +374,7 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
     "kind_config": {
       "mcp": {
         "transport": "streamable-http",
-        "url": "http://127.0.0.1:8002/mcp",
+        "url": "http://127.0.0.1:8002/mcp/filesystem",
         "egress_allowlist": ["127.0.0.1"]
       }
     }

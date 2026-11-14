@@ -333,3 +333,41 @@ func TestDeclaredMCPToolsNeverFallBackToMock(t *testing.T) {
 		t.Fatalf("code = %q, want %q", got, CodeResourceUnreachable)
 	}
 }
+
+// The probe and a real call share the same SSRF-hardened client, so a loopback
+// endpoint is measurable only when the record allows it — health and use cannot
+// disagree.
+func TestMCPProbeHonorsEgressAllowlist(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	conn := &mcpConnector{}
+
+	allowed := &registry.Entry{
+		Name: "local",
+		KindConfig: &registry.KindConfig{
+			MCP: &registry.MCPConfig{
+				Transport:       string(registry.TransportStreamableHTTP),
+				URL:             srv.URL + "/mcp",
+				EgressAllowlist: []string{"127.0.0.1"},
+			},
+		},
+	}
+	if health, err := conn.Health(context.Background(), allowed); err != nil || health != registry.HealthHealthy {
+		t.Fatalf("allowed loopback probe: health=%v err=%v; want healthy", health, err)
+	}
+
+	// No allowlist: the probe must not dial the loopback address, mirroring the
+	// real-call refusal.
+	blocked := &registry.Entry{
+		Name: "local",
+		KindConfig: &registry.KindConfig{
+			MCP: &registry.MCPConfig{Transport: string(registry.TransportStreamableHTTP), URL: srv.URL + "/mcp"},
+		},
+	}
+	if health, err := conn.Health(context.Background(), blocked); err == nil {
+		t.Fatalf("unallowed loopback probe: health=%v; want an error", health)
+	}
+}

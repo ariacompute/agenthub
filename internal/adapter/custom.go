@@ -53,5 +53,5 @@ func (c *customConnector) Health(ctx context.Context, e *registry.Entry) (regist
 	if url == "" {
 		return nothingMeasured, nil
 	}
-	return probeHTTP(ctx, http.MethodGet, url, nil, nil)
+	return probeHTTP(ctx, http.DefaultClient, http.MethodGet, url, nil, nil)
 }
