@@ -773,10 +773,11 @@ func TestPostThreadMessageResolvesHandTypedHandleOverTheFallback(t *testing.T) {
 	}
 }
 
-// The scheduler path must carry the same target: the ticket's resource is read
-// from the trigger metadata, so a stale client id there would reproduce the bug
-// even though the direct delegation path was fixed.
-func TestPostThreadMessageRoutesHandTypedHandleToTheMentionedAgent(t *testing.T) {
+// A typed @handle is a direct request, not a scheduler trigger. Routing it
+// opened an asynchronous ticket whose new task id the thread stream never
+// learned about, so "@google-adk hi" looked unanswered even when the agent had
+// replied. The stale id sent by the console must not win either.
+func TestPostThreadMessageBypassesRouterForHandTypedHandle(t *testing.T) {
 	fallback := &registry.Entry{ID: "demo-agent", Kind: registry.KindAgent, Name: "aria-agent-cloud"}
 	google := &registry.Entry{ID: "example-agent-google-adk", Kind: registry.KindAgent, Name: "google-adk"}
 	mt := newMemThreads()
@@ -791,22 +792,68 @@ func TestPostThreadMessageRoutesHandTypedHandleToTheMentionedAgent(t *testing.T)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
 	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+		Failed    []string `json:"failed"`
+		Routed    bool     `json:"routed"`
+	}
+	decodeJSON(t, w, &body)
+	if body.Routed || len(body.Delegated) != 1 || len(body.Failed) != 0 {
+		t.Fatalf("delegated = %+v, failed = %+v, routed = %v; want one direct run", body.Delegated, body.Failed, body.Routed)
+	}
+	triggers, err := d.Router.ListTriggers(context.Background(), router.TriggerQuery{Limit: 10})
+	if err != nil || len(triggers) != 0 {
+		t.Fatalf("an explicit @handle injected triggers = %+v, err = %v", triggers, err)
+	}
+	task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
+	if task == nil || task.ResourceID != google.ID {
+		t.Fatalf("task = %+v, want a run on the mentioned %q", task, google.ID)
+	}
+	if len(task.History) == 0 || task.History[0].Text() != "hi" {
+		t.Fatalf("prompt = %+v, want the handle stripped", task.History)
+	}
+}
+
+// Plain messages keep the scheduler: ids sent by the console's picker, and
+// follow-ups on a thread a ticket already owns, are still routed.
+func TestPostThreadMessageStillRoutesPlainMessages(t *testing.T) {
+	agent := &registry.Entry{ID: "demo-agent", Kind: registry.KindAgent, Name: "aria-agent-cloud"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), agent)
+	d.Threads = mt
+	d.Router = routerService(t)
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	raw, _ := json.Marshal(map[string]any{"body": "hi there", "mentions": []string{agent.ID}})
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages", string(raw), nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+		Routed    bool     `json:"routed"`
+	}
+	decodeJSON(t, w, &body)
+	if !body.Routed || len(body.Delegated) != 0 {
+		t.Fatalf("routed = %v, delegated = %+v; plain messages belong to the scheduler", body.Routed, body.Delegated)
+	}
+	if tasks := d.Hub.Store().List(context.Background()); len(tasks) != 0 {
+		t.Fatalf("a routed message opened %d direct tasks", len(tasks))
+	}
 	triggers, err := d.Router.ListTriggers(context.Background(), router.TriggerQuery{Limit: 10})
 	if err != nil || len(triggers) != 1 {
 		t.Fatalf("triggers = %+v, err = %v", triggers, err)
 	}
 	trig := triggers[0]
-	if !trig.Explicit {
-		t.Fatal("a resolved @handle must mark the trigger explicit")
+	if !trig.Explicit || trig.Body != "hi there" {
+		t.Fatalf("trigger = %+v, want the console's explicit request", trig)
 	}
-	if got, _ := trig.Meta["resource"].(string); got != google.ID {
-		t.Fatalf("meta resource = %v, want %q", trig.Meta["resource"], google.ID)
+	if got, _ := trig.Meta["resource"].(string); got != agent.ID {
+		t.Fatalf("meta resource = %v, want %q", trig.Meta["resource"], agent.ID)
 	}
-	if trig.Meta["mention"] != true {
-		t.Fatal("a resolved @handle must be marked so the scheduler re-targets an existing ticket")
-	}
-	if trig.Body != "hi" {
-		t.Fatalf("trigger body = %q, want the handle stripped", trig.Body)
+	if trig.Meta["mention"] != nil {
+		t.Fatal("a plain message must not re-target a ticket as a typed @mention")
 	}
 }
 
@@ -1129,7 +1176,7 @@ func TestPostThreadMessageReportsWhyItCouldNotDelegate(t *testing.T) {
 }
 
 // Inject returns a trigger, not a ticket. When the operator turns the thread
-// source off, a direct request from a person must still be delegated instead of
+// source off, a plain message from a person must still be delegated instead of
 // being reported as routed and then never producing a reply.
 func TestPostThreadMessageDelegatesWhenSchedulerFiltersTheTrigger(t *testing.T) {
 	google := &registry.Entry{ID: "example-agent-google-adk", Kind: registry.KindAgent, Name: "google-adk"}
@@ -1145,17 +1192,18 @@ func TestPostThreadMessageDelegatesWhenSchedulerFiltersTheTrigger(t *testing.T) 
 	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
 	h := Register(d)
 
-	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
-		`{"body":"@google-adk hi","mentions":[]}`, nil)
+	raw, _ := json.Marshal(map[string]any{"body": "hi", "mentions": []string{google.ID}})
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages", string(raw), nil)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
 	}
 	var body struct {
 		Delegated []string `json:"delegated"`
+		Routed    bool     `json:"routed"`
 	}
 	decodeJSON(t, w, &body)
-	if len(body.Delegated) != 1 {
-		t.Fatalf("delegated = %+v, want one direct run", body.Delegated)
+	if body.Routed || len(body.Delegated) != 1 {
+		t.Fatalf("delegated = %+v, routed = %v; want one direct run", body.Delegated, body.Routed)
 	}
 	task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
 	if task == nil || task.ResourceID != google.ID {

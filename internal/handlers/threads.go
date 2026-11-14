@@ -198,11 +198,14 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	// typed, so the transcript still shows who was addressed.
 	prompt := stripMentionTokens(body.Body, d.mentionTokens(mentions))
 
-	// With the scheduler on, the message becomes a trigger instead of a direct
-	// send. The router decides: an @mention is an explicit request, so it opens a
-	// ticket bound to this thread; a follow-up on a thread a ticket already owns
-	// is passed straight through to that ticket, without a second decision.
-	if d.Router != nil {
+	// A typed @handle is a direct request to a named agent: it goes straight to
+	// the hub, exactly like the playground's message/send. The thread stream
+	// follows the task id returned here, so the reply arrives as it completes.
+	// Routing it instead turns the request into an asynchronous ticket whose new
+	// task id the stream never learns about, leaving the console with no reply
+	// even when the agent answered. Only plain messages (no @handle in the body)
+	// are candidates for the scheduler's ticket / pass-through model.
+	if d.Router != nil && len(handles) == 0 {
 		trig := &router.Trigger{
 			Source:    string(router.SourceThread),
 			SourceID:  id + "#" + userMsg.ID,
@@ -218,12 +221,6 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(mentions) > 0 {
 			trig.Meta = map[string]any{"mentions": mentions, "resource": mentions[0]}
-			// Only a real @handle re-targets a ticket that already owns this
-			// thread. A plain message carries the default worker too, and that
-			// must not undo a re-target made by an earlier mention.
-			if fromHandle {
-				trig.Meta["mention"] = true
-			}
 		}
 		created, _, rerr := d.Router.Inject(r.Context(), trig)
 		if rerr != nil {
