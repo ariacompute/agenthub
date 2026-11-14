@@ -11,6 +11,9 @@
 #   ./load.sh                 # picks the platform from uname -s
 #   ./load.sh --platform windows | --platform ubuntu
 #   ./load.sh --all           # loads both platform namespaces
+#   ./load.sh --bridge        # also loads the optional local-bridge seed entries
+#                             # (streamable-http records pointing at a deploy-mcp.sh
+#                             # bridge, e.g. http://127.0.0.1:8002/mcp/filesystem)
 #
 # Environment: read from the **repository-root** .env (gitignored; see the root
 # .env.example) or export any of these in the shell. The catalogue is opt-in —
@@ -65,6 +68,10 @@ EMAIL="${AGENTHUB_EXAMPLE_EMAIL:-${EMAIL:-${AGENTHUB_BOOTSTRAP_ADMIN_EMAIL:-admi
 PASSWORD="${AGENTHUB_EXAMPLE_PASSWORD:-${PASSWORD:-${AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD:-agenthub-admin-pass}}}"
 SESSION_TOKEN="${AGENTHUB_SESSION_TOKEN:-}"
 MODEL_ID="${AGENTHUB_EXAMPLE_MODEL_ID:-}"
+# The catalogue uses <user> for the local system account. Substitute it here,
+# matching deploy-skill.sh's expand(), so registered paths point at the machine
+# the loader runs on instead of keeping the literal placeholder.
+LOAD_USER="$(id -un 2>/dev/null || whoami 2>/dev/null || printf '%s' "$USER")"
 # Creating the account is opt-in: on a fresh instance no one is signed up yet,
 # but silently registering one against an instance that already has an owner
 # produces a second-class account with no resources:write, which turns into 41
@@ -73,9 +80,11 @@ ALLOW_REGISTER="${ALLOW_REGISTER:-0}"
 
 PLATFORM=""
 ALL=0
+BRIDGE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --all) ALL=1 ;;
+    --bridge) BRIDGE=1 ;;
     --platform)
       PLATFORM="${2:-}"
       shift
@@ -162,7 +171,8 @@ render() {
       exit 2
     fi
   fi
-  sed "s|__AGENTHUB_EXAMPLE_MODEL_ID__|${MODEL_ID}|g" "$file"
+  sed -e "s|__AGENTHUB_EXAMPLE_MODEL_ID__|${MODEL_ID}|g" \
+      -e "s|<user>|${LOAD_USER}|g" "$file"
 }
 
 # entry_id <file> reads the fixed id from the payload.
@@ -271,6 +281,24 @@ for platform in $PLATFORMS; do
     fi
   done
 done
+
+# Optional local-bridge seed entries (resources/*-bridge-<platform>.opt.json) are
+# skipped by the glob above on purpose. They describe a streamable-http record that
+# points at a deploy-mcp.sh bridge (e.g. http://127.0.0.1:8002/mcp/filesystem),
+# so they only make sense once the bridge is running — load them explicitly.
+if [ "$BRIDGE" = "1" ]; then
+  for platform in $PLATFORMS; do
+    echo "loading $platform bridge entries (local streamable-http bridges)"
+    for file in "$RES_DIR"/*-bridge-"$platform".opt.json; do
+      [ -e "$file" ] || continue
+      if load_one "$file"; then
+        loaded=$((loaded + 1))
+      else
+        failures=$((failures + 1))
+      fi
+    done
+  done
+fi
 
 echo "summary: $loaded ok, $failures failed"
 if [ "$failures" -ne 0 ]; then

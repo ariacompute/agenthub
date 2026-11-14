@@ -195,7 +195,7 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
 
 | 占位符 | 含义 |
 | --- | --- |
-| `<user>` | 你的系统用户名（`C:\Users\<user>` / `/home/<user>`） |
+| `<user>` | 你的系统用户名；`load.sh` 登记时自动替换为当前系统用户（与 `deploy-skill.sh` 一致），无需手动改 JSON |
 | `<project>` | 你跑 `npx skills add` 的项目根目录 |
 | `<app_id>` / `<app_secret>` | 飞书自建应用凭证 |
 | `__AGENTHUB_EXAMPLE_MODEL_ID__` | 网关上的模型名，由 `load.sh` 从 `.env` 注入 |
@@ -332,6 +332,10 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   ```
   没有 `egress_allowlist` 时，connector 会拒绝 `127.0.0.1`（以及任何私有 IP / CIDR）。该字段只接受精确 IP、
   CIDR 与主机名——通配符或类 URL 的值会在加载时被拒，所以它只能收窄防护，绝不会向 caller 提供的 URL 重新敞开。
+- **本地桥接的可选种子条目。** 不想手填上面的 JSON，可在 `deploy-mcp.sh filesystem start` 之后运行
+  `./example/load.sh --bridge`：它会登记一条名为 `filesystem-bridge` 的 `streamable-http` 记录，
+  URL 即桥接默认地址 `http://127.0.0.1:8002/mcp/filesystem`，并已带 `egress_allowlist: ["127.0.0.1"]`，
+  因此 Probe 直接变绿、无需再改。若你启动时改了 `--port` 或 `--http-path`，先改种子文件的 `url` 即可。
 - `deploy-cli.sh` 从根目录 `.env` / `.env.example` 读 `AGENTHUB_CLI_ALLOWLIST`，并复刻服务端的整串比对。
   服务端只在启动时读一次，改完要重启服务端；`--allowlist` 覆盖预检，`--skip-allowlist` 则照样记录。
 - 这三个脚本都不改变第 6 节所述的 connector 现状：服务端 mcp / skill / cli connector 仍是

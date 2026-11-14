@@ -218,7 +218,7 @@ No real usernames, paths or keys appear in the JSON — everything is placeholde
 
 | Placeholder | Meaning |
 | --- | --- |
-| `<user>` | your OS username (`C:\Users\<user>` / `/home/<user>`) |
+| `<user>` | your OS username; `load.sh` substitutes the current system user on registration (matching `deploy-skill.sh`), so the JSON needs no manual edit |
 | `<project>` | the project root where you run `npx skills add` |
 | `<app_id>` / `<app_secret>` | Feishu self-built app credentials |
 | `__AGENTHUB_EXAMPLE_MODEL_ID__` | the model name on the gateway, injected by `load.sh` from `.env` |
@@ -381,9 +381,16 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   }
   ```
   Without `egress_allowlist`, the connector refuses `127.0.0.1` (and any private
-  IP / CIDR). The field accepts exact IPs, CIDRs and hostnames only — a wildcard
+  IP / CIDR).   The field accepts exact IPs, CIDRs and hostnames only — a wildcard
   or a URL-shaped value is rejected at load time, so it can only narrow the guard,
   never reopen it to caller-supplied URLs.
+- **Optional seed entry for the local bridge.** Instead of pasting the JSON above,
+  run `./example/load.sh --bridge` after `deploy-mcp.sh filesystem start`. It
+  registers a `streamable-http` record named `filesystem-bridge` whose URL is the
+  bridge's default `http://127.0.0.1:8002/mcp/filesystem` and which already carries
+  `egress_allowlist: ["127.0.0.1"]`, so its Probe turns healthy without further edits.
+  (If you started the bridge on a different `--port` or `--http-path`, edit the
+  seed file's `url` first.)
 - `deploy-cli.sh` reads `AGENTHUB_CLI_ALLOWLIST` from the root `.env` / `.env.example` and mirrors
   the server's whole-string comparison. The server reads it once at startup, so restart the server
   after changing it; `--allowlist` overrides the preflight and `--skip-allowlist` records anyway.
