@@ -14,6 +14,7 @@ import (
 
 	"agenthub/internal/a2a"
 	"agenthub/internal/adapter"
+	"agenthub/internal/authz"
 	"agenthub/internal/hub"
 	"agenthub/internal/registry"
 	"agenthub/internal/router"
@@ -541,8 +542,10 @@ func TestPostThreadMessageDelegationFailure(t *testing.T) {
 		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
 	}
 	var body struct {
-		Delegated []string `json:"delegated"`
-		Failed    []string `json:"failed"`
+		Delegated []string          `json:"delegated"`
+		Failed    []string          `json:"failed"`
+		Reason    string            `json:"reason"`
+		Reasons   map[string]string `json:"reasons"`
 	}
 	decodeJSON(t, w, &body)
 	if len(body.Delegated) != 0 {
@@ -550,6 +553,9 @@ func TestPostThreadMessageDelegationFailure(t *testing.T) {
 	}
 	if len(body.Failed) != 1 || body.Failed[0] != "no-such-resource" {
 		t.Fatalf("failed = %+v, want [no-such-resource]", body.Failed)
+	}
+	if body.Reason != reasonDelegateFailed || body.Reasons["no-such-resource"] != reasonDelegateFailed {
+		t.Fatalf("reason = %q reasons = %+v, want delegate_failed", body.Reason, body.Reasons)
 	}
 }
 
@@ -981,5 +987,190 @@ func TestTaskReplyIgnoresUnfinishedTasks(t *testing.T) {
 	}
 	if got := taskReply(userOnly); got != "" {
 		t.Fatalf("user-only task = %q, want empty", got)
+	}
+}
+
+// A terminal answer is valid A2A in three places. Trusting History alone left a
+// real agent's answer blank forever when it arrived as a status message or an
+// artifact instead of a history entry.
+func TestTaskReplyReadsStatusAndArtifacts(t *testing.T) {
+	statusOnly := &a2a.Task{
+		Status: a2a.TaskStatus{
+			State:   a2a.TaskStateCompleted,
+			Message: ptr(a2a.NewMessage(a2a.RoleAgent, a2a.NewTextPart("from status"))),
+		},
+		History: []a2a.Message{{Role: a2a.RoleUser, Parts: []a2a.Part{a2a.NewTextPart("hi")}}},
+	}
+	if got := taskReply(statusOnly); got != "from status" {
+		t.Fatalf("status-only reply = %q", got)
+	}
+
+	artifactOnly := &a2a.Task{
+		Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		Artifacts: []a2a.Artifact{
+			{Parts: []a2a.Part{a2a.NewDataPart(map[string]any{"k": "v"})}},
+			{Parts: []a2a.Part{a2a.NewTextPart("from "), a2a.NewTextPart("artifact")}},
+		},
+	}
+	if got := taskReply(artifactOnly); got != "from artifact" {
+		t.Fatalf("artifact-only reply = %q", got)
+	}
+
+	// History still wins when it carries the answer, as completed hub tasks do.
+	history := &a2a.Task{
+		Status: a2a.TaskStatus{
+			State:   a2a.TaskStateCompleted,
+			Message: ptr(a2a.NewMessage(a2a.RoleAgent, a2a.NewTextPart("status"))),
+		},
+		History: []a2a.Message{{Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.NewTextPart("history")}}},
+	}
+	if got := taskReply(history); got != "history" {
+		t.Fatalf("history reply = %q, want history to win", got)
+	}
+
+	empty := &a2a.Task{
+		Status:    a2a.TaskStatus{State: a2a.TaskStateFailed},
+		Artifacts: []a2a.Artifact{{Parts: []a2a.Part{a2a.NewDataPart(map[string]any{"code": "x"})}}},
+	}
+	if got := taskReply(empty); got != "" {
+		t.Fatalf("data-only failure = %q, want empty", got)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// A grant decides visibility; approval decides discoverability. The thread has
+// to ask the same per-resource question the playground's A2A path asks, or a
+// perfectly reachable @google-adk is dropped with no explanation.
+func TestResolveMentionsUsesThePlaygroundInvokeCheck(t *testing.T) {
+	az := newMemAuthz()
+	adk := &registry.Entry{Kind: registry.KindAgent, Name: "google-adk", Visibility: registry.VisibilityRestricted}
+	pending := &registry.Entry{
+		Kind: registry.KindAgent, Name: "pending-adk", Status: registry.StatusPending,
+		Visibility: registry.VisibilityRestricted,
+	}
+	public := &registry.Entry{Kind: registry.KindAgent, Name: "public-adk", Visibility: registry.VisibilityPublic}
+	d, _ := accessDeps(t, az, adk, pending, public)
+	as := func() *http.Request {
+		return withPrincipal(httptest.NewRequest(http.MethodPost, "/api/threads/1/messages", nil), reader("u-1"))
+	}
+
+	before := d.resolveMentions(as(), []string{"google-adk", "pending-adk", "public-adk", "ghost"})
+	if len(before.IDs) != 1 || before.IDs[0] != public.ID {
+		t.Fatalf("ids without grants = %v, want only the published %s", before.IDs, public.ID)
+	}
+	if before.Reasons["google-adk"] != reasonForbidden {
+		t.Fatalf("restricted/approved reason = %q, want forbidden", before.Reasons["google-adk"])
+	}
+	if before.Reasons["pending-adk"] != reasonNotApproved {
+		t.Fatalf("pending reason = %q, want not_approved", before.Reasons["pending-adk"])
+	}
+	if before.Reasons["ghost"] != reasonNotFound {
+		t.Fatalf("unknown reason = %q, want not_found", before.Reasons["ghost"])
+	}
+
+	// A write grant (the level the Administration page offers) covers read and
+	// makes the restricted record invocable; it must not weaken the approved gate.
+	az.grant("u-1", adk.ID, authz.LevelWrite)
+	after := d.resolveMentions(as(), []string{"google-adk", "GOOGLE-ADK", "pending-adk"})
+	if len(after.IDs) != 1 || after.IDs[0] != adk.ID {
+		t.Fatalf("ids with grant = %v, want [%s] once", after.IDs, adk.ID)
+	}
+	if len(after.Reasons) != 1 || after.Reasons["pending-adk"] != reasonNotApproved {
+		t.Fatalf("reasons with grant = %+v", after.Reasons)
+	}
+	if ids := d.resolveMentionHandles(as(), []string{"google-adk"}); len(ids) != 1 || ids[0] != adk.ID {
+		t.Fatalf("id-only wrapper = %v, want [%s]", ids, adk.ID)
+	}
+	if got := (Deps{}).resolveMentions(as(), []string{"ghost"}); got.Reasons["ghost"] != reasonNotFound {
+		t.Fatalf("reasons without a registry = %+v", got.Reasons)
+	}
+	if got := primaryReason(map[string]string{"a": reasonNotFound, "b": reasonForbidden}); got != reasonForbidden {
+		t.Fatalf("primaryReason = %q, want the actionable one", got)
+	}
+}
+
+// The console must be told why a message was not handed over — a generic
+// "could not reach" cannot distinguish a typo from an unapproved record.
+func TestPostThreadMessageReportsWhyItCouldNotDelegate(t *testing.T) {
+	pending := &registry.Entry{Kind: registry.KindAgent, Name: "pending-adk", Status: registry.StatusPending}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), pending)
+	d.Threads = mt
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	for _, tc := range []struct{ body, handle, reason string }{
+		{"@ghost hi", "ghost", reasonNotFound},
+		{"@pending-adk hi", "pending-adk", reasonNotApproved},
+	} {
+		raw, _ := json.Marshal(map[string]any{"body": tc.body, "mentions": []string{}})
+		w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages", string(raw), nil)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("%q: status = %d (%s)", tc.body, w.Code, w.Body.String())
+		}
+		var body struct {
+			Delegated []string          `json:"delegated"`
+			Routed    bool              `json:"routed"`
+			Reason    string            `json:"reason"`
+			Reasons   map[string]string `json:"reasons"`
+		}
+		decodeJSON(t, w, &body)
+		if body.Reason != tc.reason || body.Reasons[tc.handle] != tc.reason {
+			t.Fatalf("%q: reason = %q reasons = %+v, want %q", tc.body, body.Reason, body.Reasons, tc.reason)
+		}
+		if len(body.Delegated) != 0 || body.Routed {
+			t.Fatalf("%q: delegated = %v routed = %v; no default agent may answer", tc.body, body.Delegated, body.Routed)
+		}
+	}
+	if tasks := d.Hub.Store().List(context.Background()); len(tasks) != 0 {
+		t.Fatalf("an unresolvable handle opened %d tasks", len(tasks))
+	}
+}
+
+// Inject returns a trigger, not a ticket. When the operator turns the thread
+// source off, a direct request from a person must still be delegated instead of
+// being reported as routed and then never producing a reply.
+func TestPostThreadMessageDelegatesWhenSchedulerFiltersTheTrigger(t *testing.T) {
+	google := &registry.Entry{ID: "example-agent-google-adk", Kind: registry.KindAgent, Name: "google-adk"}
+	mt := newMemThreads()
+	d := testDeps(t, openConfig(""), google)
+	d.Threads = mt
+	d.Router = routerService(t)
+	if _, err := d.Router.SavePolicy(context.Background(), &router.Policy{
+		Source: string(router.SourceThread), Mode: router.PolicyOff, QuietStart: -1, QuietEnd: -1,
+	}); err != nil {
+		t.Fatalf("save policy: %v", err)
+	}
+	th, _ := mt.CreateThread(context.Background(), &threads.Thread{OwnerID: "dev", Title: "t"})
+	h := Register(d)
+
+	w := do(t, h, http.MethodPost, "/api/threads/"+th.ID+"/messages",
+		`{"body":"@google-adk hi","mentions":[]}`, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Delegated []string `json:"delegated"`
+	}
+	decodeJSON(t, w, &body)
+	if len(body.Delegated) != 1 {
+		t.Fatalf("delegated = %+v, want one direct run", body.Delegated)
+	}
+	task := d.Hub.Store().Get(context.Background(), body.Delegated[0])
+	if task == nil || task.ResourceID != google.ID {
+		t.Fatalf("task = %+v, want a run on %s", task, google.ID)
+	}
+}
+
+func TestRouterAdmitted(t *testing.T) {
+	if routerAdmitted(nil) {
+		t.Fatal("a deduplicated trigger is not admitted")
+	}
+	if routerAdmitted(&router.Trigger{Disposition: string(router.DispositionFiltered)}) {
+		t.Fatal("a filtered trigger is not admitted")
+	}
+	if !routerAdmitted(&router.Trigger{Disposition: string(router.DispositionPending)}) {
+		t.Fatal("a queued trigger is admitted")
 	}
 }

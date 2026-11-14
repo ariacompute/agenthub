@@ -11,6 +11,9 @@ export const STATUSES = ['draft', 'pending', 'approved', 'rejected', 'deprecated
 export const useHubStore = defineStore('hub', {
   state: () => ({
     resources: [],
+    // The discoverable view is a separate slice: an approved-only answer must
+    // never overwrite the curator's full catalogue in `resources`.
+    discoverableResources: [],
     counts: {},
     healthCounts: {},
     tasks: [],
@@ -56,6 +59,20 @@ export const useHubStore = defineStore('hub', {
         return false
       } finally {
         this.loading = false
+      }
+    },
+    // Consumer pickers read this view. The server applies the approval gate, so
+    // a curated record never reaches the client; a failed read keeps the last
+    // good list rather than emptying the picker on a transient 500.
+    async refreshDiscoverableResources() {
+      try {
+        const data = await api.listResources({ discoverable: true })
+        this.discoverableResources = data?.resources ?? []
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = error.code || 'internal_error'
+        return false
       }
     },
     async refreshTasks() {

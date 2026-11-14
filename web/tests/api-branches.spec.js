@@ -32,6 +32,18 @@ describe('listResources', () => {
     await listResources()
     expect(fetchMock.mock.calls[0][0]).toBe('/api/resources')
   })
+
+  it('asks the server to apply the discoverable gate', async () => {
+    const fetchMock = stubFetch(jsonResponse({ resources: [] }))
+    await listResources({ discoverable: true })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/resources?discoverable=true')
+  })
+
+  it('combines the discoverable view with the other filters', async () => {
+    const fetchMock = stubFetch(jsonResponse({ resources: [] }))
+    await listResources({ kind: 'agent', status: 'approved', discoverable: true })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/resources?kind=agent&status=approved&discoverable=true')
+  })
 })
 
 describe('sendTask', () => {

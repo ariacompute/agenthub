@@ -134,7 +134,7 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/resources` | `resources:read` — Read resources | List all resources | `?kind=&q=&namespace=&status=` | `{ resources: [Entry], counts: { kind }, health: { state } }` |
+| `GET` | `/api/resources` | `resources:read` — Read resources | List all resources | `?kind=&q=&namespace=&status=&discoverable=` | `{ resources: [Entry], counts: { kind }, health: { state } }` |
 | `POST` | `/api/resources` | `resources:write` — Change resources | Create a new entry among the resources | `{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }` | `Entry — 201` |
 | `GET` | `/api/resources/{id}` | `resources:read` — Read resources | Read one of the resources by id | — | `Entry` |
 | `PUT` | `/api/resources/{id}` | `resources:write` — Change resources | Replace one of the resources outright | `Entry — the path id wins over the body` | `Entry` |

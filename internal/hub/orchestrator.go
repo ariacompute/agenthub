@@ -524,13 +524,21 @@ func (h *Hub) park(taskID, prompt string, emit Emit) (*a2a.Task, error) {
 
 func (h *Hub) fail(taskID string, cause error, emit Emit) (*a2a.Task, error) {
 	code := string(httputil.AsError(cause).Code)
-	reply := a2a.NewMessage(a2a.RoleAgent, a2a.NewDataPart(map[string]any{"code": code}))
+	// A data-only failure message is invisible to every consumer that renders an
+	// answer as text (the thread SSE stream, the read-path reply filler and the
+	// console). Keep the machine code for dashboards, but give the failure a
+	// readable text part and record it in the history so a delegated run never
+	// ends as an empty reply bubble.
+	reply := a2a.NewMessage(a2a.RoleAgent,
+		a2a.NewTextPart("Agent run failed: "+code),
+		a2a.NewDataPart(map[string]any{"code": code}))
 	updated, err := h.store.SetState(taskID, a2a.TaskStateFailed, &reply)
 	if err != nil {
 		// A task that cannot transition already reached a terminal state; the
 		// original failure is the one worth reporting.
 		return h.store.Get(dbCtx(), taskID), adapterError(cause)
 	}
+	_ = h.store.AppendHistory(taskID, reply)
 	h.publishMessage(taskID, reply, emit)
 	h.publishStatus(updated, emit, true)
 	h.notifyPush(updated)

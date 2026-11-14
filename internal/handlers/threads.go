@@ -153,22 +153,44 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	handles := mentionHandles(body.Body)
 	mentions := body.Mentions
 	fromHandle := false
+	reasons := map[string]string{}
 	if len(handles) > 0 {
-		if resolved := d.resolveMentionHandles(r, handles); len(resolved) > 0 {
-			mentions = resolved
+		resolved := d.resolveMentions(r, handles)
+		reasons = resolved.Reasons
+		if len(resolved.IDs) > 0 {
+			mentions = resolved.IDs
 			fromHandle = true
 		} else if len(mentions) == 0 {
 			// An address to an agent that is not registered must not be served
 			// by a default worker: that run would fabricate a digest instead of
-			// the content the person asked for. The message is still posted.
+			// the content the person asked for. The message is still posted,
+			// together with the reason so the console can say what to fix.
 			httputil.WriteJSON(w, http.StatusCreated, map[string]any{
 				"message":   userMsg,
 				"delegated": []string{},
 				"failed":    handles,
 				"routed":    false,
+				"reason":    primaryReason(reasons),
+				"reasons":   reasons,
 			})
 			return
 		}
+	}
+
+	// Ids sent by the console are not authoritative either. A plain message (no
+	// @handle) still has to pass the same single-resource invoke check the
+	// playground's mayInvoke applies, rather than being trusted because it came
+	// from a signed-in session.
+	if !fromHandle {
+		invokable := make([]string, 0, len(mentions))
+		for _, rid := range mentions {
+			if d.canAccess(r, rid, false) {
+				invokable = append(invokable, rid)
+			} else {
+				reasons[rid] = reasonForbidden
+			}
+		}
+		mentions = invokable
 	}
 
 	// The run receives the instruction, not the addressing: strip the handles
@@ -208,13 +230,21 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteErr(w, rerr)
 			return
 		}
-		httputil.WriteJSON(w, http.StatusCreated, map[string]any{
-			"message":   userMsg,
-			"delegated": []string{},
-			"failed":    []string{},
-			"routed":    created != nil,
-		})
-		return
+		if routerAdmitted(created) {
+			httputil.WriteJSON(w, http.StatusCreated, map[string]any{
+				"message":   userMsg,
+				"delegated": []string{},
+				"failed":    []string{},
+				"routed":    true,
+				"reason":    "",
+				"reasons":   reasons,
+			})
+			return
+		}
+		// The scheduler dropped this trigger (source off, policy unset or an
+		// allowlist that excludes the actor). A direct request from a person must
+		// not disappear silently, so fall through to the direct delegation below
+		// instead of reporting a routing that will never produce a task.
 	}
 
 	delegated := make([]string, 0, len(mentions))
@@ -228,6 +258,7 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		task, derr := d.Hub.Send(r.Context(), params)
 		if derr != nil {
 			failed = append(failed, rid)
+			reasons[rid] = reasonDelegateFailed
 			continue
 		}
 		if _, uerr := d.Threads.UpsertAgentMessage(r.Context(), id, task.ID, rid, ""); uerr != nil {
@@ -241,6 +272,8 @@ func (d Deps) handlePostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		"message":   userMsg,
 		"delegated": delegated,
 		"failed":    failed,
+		"reason":    primaryReason(reasons),
+		"reasons":   reasons,
 	})
 }
 
@@ -410,32 +443,113 @@ func mentionHandles(body string) []string {
 	return out
 }
 
-// resolveMentionHandles maps @handles to resource ids using the catalogue the
-// console itself reads: only entries this caller may see and that A2A may
-// discover. A handle may be an id, a registry name or a display label, and
-// matching ignores case because a hand-typed handle does. Unresolvable handles
-// contribute nothing; the caller decides what to do when none resolve.
-func (d Deps) resolveMentionHandles(r *http.Request, handles []string) []string {
-	out := make([]string, 0, len(handles))
-	seen := make(map[string]bool)
-	if d.Reg == nil {
-		return out
-	}
-	entries := registry.Discoverable(d.visibleEntries(r, d.Reg.Snapshot()))
-	for _, handle := range handles {
-		for _, e := range entries {
-			if !strings.EqualFold(e.ID, handle) && !strings.EqualFold(e.Name, handle) &&
-				!(e.DisplayName != "" && strings.EqualFold(e.DisplayName, handle)) {
-				continue
-			}
-			if !seen[e.ID] {
-				seen[e.ID] = true
-				out = append(out, e.ID)
-			}
-			break
+// Machine-readable reasons a thread message could not be handed to the agent it
+// addressed. They are a finite enum so the console can explain the failure
+// instead of collapsing every case into "could not reach".
+const (
+	reasonNotFound       = "not_found"
+	reasonNotApproved    = "not_approved"
+	reasonForbidden      = "forbidden"
+	reasonDelegateFailed = "delegate_failed"
+)
+
+// resolvableEntries keeps the approved gate and applies the same invoke check
+// the A2A/playground path uses (mayInvoke -> canAccess). A list visibility
+// filter is not a substitute: visibleEntries filters a whole snapshot at once
+// and fails closed when the grant store hiccups, whereas canAccess answers the
+// question a run actually asks about one resource. This narrow helper leaves
+// visibleEntries' global semantics untouched for the seven endpoints that use it.
+func (d Deps) resolvableEntries(r *http.Request, entries []*registry.Entry) []*registry.Entry {
+	out := make([]*registry.Entry, 0, len(entries))
+	for _, e := range registry.Discoverable(entries) {
+		if d.canAccess(r, e.ID, false) {
+			out = append(out, e)
 		}
 	}
 	return out
+}
+
+func matchEntry(entries []*registry.Entry, handle string) *registry.Entry {
+	for _, e := range entries {
+		if e == nil {
+			continue
+		}
+		if strings.EqualFold(e.ID, handle) || strings.EqualFold(e.Name, handle) ||
+			(e.DisplayName != "" && strings.EqualFold(e.DisplayName, handle)) {
+			return e
+		}
+	}
+	return nil
+}
+
+type mentionResolution struct {
+	IDs     []string
+	Reasons map[string]string
+}
+
+// resolveMentions maps @handles to the ids of approved resources this caller may
+// actually invoke, and explains every handle it had to drop. Matching ignores
+// case because a hand-typed handle does.
+func (d Deps) resolveMentions(r *http.Request, handles []string) mentionResolution {
+	res := mentionResolution{
+		IDs:     make([]string, 0, len(handles)),
+		Reasons: make(map[string]string),
+	}
+	seen := make(map[string]bool)
+	if d.Reg == nil {
+		for _, handle := range handles {
+			res.Reasons[handle] = reasonNotFound
+		}
+		return res
+	}
+	all := d.Reg.Snapshot()
+	invokable := d.resolvableEntries(r, all)
+	approved := registry.Discoverable(all)
+	for _, handle := range handles {
+		if e := matchEntry(invokable, handle); e != nil {
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				res.IDs = append(res.IDs, e.ID)
+			}
+			continue
+		}
+		switch {
+		case matchEntry(all, handle) == nil:
+			res.Reasons[handle] = reasonNotFound
+		case matchEntry(approved, handle) == nil:
+			res.Reasons[handle] = reasonNotApproved
+		default:
+			res.Reasons[handle] = reasonForbidden
+		}
+	}
+	return res
+}
+
+// resolveMentionHandles is the id-only view kept for callers that do not surface
+// a reason.
+func (d Deps) resolveMentionHandles(r *http.Request, handles []string) []string {
+	return d.resolveMentions(r, handles).IDs
+}
+
+// primaryReason picks one deterministic reason out of a set: the most
+// actionable explanation wins regardless of map iteration order.
+func primaryReason(reasons map[string]string) string {
+	for _, want := range []string{reasonForbidden, reasonNotApproved, reasonDelegateFailed, reasonNotFound} {
+		for _, got := range reasons {
+			if got == want {
+				return want
+			}
+		}
+	}
+	return ""
+}
+
+// routerAdmitted reports whether a freshly injected trigger will actually reach
+// a ticket. Inject returns the trigger, not the ticket, so created != nil alone
+// also covers a trigger the program layer filtered out: that one never opens a
+// run, and treating it as routed leaves the console waiting for a reply forever.
+func routerAdmitted(created *router.Trigger) bool {
+	return created != nil && created.Disposition != string(router.DispositionFiltered)
 }
 
 // mentionTokens collects every spelling a thread body may use for the resources it
@@ -523,6 +637,9 @@ func (d Deps) fillPendingReplies(ctx context.Context, threadID string, msgs []*t
 
 // taskReply is the agent's answer for a finished task: the last non-empty text
 // message the agent wrote. A task still in flight has no reply to persist yet.
+// History is the primary source, but a terminal status message and text
+// artifacts are valid A2A answers too; trusting History alone left replies that
+// only ever existed in one of those two places blank for good.
 func taskReply(task *a2a.Task) string {
 	if task == nil || !task.Status.State.IsTerminal() {
 		return ""
@@ -532,6 +649,22 @@ func taskReply(task *a2a.Task) string {
 			continue
 		}
 		if text := strings.TrimSpace(task.History[i].Text()); text != "" {
+			return text
+		}
+	}
+	if task.Status.Message != nil {
+		if text := strings.TrimSpace(task.Status.Message.Text()); text != "" {
+			return text
+		}
+	}
+	for i := len(task.Artifacts) - 1; i >= 0; i-- {
+		var b strings.Builder
+		for _, p := range task.Artifacts[i].Parts {
+			if p.Type == a2a.PartTypeText {
+				b.WriteString(p.Text)
+			}
+		}
+		if text := strings.TrimSpace(b.String()); text != "" {
 			return text
 		}
 	}

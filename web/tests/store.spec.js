@@ -76,6 +76,44 @@ describe('refreshResources', () => {
   })
 })
 
+describe('refreshDiscoverableResources', () => {
+  it('stores the server-approved catalogue without touching the management list', async () => {
+    api.listResources.mockResolvedValue({ resources: [{ id: 'a1', status: 'approved' }] })
+    const store = useHubStore()
+    store.resources = [{ id: 'draft', status: 'draft' }]
+
+    expect(await store.refreshDiscoverableResources()).toBe(true)
+
+    expect(api.listResources).toHaveBeenCalledWith({ discoverable: true })
+    expect(store.discoverableResources).toEqual([{ id: 'a1', status: 'approved' }])
+    expect(store.resources).toEqual([{ id: 'draft', status: 'draft' }])
+    expect(store.errorCode).toBe('')
+  })
+
+  it('keeps the last good catalogue and reports the code on failure', async () => {
+    api.listResources.mockRejectedValue({ code: 'service_unavailable' })
+    const store = useHubStore()
+    store.discoverableResources = [{ id: 'a1' }]
+
+    expect(await store.refreshDiscoverableResources()).toBe(false)
+
+    expect(store.discoverableResources).toEqual([{ id: 'a1' }])
+    expect(store.errorCode).toBe('service_unavailable')
+  })
+
+  it('falls back to a generic code and survives a thin answer', async () => {
+    api.listResources.mockRejectedValueOnce(new Error('socket closed'))
+    const store = useHubStore()
+    expect(await store.refreshDiscoverableResources()).toBe(false)
+    expect(store.errorCode).toBe('internal_error')
+
+    api.listResources.mockResolvedValueOnce(null)
+    expect(await store.refreshDiscoverableResources()).toBe(true)
+    expect(store.discoverableResources).toEqual([])
+    expect(store.errorCode).toBe('')
+  })
+})
+
 describe('refreshTasks', () => {
   it('shows the newest task first', async () => {
     api.listTasks.mockResolvedValue({ tasks: [{ id: 'a' }, { id: 'b' }] })

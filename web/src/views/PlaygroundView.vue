@@ -81,15 +81,12 @@ const STYLE_KEYS = { broadcast: 'styleBroadcast', relay: 'styleRelay', group: 's
 const STYLE_HINTS = { broadcast: 'styleBroadcastHint', relay: 'styleRelayHint', group: 'styleGroupHint' }
 const POLICY_KEYS = { limit: 'roundsLimit', manual: 'roundsManual', confirm: 'roundsConfirm' }
 
-const resources = computed(() => store.resources)
-// The playground only runs agents the caller may reach: a resource still being
-// curated (draft/pending) is not discoverable, so it is hidden from the picker
-// just as it is from agentbuddy and the A2A export. An empty status is read as
-// approved by the registry, so it stays listed.
-const approvedResources = computed(() =>
-  resources.value.filter((r) => !r.status || r.status === 'approved'),
-)
-const candidates = computed(() => chatCandidates(approvedResources.value))
+// The server narrowed this view to approved (discoverable) records the caller
+// may see and invoke — the same gate as /api/workspace and the A2A export. The
+// picker renders that catalogue exactly as it arrived: re-filtering here would
+// let the client re-admit a record the server deliberately withheld.
+const resources = computed(() => store.discoverableResources)
+const candidates = computed(() => chatCandidates(resources.value))
 const flowCheck = computed(() => validateFlow(flowRaw.value))
 const canRun = computed(
   () =>
@@ -123,7 +120,7 @@ const conversationNote = computed(() => {
 const statusText = computed(() => enumLabel('taskState', run.value.status || 'unknown'))
 
 onMounted(async () => {
-  await store.refreshResources()
+  await store.refreshDiscoverableResources()
   if (!resourceId.value && candidates.value.length) resourceId.value = candidates.value[0].id
 })
 
@@ -196,8 +193,11 @@ async function runOnce() {
     running.value = false
     controller.value = null
     // The run is the measurement: the task list and the health dots both moved.
+    // Re-read the discoverable view too, so a record approved or deprecated
+    // while the run was in flight changes the picker without a page reload.
     await store.refreshTasks()
     await store.refreshResources()
+    await store.refreshDiscoverableResources()
   }
 }
 
@@ -457,7 +457,7 @@ function replyStatus(reply) {
         <div class="field">
           <label for="pg-resource">{{ t('resourceLabel') }}</label>
           <select id="pg-resource" v-model="resourceId">
-            <option v-for="resource in approvedResources" :key="resource.id" :value="resource.id">
+            <option v-for="resource in resources" :key="resource.id" :value="resource.id">
               {{ resource.name }} · {{ enumLabel('kind', resource.kind) }}
             </option>
           </select>

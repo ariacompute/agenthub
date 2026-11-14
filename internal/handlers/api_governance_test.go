@@ -267,3 +267,74 @@ func TestResourceListingFiltersByNamespaceAndStatus(t *testing.T) {
 		t.Fatalf("bad status filter = %d", res.StatusCode)
 	}
 }
+
+// Consumer pickers must not have to re-implement the approval rule. The
+// discoverable view is filtered here, on the server, with the same
+// registry.Discoverable gate used by /api/workspace and the exports.
+func TestResourceListingDiscoverableView(t *testing.T) {
+	srv := governanceServer(t)
+	_, _ = doJSON(t, http.MethodPost, srv.URL+"/api/registries",
+		`{"id":"curated","name":"Curated","auto_approve":false}`)
+	_, _ = doJSON(t, http.MethodPost, srv.URL+"/api/resources",
+		`{"kind":"mcp","name":"draft-mcp","version":"1.0.0","namespace":"curated"}`)
+	_, _ = doJSON(t, http.MethodPost, srv.URL+"/api/resources",
+		`{"kind":"agent","name":"live-agent","version":"1.0.0"}`)
+
+	names := func(url string) []string {
+		t.Helper()
+		_, body := doJSON(t, http.MethodGet, url, "")
+		list, _ := body["resources"].([]any)
+		out := make([]string, 0, len(list))
+		for _, raw := range list {
+			m, _ := raw.(map[string]any)
+			name, _ := m["name"].(string)
+			out = append(out, name)
+		}
+		return out
+	}
+
+	// The management listing is unchanged: a curator still sees the draft.
+	if got := names(srv.URL + "/api/resources"); len(got) != 2 {
+		t.Fatalf("management list = %v, want draft + approved", got)
+	}
+	if got := names(srv.URL + "/api/resources?discoverable=false"); len(got) != 2 {
+		t.Fatalf("discoverable=false = %v, want the full management list", got)
+	}
+
+	// The consumer view contains only the approved record, and the counters
+	// describe that same filtered world rather than the whole catalogue.
+	res, body := doJSON(t, http.MethodGet, srv.URL+"/api/resources?discoverable=true", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("discoverable status = %d", res.StatusCode)
+	}
+	if got := names(srv.URL + "/api/resources?discoverable=true"); len(got) != 1 || got[0] != "live-agent" {
+		t.Fatalf("discoverable view = %v, want only live-agent", got)
+	}
+	counts, _ := body["counts"].(map[string]any)
+	if counts["agent"] != float64(1) || counts["mcp"] != float64(0) {
+		t.Fatalf("discoverable counts = %v, want agent=1 mcp=0", counts)
+	}
+	if got := names(srv.URL + "/api/resources?discoverable=true&kind=mcp"); len(got) != 0 {
+		t.Fatalf("kind + discoverable = %v, want no curated mcp", got)
+	}
+
+	res, _ = doJSON(t, http.MethodGet, srv.URL+"/api/resources?discoverable=maybe", "")
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid discoverable flag = %d, want 400", res.StatusCode)
+	}
+
+	// Approving the draft is a server-side state change: the view follows it
+	// without any client-side status check.
+	_, before := doJSON(t, http.MethodGet, srv.URL+"/api/resources?namespace=curated", "")
+	list, _ := before["resources"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("curated list = %d, want 1", len(list))
+	}
+	entry, _ := list[0].(map[string]any)
+	id, _ := entry["id"].(string)
+	_, _ = doJSON(t, http.MethodPost, srv.URL+"/api/resources/"+id+"/status", `{"status":"pending"}`)
+	_, _ = doJSON(t, http.MethodPost, srv.URL+"/api/resources/"+id+"/status", `{"status":"approved"}`)
+	if got := names(srv.URL + "/api/resources?discoverable=true&kind=mcp"); len(got) != 1 || got[0] != "draft-mcp" {
+		t.Fatalf("approved record missing from discoverable view: %v", got)
+	}
+}

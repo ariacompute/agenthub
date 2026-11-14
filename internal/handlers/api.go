@@ -62,8 +62,9 @@ func writeDomainErr(w http.ResponseWriter, err error) {
 
 // handleListResources is the management listing: it shows every state, drafts
 // and pending records included, because a curator cannot act on what a listing
-// hides. The discoverable catalogue is the export endpoints, which filter down
-// to approved records.
+// hides. Consumers that only want invocable records ask for the discoverable
+// view; the filtering happens here so no client has to re-implement the
+// approval rule (and an unapproved record never leaves the server).
 func (d Deps) handleListResources(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	kind := q.Get("kind")
@@ -79,12 +80,28 @@ func (d Deps) handleListResources(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	discoverable := false
+	if raw := q.Get("discoverable"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, httputil.CodeBadRequest)
+			return
+		}
+		discoverable = parsed
+	}
 	entries := d.visibleEntries(r, d.Reg.ListFiltered(registry.Filter{
 		Kind:      kind,
 		Query:     q.Get("q"),
 		Namespace: q.Get("namespace"),
 		Status:    q.Get("status"),
 	}))
+	if discoverable {
+		// Discoverable is the single consumer-facing gate used by /api/workspace,
+		// the MCP/Agent Card exports and A2A selection. Applying it here (rather
+		// than filtering by status) also keeps legacy records whose status is
+		// empty, which EffectiveStatus reads as approved.
+		entries = registry.Discoverable(entries)
+	}
 	byKind, byHealth := countsOf(entries)
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"resources": entries,

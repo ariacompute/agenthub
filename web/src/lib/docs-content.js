@@ -395,7 +395,7 @@ export const httpEndpoints = [
     permission: 'resources:read',
     descKey: 'verbList',
     nounKey: 'nounResources',
-    request: '?kind=&q=&namespace=&status=',
+    request: '?kind=&q=&namespace=&status=&discoverable=',
     response: '{ resources: [Entry], counts: { kind }, health: { state } }',
   },
   {

@@ -37,12 +37,15 @@ export function healthz() {
   return request('/healthz')
 }
 
-export function listResources({ kind = '', q = '', namespace = '', status = '' } = {}) {
+export function listResources({ kind = '', q = '', namespace = '', status = '', discoverable = false } = {}) {
   const params = new URLSearchParams()
   if (kind) params.set('kind', kind)
   if (q) params.set('q', q)
   if (namespace) params.set('namespace', namespace)
   if (status) params.set('status', status)
+  // The server applies the approval gate; the console never filters statuses
+  // locally for a view that is meant to be invocable.
+  if (discoverable) params.set('discoverable', 'true')
   const query = params.toString()
   return request(`/api/resources${query ? `?${query}` : ''}`)
 }

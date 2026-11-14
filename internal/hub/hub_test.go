@@ -1125,3 +1125,52 @@ func TestHubResolvesTheResourceFromMessageMetadata(t *testing.T) {
 		t.Fatalf("resource = %q, want the addressed agent %q", task.ResourceID, agent.ID)
 	}
 }
+
+// A failed run used to emit a data-only status message and no history entry.
+// Every consumer that renders an answer as text (the thread SSE stream and the
+// read-path reply filler) then saw an empty bubble for good.
+func TestFailedTaskCarriesAReadableReply(t *testing.T) {
+	down := &registry.Entry{
+		Kind: registry.KindAgent,
+		Name: "down-agent",
+		KindConfig: &registry.KindConfig{
+			Agent: &registry.AgentConfig{CardURL: "http://127.0.0.1:1/.well-known/agent-card.json"},
+		},
+	}
+	h, _, _ := newTestHub(t, down)
+	defer h.Close()
+
+	task, err := h.Send(context.Background(), sendParams("hello", map[string]any{"resourceId": down.ID}))
+	if err == nil {
+		t.Fatal("an unreachable agent must fail the task")
+	}
+	if task == nil || task.Status.State != a2a.TaskStateFailed {
+		t.Fatalf("state = %+v, want failed", task)
+	}
+	if task.Status.Message == nil || strings.TrimSpace(task.Status.Message.Text()) == "" {
+		t.Fatalf("status message has no readable text: %+v", task.Status.Message)
+	}
+	if !strings.Contains(task.Status.Message.Text(), "resource_unreachable") {
+		t.Fatalf("status text = %q, want the machine code too", task.Status.Message.Text())
+	}
+	// The machine-readable data part must survive for dashboards.
+	var coded bool
+	for _, p := range task.Status.Message.Parts {
+		if p.Type == a2a.PartTypeData && p.Data["code"] == "resource_unreachable" {
+			coded = true
+		}
+	}
+	if !coded {
+		t.Fatalf("data part lost: %+v", task.Status.Message.Parts)
+	}
+	// History is what the read path scans; the failure must be there as well.
+	var inHistory bool
+	for _, m := range task.History {
+		if m.Role == a2a.RoleAgent && strings.TrimSpace(m.Text()) != "" {
+			inHistory = true
+		}
+	}
+	if !inHistory {
+		t.Fatalf("failure not recorded in history: %+v", task.History)
+	}
+}

@@ -244,4 +244,21 @@ describe('docs content', () => {
       expect(dict.baseUrlBody, `${lang}.baseUrlBody missing`).toBeTruthy()
     }
   })
+
+  it('keeps the approval gate on the server and out of the playground', () => {
+    // The route table documents the switch, and the view consumes the answer
+    // as-is: a client-side status filter would re-admit a record the server
+    // deliberately withheld from the discoverable catalogue.
+    const listing = httpEndpoints.find((e) => e.method === 'GET' && e.path === '/api/resources')
+    expect(listing?.request).toContain('discoverable=')
+
+    const view = readFileSync(
+      fileURLToPath(new URL('../src/views/PlaygroundView.vue', import.meta.url)),
+      'utf8',
+    )
+    expect(view).toContain('store.discoverableResources')
+    expect(view).toContain('refreshDiscoverableResources')
+    expect(view).not.toContain('approvedResources')
+    expect(view).not.toContain("status === 'approved'")
+  })
 })
