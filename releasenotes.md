@@ -562,21 +562,51 @@ screen and a visual inspector for the A2A contract.
   index rejecting a repeat, namespace CRUD and the sync bookkeeping. Both gate on
   `DATABASE_URL`.
 - **Coverage**: `make test-cover` runs `-coverprofile` and prints
-  `go tool cover -func`. With a database attached: `identity` and `schedules` 100%,
-  `sandbox` 98.2%, `a2a` 98%, `netutil` 97.4%, `model` 95.7%, `adapter` 95.4%, `audit`
-  95.1%, `config` 94.4%, `httputil` 92.1%, `authz` 91.8%, `middleware` 91%, `registry`
-  87.9%, `router` 82.2%, `hub` 82.1%, `auth` 81.4%, `secure` 80.5%, `handlers` 73.1%,
-  `channels` 71.4%, `backup` 57.3%, `store` 3% (its cases skip without `DATABASE_URL`,
-  so that number says nothing until one is set).
+  `go tool cover -func`. Measured with **no database attached**, so the cases
+  that skip cannot flatter the number: `a2a`, `audit`, `authz`, `channels`,
+  `computers`, `config`, `files`, `httputil`, `identity`, `middleware`, `model`,
+  `netutil`, `sandbox`, `schedules` and `secure` at **100%**; `adapter` 96.3%,
+  `router` 91.8%, `hub` 90.6%, `registry` 89.3%, `auth` 84.5%, `handlers` 84.2%,
+  `backup` 57.9%. Three packages stay out of scope and say so: `store` 4.5% and
+  `testdb` 9.4% need a PostgreSQL, `cmd/agenthub-server` 26.3% is the assembly
+  that only a whole process walks.
+- **Branches only a fault can reach**: eleven new `*_edges_test.go` files
+  (75 cases) cover the arms a healthy host never walks — a filesystem step that
+  fails mid-`Put`, a store outage behind a grant lookup, the limiter sweeping an
+  expired window, a `.env` key the OS refuses, a session whose pipes are already
+  taken, a remote node that never claims its job. Three rules kept that from
+  becoming cosmetic:
+  - **Impossible by construction is deleted, not tested around**:
+    `aes.NewCipher` over a fixed 32 byte key and `cipher.NewGCM` over an AES
+    block cannot fail; `authz.Load` already returns on a nil store; the
+    `default` arms after `NormalizeNetwork` / `NormalizeArgsPolicy` are dead
+    because both functions are total.
+  - **Impossible on this host but real elsewhere becomes a pure function**
+    that a case can call directly: `normalizeExitCode` ("killed by a signal is
+    1, not -1", which a Windows host never produces), `dockerRefusalReason`
+    (the empty-stderr fallback a `-cover` build decorates),
+    `namesNoDirectory` (the `C:` volume root the Unix absolute-path check
+    pre-empts).
+  - **Real but needs an injected fault gets exactly one seam**, each commented
+    "production never reassigns it": `files.fsOps` for the eleven `ErrStore`
+    branches of `Put`/`Open`/`Delete`/`Probe`, `sandbox.commandContext` and
+    `sessionFrameTimeout` for pipe wiring and the two minute backstop,
+    `sandbox.remoteJobGrace`, `config.getwd`, `channels.deliverClient` (the
+    shipped client refuses loopback on purpose, so a test could otherwise only
+    ever see a delivery fail), and `io.ReadFull(rand.Reader, …)` in place of
+    `rand.Read` so a broken entropy source is reachable — the same trick
+    `secure`'s existing cases already use.
+  No `t.Skip`, no coverage exclusion, no sleep-as-assertion: the timing cases
+  shrink a package-level interval instead of waiting out the shipped one.
 - **Isolation & audit cases**: `internal/identity` covers the four shapes of "no
   identity"; `internal/audit` covers chain continuation across a restart, a failed
   insert that is counted rather than fatal, a full queue that drops instead of
   blocking, `Verify` locating the break, and the retention branches;
   `internal/handlers` drives every audit filter, the 400s for a bad cursor, limit or
   window, the 503 when no store is wired, and asserts that reading the trail does not
-  escalate to the system identity. `model_test.go` pins all 45 table names against the
-  migrations, and `auth-store.spec.js` reads `authz.AllPermissions` out of the Go
-  source so the console vocabulary cannot drift.
+  escalate to the system identity. `model_test.go` pins all 46 table names against the
+  migrations (the audit chain anchor included), and `auth-store.spec.js` reads
+  `authz.AllPermissions` out of the Go source so the console vocabulary cannot drift.
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
@@ -1099,8 +1129,11 @@ The bytes live outside the database; only their metadata does.
   cannot list, read or delete somebody else's file even with the id. A row that is not yours
   answers `404 file_not_found`, not `403`.
 - **Tests**: `internal/files` (limits, hashing, name handling, backend failure, key traversal,
-  cancellation) at 86.4% of statements, `s3_test.go` against an `httptest` server (signature
-  headers, escaping, no redirect following, transport failure, size mismatch) and
+  cancellation) at **100%** of statements — the storage faults are injected through the
+  `fsOps` seam, so a failing `sync` / `close` / `chmod` / `rename` / `stat` / `seek` and a
+  spool that cannot be created are all pinned — plus `s3_test.go` against an `httptest`
+  server (signature headers, escaping, no redirect following, transport failure, size
+  mismatch, the virtual-host URL shape and the unknown-size ceiling) and
   `internal/handlers/files_test.go` for the HTTP surface — upload → list → metadata → download
   with `Range` → delete, plus 413 / 415 / 404 / 502 / 503.
 

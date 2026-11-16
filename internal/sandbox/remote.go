@@ -234,6 +234,11 @@ func (r *RemoteProvider) Create(_ context.Context, spec Spec) (Handle, error) {
 	return Handle{ID: spec.LeaseID, Provider: "remote", Ref: spec.LeaseID, Spec: spec}, nil
 }
 
+// remoteJobGrace is how long the caller waits past the request's own budget for
+// a node to answer before the job is declared lost. A variable so a test does
+// not have to sit out the shipped half minute.
+var remoteJobGrace = 30 * time.Second
+
 // Exec dispatches one job and waits for the node's answer.
 func (r *RemoteProvider) Exec(ctx context.Context, h Handle, req ExecRequest) (ExecResult, error) {
 	job := &Job{
@@ -247,7 +252,7 @@ func (r *RemoteProvider) Exec(ctx context.Context, h Handle, req ExecRequest) (E
 		CreatedAt: time.Now(),
 	}
 	done := r.queue.Enqueue(job)
-	timeout := time.NewTimer(requestTimeout(req) + 30*time.Second)
+	timeout := time.NewTimer(requestTimeout(req) + remoteJobGrace)
 	defer timeout.Stop()
 	select {
 	case <-done:

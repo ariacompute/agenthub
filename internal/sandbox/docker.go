@@ -62,6 +62,18 @@ func (d *DockerProvider) Describe(context.Context) (Descriptor, error) {
 	}, nil
 }
 
+// dockerRefusalReason is the explanation shown when the daemon said no. The
+// daemon's own words win when it has any; otherwise the reason is synthesised
+// from the exit code, because a catalogue row with an empty reason tells an
+// operator nothing. It is separate from Probe so the empty-stderr case can be
+// pinned without a child process whose stderr a coverage build might decorate.
+func dockerRefusalReason(bin string, exit int, stderr string) string {
+	if reason := strings.TrimSpace(stderr); reason != "" {
+		return reason
+	}
+	return bin + " reported exit " + itoa(exit) + "; is the socket reachable?"
+}
+
 // Probe asks the daemon for its version: a present CLI with an unreachable
 // daemon is the failure that actually happens in containerised deployments, and
 // `docker ps` would be a heavier way to learn the same thing.
@@ -78,11 +90,7 @@ func (d *DockerProvider) Probe(ctx context.Context) (Availability, error) {
 		return Availability{Available: false, Reason: d.bin + " is not usable on this host (binary missing or daemon unreachable)"}, nil
 	}
 	if res.exit != 0 {
-		reason := strings.TrimSpace(res.stderr)
-		if reason == "" {
-			reason = d.bin + " reported exit " + itoa(res.exit) + "; is the socket reachable?"
-		}
-		return Availability{Available: false, Reason: reason}, nil
+		return Availability{Available: false, Reason: dockerRefusalReason(d.bin, res.exit, res.stderr)}, nil
 	}
 	if d.runtime != "" {
 		// `docker version` succeeds on a host that never installed runsc, so a

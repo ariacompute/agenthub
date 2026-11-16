@@ -282,9 +282,6 @@ func (s *Service) Load(ctx context.Context, userID, email, name string, isOwner 
 		IsOwner:     isOwner,
 		Permissions: map[string]bool{},
 	}
-	if s.store == nil {
-		return p, nil
-	}
 	groups, err := s.store.GroupsOfUser(ctx, userID)
 	if err != nil {
 		return nil, err

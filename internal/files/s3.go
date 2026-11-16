@@ -232,7 +232,7 @@ func (b *S3Backend) Open(ctx context.Context, key string, size int64) (ReadSeekC
 	default:
 		return nil, 0, ErrStore
 	}
-	tmp, err := os.CreateTemp("", "agenthub-s3-*.part")
+	tmp, err := fsOps.createTemp("", "agenthub-s3-*.part")
 	if err != nil {
 		return nil, 0, ErrStore
 	}
@@ -247,7 +247,7 @@ func (b *S3Backend) Open(ctx context.Context, key string, size int64) (ReadSeekC
 		_ = os.Remove(name)
 		return nil, 0, ErrStore
 	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+	if _, err := fsOps.seek(tmp, 0, io.SeekStart); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(name)
 		return nil, 0, ErrStore

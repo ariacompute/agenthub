@@ -103,7 +103,7 @@ func (s *Service) Upload(ctx context.Context, ownerID, name, contentType string,
 		name = "upload.bin"
 	}
 
-	spool, err := os.CreateTemp("", "agenthub-upload-*.part")
+	spool, err := fsOps.createTemp("", "agenthub-upload-*.part")
 	if err != nil {
 		return nil, ErrStore
 	}
@@ -126,7 +126,7 @@ func (s *Service) Upload(ctx context.Context, ownerID, name, contentType string,
 	}
 
 	head := make([]byte, 512)
-	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+	if _, err := fsOps.seek(spool, 0, io.SeekStart); err != nil {
 		return nil, ErrStore
 	}
 	read, _ := io.ReadFull(spool, head)
@@ -134,7 +134,7 @@ func (s *Service) Upload(ctx context.Context, ownerID, name, contentType string,
 	sum := hex.EncodeToString(digest.Sum(nil))
 	key := sum[:2] + "/" + sum
 
-	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+	if _, err := fsOps.seek(spool, 0, io.SeekStart); err != nil {
 		return nil, ErrStore
 	}
 	if err := s.backend.Put(ctx, key, spool, written, sum, mimeType); err != nil {
@@ -286,7 +286,10 @@ func resolveMIME(sniffed, claimed string) string {
 // that can be read should not be the only thing standing between two accounts.
 func newID() (string, error) {
 	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
+	// io.ReadFull over rand.Reader rather than rand.Read: same bytes, but the
+	// source is a package variable, which is what lets a test pin the refusal
+	// below with a broken entropy source.
+	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
 		// crypto/rand does not fail on any platform agenthub runs on; if it ever
 		// does, refusing is the only safe answer.
 		return "", err

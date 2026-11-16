@@ -126,6 +126,7 @@ func TestTableNameMapping(t *testing.T) {
 		(&Schedule{}).TableName():           "schedules",
 		(&Knowledge{}).TableName():          "knowledge",
 		(&AuditLog{}).TableName():           "audit_log",
+		(&AuditChainAnchor{}).TableName():   "audit_chain_anchor",
 		(&User{}).TableName():               "users",
 		(&Session{}).TableName():            "sessions",
 		(&OAuthAccount{}).TableName():       "oauth_accounts",
@@ -163,8 +164,8 @@ func TestTableNameMapping(t *testing.T) {
 	// The count is asserted too: a new model without a TableName would silently
 	// fall back to GORM's pluralised guess, which is rarely the migration's name,
 	// and the mismatch only shows up as a missing-table error at runtime.
-	if len(cases) != 45 {
-		t.Fatalf("models = %d, want 45 — did one gain or lose a table?", len(cases))
+	if len(cases) != 46 {
+		t.Fatalf("models = %d, want 46 — did one gain or lose a table?", len(cases))
 	}
 }
 

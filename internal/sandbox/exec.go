@@ -81,10 +81,7 @@ func runExternal(ctx context.Context, spec runSpec) (runResult, error) {
 		case errors.As(err, &exitErr):
 			// A non-zero exit is a result, not a transport failure: the caller
 			// wants the receipt, the console wants the code.
-			res.exit = exitErr.ExitCode()
-			if res.exit < 0 {
-				res.exit = 1
-			}
+			res.exit = normalizeExitCode(exitErr.ExitCode())
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return res, Error(CodeTimeout)
 		case errors.Is(err, exec.ErrNotFound):
@@ -101,6 +98,16 @@ func runExternal(ctx context.Context, spec runSpec) (runResult, error) {
 		return res, Error(CodeTimeout)
 	}
 	return res, nil
+}
+
+// normalizeExitCode turns "the process was terminated by a signal" into the
+// conventional non-zero code. A receipt holding -1 reads as a bug in the receipt
+// rather than as a killed process, and every console renders it as one.
+func normalizeExitCode(code int) int {
+	if code < 0 {
+		return 1
+	}
+	return code
 }
 
 // cappedBuffer keeps at most limit bytes and remembers that it dropped some, so

@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -444,7 +445,10 @@ func truncate(s string, max int) string {
 // audit event id must not be guessable, or a caller could probe for rows.
 func newID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	// io.ReadFull over rand.Reader rather than rand.Read: same bytes, but the
+	// source is a package variable, which is what lets a test pin the fallback
+	// below with a broken entropy source.
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
 		// crypto/rand failing is not recoverable in any useful way here; a
 		// timestamp keeps the trail flowing and is still unique enough per row.
 		return strconv.FormatInt(time.Now().UnixNano(), 16)

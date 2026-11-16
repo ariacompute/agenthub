@@ -7,12 +7,18 @@ import (
 	"strings"
 )
 
+// getwd is os.Getwd in production. It is a variable so a test can pin the branch
+// where the process has no readable working directory (a deleted cwd, a container
+// whose mount went away), which is a real startup shape and not an error worth
+// reporting: the walk simply does nothing when there is nowhere to start.
+var getwd = os.Getwd
+
 // LoadDotEnv walks up at most 6 directories from the working directory looking
 // for a .env file and exports every key it finds. Keys that are already present
 // in the process environment are never overwritten, so real deployments keep
 // full control over their configuration.
 func LoadDotEnv() {
-	dir, err := os.Getwd()
+	dir, err := getwd()
 	if err != nil {
 		return
 	}

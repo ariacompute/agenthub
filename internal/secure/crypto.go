@@ -66,14 +66,10 @@ func DecryptDefault(encoded string) (string, error) {
 // Encrypt seals plaintext with AES-256-GCM using a key derived from secret. The
 // returned value is base64(nonce || ciphertext).
 func Encrypt(plaintext, secret string) (string, error) {
-	block, err := aes.NewCipher(deriveKey(secret))
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
+	// Neither constructor can fail here: deriveKey always yields 32 bytes and
+	// cipher.NewGCM only rejects a non-16 byte block, which AES never is.
+	block, _ := aes.NewCipher(deriveKey(secret))
+	gcm, _ := cipher.NewGCM(block)
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
@@ -88,14 +84,10 @@ func Decrypt(encoded, secret string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	block, err := aes.NewCipher(deriveKey(secret))
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
+	// Same two constructors as Encrypt: a fixed 32 byte key and an AES block can
+	// only produce a GCM cipher, so there is no error to report.
+	block, _ := aes.NewCipher(deriveKey(secret))
+	gcm, _ := cipher.NewGCM(block)
 	ns := gcm.NonceSize()
 	if len(data) < ns {
 		return "", errors.New("ciphertext too short")

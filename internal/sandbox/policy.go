@@ -321,14 +321,23 @@ func cleanHostPath(raw string) (string, bool) {
 	// "/srv/etc" — the path the runtime will actually mount, rather than the
 	// string somebody wrote.
 	cleaned := path.Clean(slashed)
-	if cleaned == "/" || cleaned == "." || cleaned == ".." {
-		return "", false
-	}
-	// "C:" alone is a Windows volume root; path.Clean leaves it as "C:".
-	if len(cleaned) == 2 && cleaned[1] == ':' {
+	if namesNoDirectory(cleaned) {
 		return "", false
 	}
 	return cleaned, true
+}
+
+// namesNoDirectory reports the cleaned shapes that name no directory to mount:
+// the filesystem root, the current or parent directory, and a bare Windows
+// volume ("C:"), which path.Clean leaves as it found it. It is its own function
+// because the volume case cannot be produced on a Unix host — the absolute-path
+// check refuses "C:" long before the cleaning — while the answer still has to be
+// pinned on every platform.
+func namesNoDirectory(cleaned string) bool {
+	if cleaned == "/" || cleaned == "." || cleaned == ".." {
+		return true
+	}
+	return len(cleaned) == 2 && cleaned[1] == ':'
 }
 
 // pathWithin reports whether candidate is prefix itself or lives under it, by
@@ -427,16 +436,10 @@ func ValidateProfile(p Profile) error {
 	if p.TimeoutMS < 0 || p.MaxOutputBytes < 0 || p.IdleTTLSeconds < 0 {
 		return Error(CodePolicyDenied)
 	}
-	switch NormalizeNetwork(p.Network) {
-	case NetworkNone, NetworkAllowlist, NetworkBridge, NetworkPlatform:
-	default:
-		return Error(CodePolicyDenied)
-	}
-	switch NormalizeArgsPolicy(p.ArgsPolicy) {
-	case ArgsNone, ArgsPrefix, ArgsPassthrough:
-	default:
-		return Error(CodePolicyDenied)
-	}
+	// The two vocabularies need no switch here: NormalizeNetwork and
+	// NormalizeArgsPolicy are total, and they already fold an unknown value onto
+	// the fail-closed default ("none"). A second switch on their output could
+	// only ever have a default branch nobody can reach.
 	if NormalizeArgsPolicy(p.ArgsPolicy) == ArgsPrefix && len(p.ArgsAllow) == 0 {
 		// A prefix policy with no prefixes would refuse everything, which is
 		// indistinguishable from a misconfiguration; say so at registration.

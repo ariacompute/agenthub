@@ -424,16 +424,39 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   per-kind 配置的 jsonb 往返、唯一索引拒绝重复、命名空间 CRUD、同步结果留痕。两者均以
   `DATABASE_URL` 门控。
 - **覆盖率**：`make test-cover` 跑 `-coverprofile` 并打印 `go tool cover -func`。
-  带库时：`identity` 与 `schedules` 100%、`sandbox` 98.2%、`a2a` 98%、`netutil` 97.4%、
-  `model` 95.7%、`adapter` 95.4%、`audit` 95.1%、`config` 94.4%、`httputil` 92.1%、
-  `authz` 91.8%、`middleware` 91%、`registry` 87.9%、`router` 82.2%、`hub` 82.1%、
-  `auth` 81.4%、`secure` 80.5%、`handlers` 73.1%、`channels` 71.4%、`backup` 57.3%、
-  `store` 3%（未设 `DATABASE_URL` 时它的用例 skip，数字不代表真实覆盖）。
+  **不接数据库**测得（跳过的用例因此不会把数字撑高）：`a2a`、`audit`、`authz`、
+  `channels`、`computers`、`config`、`files`、`httputil`、`identity`、`middleware`、
+  `model`、`netutil`、`sandbox`、`schedules`、`secure` 均为 **100%**；`adapter` 96.3%、
+  `router` 91.8%、`hub` 90.6%、`registry` 89.3%、`auth` 84.5%、`handlers` 84.2%、
+  `backup` 57.9%。三个包明确不在范围内并写明原因：`store` 4.5% 与 `testdb` 9.4%
+  需要 PostgreSQL，`cmd/agenthub-server` 26.3% 是只有整个进程才走得到的装配层。
+- **只有故障才走得到的分支**：新增 11 个 `*_edges_test.go`（75 条用例），覆盖健康机器
+  永远走不到的臂——`Put` 中途失败的文件系统步骤、授权查询背后的存储故障、限流器清扫
+  过期窗口、操作系统拒绝的 `.env` 键名、管道已被占用的会话、始终不领取任务的远端节点。
+  三条规则让这件事不至于变成「为了覆盖而覆盖」：
+  - **构造上不可能的分支直接删掉，而不是绕过去测**：固定 32 字节密钥下的
+    `aes.NewCipher` 与 AES 分组下的 `cipher.NewGCM` 不可能失败；`authz.Load` 已在
+    开头对 nil store 返回；`NormalizeNetwork` / `NormalizeArgsPolicy` 是满射，它们身后
+    的 `default` 是死代码。
+  - **本机不可能、别处真实存在的分支抽成纯函数**，用例可直接调用：`normalizeExitCode`
+    （「被信号杀死记 1，不是 -1」，Windows 主机永远产生不出来）、`dockerRefusalReason`
+    （stderr 为空时的兜底文案，`-cover` 构建会把它污染掉）、`namesNoDirectory`
+    （`C:` 卷根会被 Unix 的绝对路径判断提前拦掉）。
+  - **真实但需要注入故障的分支只开一处窄接缝**，每处都注明「生产代码从不重新赋值」：
+    `files.fsOps` 对应 `Put`/`Open`/`Delete`/`Probe` 的十一个 `ErrStore` 分支，
+    `sandbox.commandContext` 与 `sessionFrameTimeout` 对应管道接线与两分钟兜底，
+    `sandbox.remoteJobGrace`、`config.getwd`、`channels.deliverClient`（出厂客户端
+    按设计拒绝回环，否则投递的成功路径永远只能看到失败），以及用
+    `io.ReadFull(rand.Reader, …)` 取代 `rand.Read`，让随机源故障可达——这正是
+    `secure` 既有用例已经在用的手法。
+  没有 `t.Skip`、没有覆盖率排除、没有拿 `Sleep` 当断言：涉及时序的用例缩小包内间隔，
+  而不是去等出厂值。
 - **隔离与审计用例**：`internal/identity` 覆盖「没有身份」的四种形态；`internal/audit` 覆盖
   重启续链、插入失败只计数不致命、队列满丢帧而不阻塞、`Verify` 定位断点、保留期两种分支；
   `internal/handlers` 逐一驱动审计的每个筛选参数、非法游标/上限/窗口的 400、未接线的 503，
-  并断言「读审计不会被提权为 system 身份」。`model_test.go` 用 45 张表的表名钉住迁移，
-  `auth-store.spec.js` 直接读 Go 源码里的 `authz.AllPermissions`，两端词表无法再悄悄漂移。
+  并断言「读审计不会被提权为 system 身份」。`model_test.go` 用 46 张表的表名钉住迁移
+  （含审计链锚点表），`auth-store.spec.js` 直接读 Go 源码里的 `authz.AllPermissions`，
+  两端词表无法再悄悄漂移。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
 - **前端**：`bunx vitest run` 24 个文件 **475 项通过**（languages / copy-fallback / enums-copy /
@@ -811,8 +834,10 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   对象键前缀与字节数，绝不记签名、密钥或带 userinfo 的 endpoint。
 - **归属**：`shared_files.owner_id` + `FORCE` 行级安全，第二个账号即使拿到 id 也无法列出、读取或删除
   别人的文件；不是你的行回 `404 file_not_found`，而不是 `403`。
-- **测试**：`internal/files`（上限、哈希、文件名处理、后端故障、键穿越、取消）语句覆盖 86.4%；
-  `s3_test.go` 用 `httptest` 桩验证签名头、路径转义、不跟随重定向、传输失败与体积不符；
+- **测试**：`internal/files`（上限、哈希、文件名处理、后端故障、键穿越、取消）语句覆盖 **100%**
+  ——存储故障经 `fsOps` 接缝注入，`sync` / `close` / `chmod` / `rename` / `stat` / `seek` 任一步失败
+  与临时文件建不出来都被钉住；`s3_test.go` 用 `httptest` 桩验证签名头、路径转义、不跟随重定向、
+  传输失败、体积不符、虚拟主机式 URL 与「体积未知时的上限兜底」；
   `internal/handlers/files_test.go` 覆盖 HTTP 面——上传 → 列表 → 元数据 → 带 `Range` 下载 → 删除，
   外加 413 / 415 / 404 / 502 / 503。
 

@@ -23,6 +23,14 @@ type DeliverResult struct {
 	Raw    string `json:"raw"`
 }
 
+// deliverClient is the client every delivery uses. It is a variable because the
+// shipped value refuses loopback and private destinations on purpose, which
+// leaves the success path unreachable from a test that can only reach a local
+// provider; production never reassigns it.
+var deliverClient = func() *http.Client {
+	return netutil.SafeClient(15*time.Second, netutil.DefaultSafeMaxBytes, false)
+}
+
 // Deliver POSTs body to the channel's configured target URL (config.target_url),
 // using an SSRF-safe client that refuses private hosts, caps the response body
 // and follows no redirects. It returns the provider's raw response verbatim and
@@ -37,7 +45,7 @@ func Deliver(ctx context.Context, ch *Channel, body string) (*DeliverResult, err
 	if err := netutil.ValidateURL(target, false); err != nil {
 		return nil, err
 	}
-	client := netutil.SafeClient(15*time.Second, netutil.DefaultSafeMaxBytes, false)
+	client := deliverClient()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewBufferString(body))
 	if err != nil {
 		return nil, err

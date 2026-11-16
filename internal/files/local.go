@@ -30,11 +30,11 @@ func NewLocalBackend(dir string) (*LocalBackend, error) {
 	if dir == "" {
 		return nil, errors.New("files: the local backend needs a directory")
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := fsOps.abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(abs, 0o700); err != nil {
+	if err := fsOps.mkdirAll(abs, 0o700); err != nil {
 		return nil, err
 	}
 	return &LocalBackend{dir: abs}, nil
@@ -63,10 +63,10 @@ func (b *LocalBackend) Put(ctx context.Context, key string, body io.Reader, size
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := fsOps.mkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return ErrStore
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".part-*")
+	tmp, err := fsOps.createTemp(filepath.Dir(path), ".part-*")
 	if err != nil {
 		return ErrStore
 	}
@@ -84,21 +84,21 @@ func (b *LocalBackend) Put(ctx context.Context, key string, body io.Reader, size
 		cleanup()
 		return ErrStore
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := fsOps.sync(tmp); err != nil {
 		cleanup()
 		return ErrStore
 	}
-	if err := tmp.Close(); err != nil {
+	if err := fsOps.closeFile(tmp); err != nil {
 		_ = os.Remove(name)
 		return ErrStore
 	}
 	// CreateTemp already uses 0600; the Chmod keeps that true even if the umask
 	// of a future Go version changes it.
-	if err := os.Chmod(name, 0o600); err != nil {
+	if err := fsOps.chmod(name, 0o600); err != nil {
 		_ = os.Remove(name)
 		return ErrStore
 	}
-	if err := os.Rename(name, path); err != nil {
+	if err := fsOps.rename(name, path); err != nil {
 		_ = os.Remove(name)
 		return ErrStore
 	}
@@ -115,7 +115,7 @@ func (b *LocalBackend) Open(ctx context.Context, key string, size int64) (ReadSe
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
-	file, err := os.Open(path)
+	file, err := fsOps.open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// The row survived but the bytes did not: that is a store fault, not
@@ -124,7 +124,7 @@ func (b *LocalBackend) Open(ctx context.Context, key string, size int64) (ReadSe
 		}
 		return nil, 0, ErrStore
 	}
-	info, err := file.Stat()
+	info, err := fsOps.stat(file)
 	if err != nil {
 		_ = file.Close()
 		return nil, 0, ErrStore
@@ -142,7 +142,7 @@ func (b *LocalBackend) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := fsOps.remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return ErrStore
 	}
 	return nil
@@ -154,7 +154,7 @@ func (b *LocalBackend) Probe(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(b.dir, ".probe-*")
+	tmp, err := fsOps.createTemp(b.dir, ".probe-*")
 	if err != nil {
 		return ErrStore
 	}

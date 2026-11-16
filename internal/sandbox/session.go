@@ -25,12 +25,23 @@ type procSession struct {
 	closed bool
 }
 
+var (
+	// commandContext builds the child command. It is a variable so a test can
+	// hand startSession a command whose pipes are already taken, which is the
+	// only way the three "cannot wire stdio" branches are reachable.
+	commandContext = exec.CommandContext
+	// sessionFrameTimeout is the backstop for a child that never answers and
+	// never lets its context expire. A variable so a test need not wait two
+	// minutes to see the branch.
+	sessionFrameTimeout = 2 * time.Minute
+)
+
 // startSession launches bin+args and wires its stdio.
 func startSession(ctx context.Context, spec runSpec) (*procSession, error) {
 	if strings.TrimSpace(spec.bin) == "" {
 		return nil, Error(CodePolicyDenied)
 	}
-	cmd := exec.CommandContext(ctx, spec.bin, spec.args...)
+	cmd := commandContext(ctx, spec.bin, spec.args...)
 	cmd.Dir = spec.dir
 	cmd.Env = spec.env
 	setProcessGroup(cmd)
@@ -95,7 +106,7 @@ func (s *procSession) RoundTrip(ctx context.Context, payload []byte) ([]byte, er
 		// behind would leak one goroutine per timed out call.
 		s.kill()
 		return nil, Error(CodeTimeout)
-	case <-time.After(2 * time.Minute):
+	case <-time.After(sessionFrameTimeout):
 		s.kill()
 		return nil, Error(CodeTimeout)
 	}
