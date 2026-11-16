@@ -1,11 +1,15 @@
 name: Release
 
-# Publish an agenthub release: build and push the container image to DockerHub.
+# Publish an agenthub release: build and push the container image to DockerHub,
+# Quay.io and GitHub Container Registry (GHCR).
 #
-# Image:
+# The same image is published to all three registries under the same repository
+# name (with <release tag> pinned to that release and :latest tracking the most
+# recent one):
 #
-#   ariacompute/agenthub-agenthub:<release tag>   pinned to that release
-#   ariacompute/agenthub-agenthub:latest          whatever was released last
+#   ariacompute/agenthub-agenthub:<release tag>          (DockerHub)
+#   quay.io/ariacompute/agenthub-agenthub:<release tag>  (Quay.io)
+#   ghcr.io/ariacompute/agenthub-agenthub:<release tag>  (GHCR)
 #
 # The release tag is both the image tag and the VERSION build-arg, so the image
 # tag always equals what /healthz reports and what the console renders in the
@@ -26,6 +30,9 @@ name: Release
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
 #   - DOCKERHUB_USERNAME: DockerHub account / org name
 #   - DOCKERHUB_TOKEN:    DockerHub access token with write permission
+#   - QUAY_USERNAME:      Quay.io account / org name
+#   - QUAY_TOKEN:         Quay.io access token with write permission
+#   - ARIACOMPUTE_TOKEN:  GitHub PAT with packages:write, used to push to GHCR
 on:
   release:
     types: [published]
@@ -43,6 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write # needed to push to GHCR
 
     steps:
       - name: Checkout the release tag
@@ -86,6 +94,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.ARIACOMPUTE_TOKEN }}
+
       - name: Build and push the agenthub image
         uses: docker/build-push-action@v6
         with:
@@ -105,6 +127,10 @@ jobs:
           tags: |
             ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
             ariacompute/agenthub-agenthub:latest
+            quay.io/ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
+            quay.io/ariacompute/agenthub-agenthub:latest
+            ghcr.io/ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
+            ghcr.io/ariacompute/agenthub-agenthub:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.meta.outputs.tag }}
