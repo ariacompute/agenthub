@@ -32,8 +32,14 @@ export default [
     moduleOrSkip(res, 'sandbox default profile')
     expectAvailable(res, 'sandbox default profile')
     const profile = res.json?.default
-    if (!profile) throw new Error('the sandbox list carries no default profile')
-    expectShape(profile, ['cpu', 'memoryMB', 'pidsLimit'], 'default profile')
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+      throw new Error('the sandbox list carries no default profile')
+    }
+    // expectShape() takes a response object (it reads .json), not the already
+    // unwrapped profile. Validate the plain object's keys directly.
+    for (const key of ['cpu', 'memoryMB', 'pidsLimit']) {
+      if (!(key in profile)) throw new Error(`the default profile is missing ${key}`)
+    }
     if (!(profile.cpu > 0) || !(profile.memoryMB > 0) || !(profile.pidsLimit > 0)) {
       throw new Error(`the default ceiling is not positive: ${JSON.stringify(profile)}`)
     }

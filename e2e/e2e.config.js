@@ -73,8 +73,8 @@ export function publicConfig(config) {
   }
 }
 
-/** Opt-in reason helper: returns false (run) or a skip reason (string). */
+/** Opt-in gate: `true` runs the case, a string skips it with that reason. */
 export function optinReason(config, key, description) {
-  if (config.optin[key]) return false
+  if (config.optin[key]) return true
   return `${description}: set AGENTHUB_E2E_${key.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase()).toUpperCase()} to enable`
 }
