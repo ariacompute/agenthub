@@ -130,11 +130,37 @@ func (d *DeclarativeProvider) Describe(context.Context) (Descriptor, error) {
 		Layer:     layer,
 		Isolation: isolation,
 		Network:   network,
-		Requires:  []string{d.spec.Binary},
-		Source:    SourceDeclarative,
-		License:   licence,
-		DocsURL:   d.spec.DocsURL,
+		// Only the limits the template actually forwards: a preset that expands
+		// --mem={memory_mb} is claiming the tool enforces memory, and one that
+		// never mentions {cpu} is not.
+		Limits:   d.declaredLimits(),
+		Requires: []string{d.spec.Binary},
+		Source:   SourceDeclarative,
+		License:  licence,
+		DocsURL:  d.spec.DocsURL,
 	}, nil
+}
+
+// declaredLimits reports which of the quota placeholders appear anywhere in the
+// operator's argv. The values come from the resolved profile, so what the tool
+// receives is what the ceiling allowed.
+func (d *DeclarativeProvider) declaredLimits() []string {
+	segments := make([]string, 0, len(d.create)+len(d.execPre)+len(d.execSuf))
+	segments = append(segments, d.create...)
+	segments = append(segments, d.execPre...)
+	segments = append(segments, d.execSuf...)
+	joined := strings.Join(segments, "\x00")
+	var out []string
+	for _, pair := range [][2]string{
+		{"{cpu}", LimitCPU},
+		{"{memory_mb}", LimitMemory},
+		{"{pids}", LimitPids},
+	} {
+		if strings.Contains(joined, pair[0]) {
+			out = append(out, pair[1])
+		}
+	}
+	return out
 }
 
 // normalizeNetworks drops values the vocabulary does not know, so a typo in an

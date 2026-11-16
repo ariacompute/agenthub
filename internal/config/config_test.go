@@ -708,6 +708,33 @@ func TestValidateSandboxBlock(t *testing.T) {
 		t.Fatalf("provider = %q, want the docker default", c.SandboxProvider)
 	}
 
+	// A hand-built Config leaves the quota block zeroed; Validate fills it with
+	// the shipped numbers instead of rejecting the instance.
+	c = sandboxConfig()
+	if c.SandboxCPU != 0 || c.SandboxMaxMemoryMB != 0 {
+		t.Fatalf("the fixture must start with a zeroed quota block: %+v", c)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a zeroed quota block must be filled, not rejected: %v", err)
+	}
+	if c.SandboxCPU != 1 || c.SandboxMemoryMB != 1024 || c.SandboxPidsLimit != 128 {
+		t.Fatalf("defaults = %g/%dMB/%d, want 1/1024/128", c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit)
+	}
+	if c.SandboxMaxCPU != 4 || c.SandboxMaxMemoryMB != 4096 || c.SandboxMaxPidsLimit != 512 {
+		t.Fatalf("ceilings = %g/%dMB/%d, want 4/4096/512", c.SandboxMaxCPU, c.SandboxMaxMemoryMB, c.SandboxMaxPidsLimit)
+	}
+
+	// And an operator who sizes both halves keeps exactly what they wrote.
+	c = sandboxConfig()
+	c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit = 2, 2048, 256
+	c.SandboxMaxCPU, c.SandboxMaxMemoryMB, c.SandboxMaxPidsLimit = 8, 8192, 1024
+	if err := c.Validate(); err != nil {
+		t.Fatalf("explicit quotas must be accepted: %v", err)
+	}
+	if c.SandboxCPU != 2 || c.SandboxMaxMemoryMB != 8192 {
+		t.Fatalf("explicit quotas were rewritten: %g/%d", c.SandboxCPU, c.SandboxMaxMemoryMB)
+	}
+
 	cases := []struct {
 		name string
 		mut  func(*Config)
@@ -723,6 +750,26 @@ func TestValidateSandboxBlock(t *testing.T) {
 		{"node poll timeout above a minute", func(c *Config) { c.SandboxNodePollTimeout = 90 * time.Second }},
 		{"zero sweep interval", func(c *Config) { c.SandboxSweepInterval = 0 }},
 		{"sweep interval above ten minutes", func(c *Config) { c.SandboxSweepInterval = 11 * time.Minute }},
+		// Quotas: a zero default is "no ceiling", which is not what an operator
+		// means to write, and a ceiling below the default would clip every
+		// resource before it runs.
+		{"negative cpu default", func(c *Config) {
+			c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit = -1, 1024, 128
+		}},
+		{"zero memory default", func(c *Config) {
+			c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit = 1, 0, 128
+		}},
+		{"ceiling below the default", func(c *Config) {
+			c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit = 2, 1024, 128
+			c.SandboxMaxCPU, c.SandboxMaxMemoryMB, c.SandboxMaxPidsLimit = 1, 4096, 512
+		}},
+		{"ceiling out of range", func(c *Config) {
+			c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit = 1, 1024, 128
+			c.SandboxMaxCPU, c.SandboxMaxMemoryMB, c.SandboxMaxPidsLimit = 1024, 4096, 512
+		}},
+		{"relative work directory root", func(c *Config) {
+			c.SandboxWorkDirRoots = []string{"srv/work"}
+		}},
 		{"sandbox ceiling below the router ticket bound", func(c *Config) {
 			c.RouterEnabled = true
 			c.RouterInterval = time.Second

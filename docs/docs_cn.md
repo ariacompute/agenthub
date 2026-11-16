@@ -134,8 +134,9 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 
 | 方法 | 路径 | 权限 | 作用 | 请求 | 响应 |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/resources` | `resources:read` — 查看资源 | 列出全部资源 | `?kind=&q=&namespace=&status=&discoverable=` | `{ resources: [Entry], counts: { kind }, health: { state } }` |
+| `GET` | `/api/resources` | `resources:read` — 查看资源 | 列出全部资源 | `?kind=&q=&namespace=&status=&discoverable=&limit=&offset=` | `{ resources: [Entry], counts: { kind }, health: { state }, total, limit, offset }` |
 | `POST` | `/api/resources` | `resources:write` — 变更资源 | 在资源中新建一条 | `{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }` | `Entry — 201` |
+| `POST` | `/api/resources/batch` | `resources:read` — 查看资源 | 按 id 一次读取多条记录；读不到的 id 以 missing 返回。 | `{ ids: [string] } — up to 100, duplicates dropped, order preserved` | `{ resources: [Entry], missing: [id] }` |
 | `GET` | `/api/resources/{id}` | `resources:read` — 查看资源 | 按 id 读取其中一条资源 | — | `Entry` |
 | `PUT` | `/api/resources/{id}` | `resources:write` — 变更资源 | 整体替换其中一条资源 | `Entry — the path id wins over the body` | `Entry` |
 | `DELETE` | `/api/resources/{id}` | `resources:write` — 变更资源 | 删除其中一条资源 | — | `204, no body` |
@@ -404,8 +405,7 @@ API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证�
       "provider": "docker",
       "runtime": "runsc",
       "image": "python:3.12-slim",
-      "work_dir": "/work",
-      "readonly_root": false,
+      "work_dir": "/srv/agenthub/work/ruff",
       "network": "none",
       "cpu": 1.5,
       "memory_mb": 512,
@@ -420,7 +420,7 @@ API 密钥是一种长效 bearer 凭证，以所属用户的身份进行认证�
 }
 ```
 
-network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发放连通性；egress_allowlist 只是记下资源希望访问的主机，在出网代理落地之前一律按 none 执行，因为接受这个取值不能变成一层并不存在的过滤。readonly_root 是三态：不写即继承只读根，只有显式 false 才是申请可写的方式。
+network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发放连通性；egress_allowlist 只是记下资源希望访问的主机，在出网代理落地之前一律按 none 执行，因为接受这个取值不能变成一层并不存在的过滤。readonly_root 是三态：不写即继承只读根，只有显式 false 才是申请可写的方式。文件系统与配额走同一道闸门：work_dir 是宿主路径且必须落在 AGENTHUB_SANDBOX_WORKDIR_ROOTS 内，显式 false 需要实例打开 AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT，cpu/memory/pids 在创建租约时被夹到 AGENTHUB_SANDBOX_MAX_*。
 
 ### 网络模式
 

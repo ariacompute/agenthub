@@ -32,7 +32,9 @@ onMounted(async () => {
   // Who the caller is decides what the rest of the console may show, so it is
   // resolved first; the router guard then redirects an anonymous visit.
   await Promise.all([auth.loadMe(), store.refreshHealth()])
-  await Promise.all([store.refreshResources(), store.refreshTasks()])
+  // The boot prefetch is the whole catalogue: the views that need everything
+  // (topology, playground, grants) get it before it is ever paged.
+  await Promise.all([store.refreshAllResources(), store.refreshTasks()])
   setInterval(() => store.refreshTasks(), 5000)
 })
 </script>

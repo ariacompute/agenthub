@@ -204,7 +204,7 @@ persistence ← internal/store（GORM 实现）
   `components/EnvEditor.vue`）；`tests/` vitest）
 - `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js` + `web/src/views/DocsView.vue`：
   **控制台自带文档屏**（侧边栏「管理」之后，无权限门控）。内容与文案分家——`docs-content.js` 是
-  语言中立的机器数据（`/a2a` 七方法 + 别名、144 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
+  语言中立的机器数据（`/a2a` 七方法 + 别名、145 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
   原样渲染不翻译；`docs-copy.js` 只放散文，13 语齐备。二者的分界由 `tests/copy-fallback.spec.js`
   强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
   CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。
@@ -332,12 +332,20 @@ make test-integration # db-migrate + 只跑 Integration 用例
 make test-cover       # db-migrate + 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
-make e2e-api                 # e2e/ 接口套件：144 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）
+make e2e-api                 # e2e/ 接口套件：145 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）
 make e2e-ui                  # e2e/ 界面套件：Playwright 六段控制台旅程
 make e2e / make e2e-coverage # 两套都跑 / 仅端点覆盖度守卫
                              # ./scripts/test-api.sh 为兼容转发器；BASE_URL 指向已运行实例
                              # 默认 SKIP 的外部依赖由 AGENTHUB_E2E_* 开关开启，详见 e2e/README.md
 ```
+
+**CI（`.github/workflows/ci.yml`，四个并行 job）**：`go`（`go vet` + 先 `-p 1` 单独跑
+`internal/store` 建表，再 `go test -race ./...`）、`go-restricted`（以生产用的
+`agenthub_app` 角色重跑全量，需要 DDL 的用例自带 skip 理由）、`web`（`bunx vitest run`）、
+`e2e`（`make build` → 路由覆盖守卫 → 起服务 → `make e2e-api` → `make e2e-ui`）。`e2e` 行的是
+**同一批 make 目标**，不另写一套命令：顺序固定为「静态守卫（无需服务）→ 接口 → 界面」，
+`AGENTHUB_E2E_STRICT_COVERAGE=1` 让「文档里有路由、用例表没覆盖」直接失败；服务端环境见
+`e2e/README.md` 的「Continuous integration」表，改这里要同步那里，否则 CI 与本地会分叉。
 
 ## 发布（镜像）
 
@@ -396,6 +404,22 @@ make e2e / make e2e-coverage # 两套都跑 / 仅端点覆盖度守卫
 - **owner 必须贯穿**：经 router 发起的执行走 `Hub.SendAs(ticket.ActorID)`，否则租约落进「匿名不复用」。
 - **上限交叉校验**：`config.Validate()` 要求 `SANDBOX_MAX_TOTAL ≥ ROUTER_MAX_TICKETS`；取不到租约返回
   **可重试**的 `sandbox_limit_reached`（与 `sandbox_policy_denied` 区分：前者会重试，后者不会）。
+- **文件系统是运营者的事，不是资源的事**：`work_dir` 是**宿主**路径（挂进 `/work`），必须过
+  `sandbox.ValidateHostPolicy`——绝对路径、无 `,`/控制字符、非卷根、不在系统目录黑名单
+  （`/proc /sys /dev /etc /root /usr /var/lib …`）；`AGENTHUB_SANDBOX_WORKDIR_ROOTS` 非空时还必须落在
+  其中一条前缀内（空 = 仅黑名单，保存量可用）。`readonly_root:false` 须 `AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT=true`
+  才放行，否则保存与租约期都回 `sandbox_policy_denied`。`docker` 用 `--mount type=bind,src=…,dst=/work[,readonly]`
+  而**不是** `-v`（`-v` 会静默创建缺失的宿主目录、并把第二个冒号当容器内路径）；`/tmp` 与匿名的 `/work`
+  都是带 `size=` 上限的 tmpfs，`HOME`/`TMPDIR` 指向 `/tmp`；`bwrap` 必须按 `Profile.Readonly()` 在
+  `--ro-bind` / `--bind` 之间切换（历史上恒只读，与 docker 语义相反）。
+- **配额只收紧不放大**：`AGENTHUB_SANDBOX_CPU/MEMORY_MB/PIDS_LIMIT` 是实例默认（资源不写就继承），
+  `AGENTHUB_SANDBOX_MAX_*` 是硬上限。注册期由 `Registry.WithSandboxPolicy` 拒绝超限（`sandbox_policy_denied`），
+  运行期 `Manager.Acquire` 再用 `Limits.Clamp` 夹到上限（存量记录与上游同步来的记录走这条），被夹时
+  `slog.Warn` + `lease.created` 帧带 `limitsClamped`；已有租约超出上限时**回收重建**而不是继续跑。
+  `Resolve` 保持纯合并语义，夹取只发生在准入与注册闸门。`docker` 的 `--memory-swap` 与 `--memory` 同值。
+  `Descriptor.Limits` 只做**如实声明**（docker `cpu/memory/pids`、bwrap/local 空、remote/垫片 `delegated`、
+  声明式模板报它真正展开的占位符），**不做**失败门禁——默认 profile 恒带 cpu/mem，按 network 那样门禁会让
+  bwrap 完全不可用。
 - **审计只存摘要**：`sandbox_execs` 存命令摘要、退出码、耗时与 stdout/stderr 的 sha256，**不得**落全量输出。
 - **两种不可用语义**：未接线 → `503 feature_unavailable`；已接线但后端跑不了 → `sandbox_unsupported`。
   控制台据此显示「沙盒已关闭」而不是空数据。

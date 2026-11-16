@@ -37,7 +37,13 @@ func (b *BwrapProvider) Describe(context.Context) (Descriptor, error) {
 		// "platform". Listing "bridge" made a request for a NAT'd interface come
 		// back as the host network, and nobody noticed because nothing compared
 		// the request with this list.
-		Network:  []string{NetworkNone, NetworkPlatform},
+		Network: []string{NetworkNone, NetworkPlatform},
+		// No cgroup of its own: a profile's cpu/memory/pids ceiling is recorded
+		// and audited but not applied here. Advertising them would be the same
+		// mistake as advertising "bridge" used to be. RLIMIT_NPROC is not a
+		// substitute for pids: it counts processes per real uid, so it leaks
+		// across sandboxes and can fail the wrapper itself.
+		Limits:   nil,
 		Requires: []string{b.bin},
 		Source:   SourceBuiltin,
 		License:  "LGPL-2.0-or-later",
@@ -115,19 +121,36 @@ func bwrapArgs(p Profile, req ExecRequest) []string {
 	if NormalizeNetwork(p.Network) == NetworkPlatform {
 		args = append(args, "--share-net")
 	}
+	// The root is read-only unless the profile says otherwise, and bubblewrap is
+	// the one backend where that was not true: it always emitted --ro-bind, so a
+	// resource that explicitly asked for a writable root silently got a
+	// different sandbox than the same policy produced under docker. Both
+	// backends now read the same Profile.Readonly().
+	rootBind := "--ro-bind"
+	if !p.Readonly() {
+		rootBind = "--bind"
+	}
 	args = append(args,
-		"--ro-bind", "/", "/",
+		rootBind, "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
+		// bubblewrap's --tmpfs has no per-mount flags, so /tmp cannot be made
+		// noexec here: the namespace is the boundary, and the descriptor says
+		// "namespace" rather than "container" for exactly this reason.
 		"--tmpfs", "/tmp",
 	)
 	workdir := strings.TrimSpace(p.WorkDir)
-	if workdir != "" {
+	switch {
+	case workdir != "" && p.Readonly():
+		// The work directory inherits the root's mode: a read-only profile gets a
+		// read-only share, which is what the docker backend's ",readonly" says.
+		args = append(args, "--ro-bind", workdir, "/work")
+	case workdir != "":
 		args = append(args, "--bind", workdir, "/work")
-	} else {
+	default:
 		args = append(args, "--tmpfs", "/work")
 	}
-	args = append(args, "--chdir", "/work", "--clearenv", "--setenv", "HOME", "/tmp")
+	args = append(args, "--chdir", "/work", "--clearenv", "--setenv", "HOME", "/tmp", "--setenv", "TMPDIR", "/tmp")
 
 	allowed := make([]string, 0, len(req.Env))
 	for name := range req.Env {

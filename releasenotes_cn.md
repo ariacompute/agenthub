@@ -119,6 +119,8 @@ Agent 调用。
 - **CRUD 与发现**：`GET/POST /api/resources`、`GET/PUT/DELETE /api/resources/{id}`、
   `POST /api/resources/{id}/health`，支持 `?kind=`、`?q=`、`?namespace=` 与 `?status=`
   过滤和计数。
+- **分页**：`GET /api/resources` 另收 `?limit=`（0–200，`0` 或不传仍是历史上的一次返回全量）与 `?offset=`，响应回带 `total` / `limit` / `offset`。无意义的窗口（`limit=abc`、`limit=201`、`offset=-1`）回 `400 bad_request`，而不是被悄悄忽略。切片**发生在可见性之后**：可见性由 Go 侧决定（grants ∪ public），先切会让非 owner 拿到长度说明不了任何事的一页。`counts` 与 `health` 改成按去掉 kind 的可见集合计算，因此筛了类型之后其余标签页的计数不再归零。`LIMIT` 刻意不下推 SQL：`q` 跨 jsonb 列、可见性在 Go 侧，下推会改答案——取舍记在 `requirements.md`，keyset 下推留作后续项。
+- **批量读**：`POST /api/resources/batch` 收 `{"ids": […]}`（最多 100 条，去重，按请求顺序回），返回 `{resources, missing}`。不存在与"存在但看不见"的 id 一律进 `missing`，与「`GET` 别人的记录回 404 而不是 403」同一条规矩：批量读不能变成存在性探针。空数组、超过 100 条、含空白 id 都是 `400`。
 - **实测健康探针**：`POST /api/resources/{id}/probe` 让资源自身的 connector 去测它到底好不好——agent 去拉它的 Agent Card、MCP 去 ping 它的 `initialize`——并把结论存回；探针若测不到，则记为 `unhealthy` 而非保留旧值。它与 `…/health` 不同：后者记录的是运维人员的判断。
 - **身份与会话**：`GET /api/auth/config` 返回已启用的 OAuth 提供方；`GET /api/auth/sessions` 与
   `DELETE /api/auth/sessions/{id}` 供用户查看并吊销自己的会话，而 `DELETE /api/users/{id}/sessions`
@@ -298,7 +300,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
 
 - **注册中心**：六类（含 `custom`）筛选 + 搜索、命名空间与状态筛选、健康指示与统计条、
   单资源「试跑」。注册抽屉改为按 kind 切换专属配置区块——model 看 router、MCP 看 transport、
-  skill 看步骤与手册；每张卡片带审批徽标，只给出当前状态允许的迁移动作。
+  skill 看步骤与手册；每张卡片带审批徽标，只给出当前状态允许的迁移动作。筛选改为**服务端**执行（键盘输入防抖），列表**可翻页**：上一页 / 下一页、每页 25 / 50 / 100，并显示「第 1–25 条，共 137 条」——区间取自服务端的 `total`，不是前端猜的。写操作后刷新的是「当前这一页」，而拓扑、试跑台、授权表与启动预取显式要全量目录，因此一个屏的分页不会饿着另一个屏。
 - **命名空间**：命名空间与其审批策略，外加待审批队列（行内批准 / 驳回）。
 - **上游源**：上游注册中心源、手动「立即同步」，以及最近一次同步的
   导入 / 更新 / 跳过三计数。
@@ -317,7 +319,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   请求 ID、主体、动作、资源、状态码与耗时条形图），以及并排展示 `prev_hash` 与 `hash` 的取证抽屉；
   链校验会指出第一处断链的行。空态与无权限态都是正经界面，不是一张空表。
 - **文档**（`/docs`）：控制台自带文档，随构建发版、离线可读。五章——核心概念、A2A 方法、
-  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**完整路由表（141 条）**，
+  HTTP 接口、认证与权限、错误码——左侧索引随滚动高亮。  端点表覆盖**完整路由表（145 条，含批量读）**，
   逐条给出方法、路径、所需权限，以及取自各 handler 真实编解码结构的请求/响应示例。
   入口位于侧边栏「管理」之后，**不加权限门控**：任何已登录账号都可读；而「管理」自身
   仍按其权限显隐，文档项不随之消失。
@@ -434,17 +436,19 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `auth-store.spec.js` 直接读 Go 源码里的 `authz.AllPermissions`，两端词表无法再悄悄漂移。
 - **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
   （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
-- **前端**：`bunx vitest run` 21 个文件 **417 项通过**（languages / copy-fallback / enums-copy /
+- **前端**：`bunx vitest run` 24 个文件 **475 项通过**（languages / copy-fallback / enums-copy /
   api / api-endpoints / audit / auth-store / format / errors / backup-api / docs-content /
-  playground / store / user-form / use-copy / use-dismiss / style 护栏，外加沙盒、调度与
-  共享文件三块面）。`bun run test:coverage`（v8）报告：语句 100%、分支 95.8%、函数 100%；
-  未覆盖的分支是界面永远走不到的防御臂。
+  playground / store / user-form / use-copy / use-dismiss / style 护栏，外加沙盒、调度、
+  共享文件、分页与启动四块面）。`bun run test:coverage`（v8）报告：语句 100%、分支 99.36%、
+  函数 100%（统计范围 `src/lib/**`）；未覆盖的分支是界面永远走不到的防御臂。
 - **同一套用例也以生产角色跑**：CI 的第二个 job 依据 `scripts/provision-db-roles.sql` 建出
   `agenthub_migrator` / `agenthub_app`，用 migrator 迁移，再以 `agenthub_app`（只有 DML、
   `NOBYPASSRLS`、无 DDL）跑完整 `go test ./...`。需要建表的用例统一走 `internal/testdb`：
   `TempSchema` 建一个 `it_<随机>` schema 并把 `search_path` 指过去，`RequireDDL` 把「这个角色
   建不了表」变成带原因的跳过（`production role: no DDL, use a migrator DSN`），而不是失败——
   否则生产形态第一次进流水线时会报一个根本不是缺陷的「权限不足」。
+- **成品也进 CI**：新增第四个 job，先 `make build`（控制台 + 二进制），再依次跑路由覆盖守卫、接口套件与六段 Playwright 旅程，对着真实 Postgres 与真实进程——单测证明的是零件，这条证明的是产品。守卫放最前，因为它不需要服务：`docs/` 里加了路由却没有用例，失败在流水线而不是在评审。Chromium 与沙盒默认镜像预先装好（首个租约会耗在拉镜像上，然后以超时报错，看起来像缺陷）；失败时报告、Playwright HTML 报告与服务端日志一并归档。
+- **目录分页与批量读**：`internal/handlers/api_paging_test.go` 钉住窗口（`limit` / `offset` 回显、`total` 准确、offset 越界为空页、`abc` / `-1` / `201` / 负 offset 的 400）、去 kind 的计数、批量读（请求顺序、去重、不存在与不可见都进 `missing`、恰好 100 条可用、空数组 / 空白 id / 101 条为 400），以及「被拒的记录不会从这两条路径漏出来」。`e2e/api/cases/02-resources.js` 再以真实 HTTP 把同一套契约钉一次。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
   错误码路径、注册 → 调用 → 删除闭环。
@@ -652,7 +656,10 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   空间而不是 NAT 接口；`docker` 声明 `none|bridge|platform` 且 `createArgs` 逐项对齐，`platform`
   交给守护进程默认网络而不再发字面 `bridge`；远端节点、平台垫片与未声明网络的模板只声明
   **`delegated`**，因为本进程不施加约束、约束发生在节点。`Descriptor` 另增 `EnvKeys`（垫片需要的
-  环境变量名）与 `SourcePlatform`，编译进二进制的垫片不再假装自己是「带一个二进制」的声明式模板。
+  环境变量名）、`Limits`（真正能施加的配额项：容器报 `cpu` / `memory` / `pids`，`bwrap` 与 `local`
+  报空，远端节点与平台垫片报 `delegated`）与 `SourcePlatform`，编译进二进制的垫片不再假装自己是
+  「带一个二进制」的声明式模板。`Limits` **只作如实展示**：默认 profile 恒带 cpu 与内存，若像网络
+  模式那样按它做门禁，bubblewrap 会直接不可用。
 - **准入失败即拒绝**：`Manager.Acquire` 先 `Describe()`，profile 的网络模式不在声明内就返回
   `sandbox_capability_unavailable`，后端一次都不会被调用。向 bubblewrap 要 `bridge` 过去会拿到
   宿主的网络命名空间，现在它得到的是一个答复。
@@ -668,6 +675,19 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   `sandbox_limit_reached`，交给调度器退避。
 - **凭据不进上下文**：远端 Agent 调用由服务端从 `credential_env` 注入，任务元数据与产物只留
   变量名。
+
+### 文件系统闸门
+
+- **能碰宿主机哪里，是运营者的策略，不是资源的策略**：资源只报一个目录，实例决定这个目录是否可达。`sandbox.HostPolicy` 配 `ValidateHostPolicy` 拒绝这些 `work_dir`——不是绝对路径、含 `..` 元素、含控制字符 / NUL、含逗号（`--mount` 把它当选项分隔符）、是卷根、落在系统目录（`/etc`、`/proc`、`/sys` 等）之下。`AGENTHUB_SANDBOX_WORKDIR_ROOTS`（绝对路径、逗号分隔）把它变成白名单：按整段匹配，`/srv/work` 不是 `/srv/workshop` 的父目录；前缀本身不合法时**跳过而不是放宽**。
+- **可写根要运营者点头**：`AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT` 默认 **false**——能自己放宽文件系统视野的资源，正是不该由资源自己决定的那一类。没有这个开关时 `readonly_root: false` 在保存那一刻就回 `sandbox_policy_denied`，租约期再拒一次。这是**有意的收紧**：依赖它的存量记录需要显式开启。
+- **两个后端说的是同一件事**：docker 改用 `--mount type=bind,src=…,dst=/work[,readonly]` 而不是 `-v`——源目录不存在现在直接失败，不再被静默建在宿主上（过去一个手误会变成一份空的、宿主所有的共享目录）；同时把 `HOME` / `TMPDIR` 指到临时目录，于是往 `$HOME` 写的 CLI 会因为它自己的原因失败，而不是报一个来自只读镜像的权限错误。`bwrap` 改为读 `Profile.Readonly()`，不再恒发 `--ro-bind /`：同一份策略在两个后端产出同一个沙盒，只读 profile 的工作目录也一并只读。
+
+### 资源配额
+
+- **三个数字、一条上限**：`sandbox.Limits{CPU, MemoryMB, PidsLimit}`，`Clamp` 只下调 profile，`Exceeds` 用于注册期。资源继承的是 `AGENTHUB_SANDBOX_CPU`（1）/ `_MEMORY_MB`（1024）/ `_PIDS_LIMIT`（128）；它永远越不过的是 `AGENTHUB_SANDBOX_MAX_CPU`（4）/ `_MAX_MEMORY_MB`（4096）/ `_MAX_PIDS_LIMIT`（512）。两组都只在沙盒开启时校验，从不启用沙盒的实例因此与过去一样合法。
+- **超限在写入处就被拒**：注册走 `Registry.WithSandboxPolicy`，由 manager 用的同一批 `AGENTHUB_SANDBOX_*` 装配，因此 handler、上游同步与示例种子共用一道闸门，被拒的 profile 一次都到不了租约。`registry` 仍然不 import 控制面。
+- **存量记录超限是夹取而不是失败**：`Manager.Acquire` 夹到上限、写日志（只记租约与资源标识和前后数字，绝不记命令），并在租约事件里带 `limitsClamped`——「资源要了 64 核、拿到 4 核」因此是可见的。已在跑但高于（被下调后的）上限的租约会被回收重建，不会继续享受旧预算。
+- **swap 换不回内存额度**：docker 让 `--memory-swap` 与 `--memory` 同值——这是「给单个容器禁掉 swap」的官方做法；只给 `--memory` 时 swap 不受限，额度就成了建议。
 
 ### 收口的执行面
 
@@ -693,6 +713,11 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
   未知回报）。
 - `tests/sandbox_e2e_test.go`：真实 HTTP 打控制台端点、空命令被拒、未知租约 404、他人租约不可见、
   未接线 503、节点注册 → 领取 → 回报（第二台节点被拒），以及 SSE 回放。
+- `internal/sandbox/policy_test.go` 与 `manager_test.go`：宿主路径闸门（相对路径、`..`、系统目录、
+  卷根、逗号、白名单命中与未命中、非法前缀被跳过）、可写根开关的两侧、`Limits.Clamp` /
+  `Exceeds`、夹取留在租约事件上，以及高于下调后上限的在跑租约被回收重建。
+- `e2e/api/cases/11-sandboxes.js`：默认 profile 不得放弃只读根；系统目录或相对 `work_dir` 带机器码
+  被拒；未开启实例开关时可写根被拒——开启了的实例按该原因 SKIP，而不是判失败。
 - agenthub 前端：`docs-content.spec.js` 钉住 13 语的沙盒文档分组，单色守卫继续覆盖新增文案。
 
 ---

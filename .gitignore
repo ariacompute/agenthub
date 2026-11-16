@@ -26,3 +26,9 @@ e2e/reports/
 e2e/.auth/
 e2e/test-results/
 e2e/playwright-report/
+
+# What the e2e CI job writes at the repository root; a local reproduction of that
+# job would otherwise leave a log and a files directory in `git status`.
+/server.log
+/server.pid
+/.e2e-files/

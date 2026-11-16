@@ -1366,3 +1366,81 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
 - 文档同步：`requirements.md`（§1.1 / §1.2）、`AGENTS.md`（概述与适配器目录）、
   中英 `releasenotes`（适配层、Model Router 边界、示例说明）、中英 `README`、
   `example/README(.md/_cn.md)`、`e2e/README.md`（SKIP 语义）、`task.md`（本条）。
+
+## M24 — 第八轮收口：分页与批量读 / 文件系统闸门 / 配额上限 / e2e 进 CI（2026-11-16）
+
+对照《agenthub + agentbuddy 完整度评估 v3》的「剩余短板」，收口四项（egress sidecar 按决定不做）。
+原则是**缺省行为不变**：分页不传参仍是全量，批量读是新路由，配额上限取宽松默认（4 核 / 4 GiB / 512）。
+
+### 1. 变更
+
+- **分页**：`GET /api/resources` 新增 `limit`（0–200，0/缺省=全量）与 `offset`（≥0），响应补
+  `total` / `limit` / `offset`；非法或越界一律 400 `bad_request`（复用既有码，不新增登记）。
+  **切片发生在 `visibleEntries` 之后**——可见性是 Go 侧（grants ∪ public）决定的，先切会让非 owner
+  拿到长度不定的空页。`counts` / `health` 改成去 kind 的同条件集合计算，因此分页后各标签页计数不再
+  归零（顺带修掉一个存量缺陷）。`LIMIT` 不下推 SQL：`q` 跨 jsonb 列、可见性在 Go 侧，下推即改语义；
+  取舍写在 `requirements.md`，keyset 下推留作后续项。
+- **批量读**：新增 `POST /api/resources/batch`（路由 144 → 145，权限沿用 `resources:read`）。
+  `{ids:[]}` 最多 100 条、去重后按请求顺序返回；空数组 / 超 100 / 含空白 id → 400；不可见与不存在
+  一律进 `missing`，不泄露存在性。`/api/resources/{id}` 只注册了 GET/PUT/DELETE，字面量段优先于
+  通配段，故无冲突；`listen.go` 的端点组表补一行（`TestListenersCoverRoutes` 兜底）。
+- **控制台分页**：`RegistryView` 的 kind/namespace/status/搜索改成服务端筛选（输入防抖 250ms），
+  加页码与每页 25/50/100 控件、区间与总数摘要（`pagePrev`/`pageNext`/`pageSize`/`pageRange`/
+  `paginationLabel` 五键 13 语），样式沿用单色令牌、触控目标 ≥44px、RTL 走逻辑属性。
+  `store.refreshResources(params)` 记忆 `resourceQuery`，写操作后按当前参数刷新本页；
+  `refreshAllResources()` 显式要全量，`TopologyView` / `PlaygroundView` / `AdminView` / `App.vue`
+  统一改走它（图、选择器、授权表都需要完整目录）。`AdminView` 的授权表改用
+  `store.resolveResourceNames`（批量读，失败降级为空）解析不在当前页的资源名，否则列表分页后
+  名字会退化成裸 id。
+- **文件系统闸门**：新增 `sandbox.HostPolicy{WorkDirRoots, AllowWritableRoot}` 与
+  `ValidateHostPolicy`——`work_dir` 必须绝对路径、无 `..` 元素、无控制字符/NUL、无逗号
+  （`--mount` 分隔符）、非卷根、不在系统目录黑名单；`AGENTHUB_SANDBOX_WORKDIR_ROOTS` 非空时还须
+  落在其中一条前缀内（按整段匹配，`/srv/work` 不是 `/srv/workshop` 的父目录，前缀本身非法时
+  **跳过而不是放宽**）。`AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT`（默认 false）是**有意的收紧**：
+  `readonly_root: false` 在无开关时保存即 `sandbox_policy_denied`，租约期再拒一次。
+  docker 侧 `-v` 改 `--mount type=bind,src=...,dst=/work[,readonly]`（源不存在直接失败，不再静默
+  mkdir），并补 `--env HOME=/tmp --env TMPDIR=/tmp`；bwrap 首次真正读 `Profile.Readonly()`，
+  只读时整根 `--ro-bind`、工作目录也一并只读（原先恒 `--bind` 可写，与 docker 语义相反）。
+- **配额上限**：新增值类型 `sandbox.Limits{CPU, MemoryMB, PidsLimit}` 与只下调的 `Clamp`、
+  注册期用的 `Exceeds`（映射 `sandbox_policy_denied`）；零值 = 无上限，既有 `ManagerOptions{}`
+  不受影响。6 个环境变量：`AGENTHUB_SANDBOX_{CPU=1,MEMORY_MB=1024,PIDS_LIMIT=128}` 与
+  `AGENTHUB_SANDBOX_MAX_{CPU=4,MEMORY_MB=4096,PIDS_LIMIT=512}`（`envFloat` 新增；`Validate` 在
+  `SandboxEnabled` 块内校验正数、上限 ≥ 默认与合理区间），`main.go` 的 `sandboxDefaults` 不再硬编码。
+  `Manager.Acquire` 的顺序是 `Limits.Clamp` → `ValidateHostPolicy` → `ValidateProfile`：
+  存量记录被夹到上限而不是失败，夹取写 `slog.Warn`（只记 lease/resource 与前后值，不记命令）并在
+  租约事件里带 `limitsClamped`；已存在的租约若高于上限则回收重建，避免旧租约长期享更大预算。
+  注册期走新端口 `Registry.WithSandboxPolicy(func(*SandboxConfig) error)`，位置在
+  `checkSandboxProvider` 之后，因此 handler、上游同步、seed 三条写入路径共用同一闸门，
+  `registry` 仍不 import 控制面。docker 补 `--memory-swap` = `--memory`（禁 swap 绕过内存上限）。
+  `Descriptor.Limits` 新增能力声明（容器类报 `cpu/memory/pids`，bwrap/local 报空，声明式报模板
+  实际用到的项，remote 与平台垫片报 `delegated`）——**只作如实展示，不作门禁**：默认 profile 恒带
+  cpu/mem，按能力拒绝会让 bwrap 完全不可用，原因写在结构体注释里防后人误加。
+- **e2e 进 CI**：`ci.yml` 新增第四个并行 job `e2e`（postgres:16 服务 + go 1.27 + bun 1.4.4）：
+  `make build` → `bun install` + `playwright install --with-deps chromium` → 预拉
+  `debian:bookworm-slim` → `make e2e-coverage`（静态守卫无需服务，最先跑）→ 后台起服务并轮询
+  `/healthz`（60×1s，失败打印日志）→ `make e2e-api` → `make e2e-ui` → 停止服务（`always()`）→
+  失败时上传 `e2e/reports`、`playwright-report` 与服务端日志。`AGENTHUB_E2E_STRICT_COVERAGE=1`
+  让「文档里有路由、用例表没覆盖」直接失败；`AGENTHUB_FILES_STORE=local` + `AGENTHUB_FILES_DIR`
+  避免五条 `/api/files*` 退化成永久 SKIP；`AGENTHUB_E2E_SANDBOX_EXEC=1` 让执行用例真跑。
+  新增用例：`02-resources`（分页窗口/翻页不重叠/offset 越界空页/非法窗口 400、批量读保序去重与
+  `missing`、空数组与 101 项 400）、`11-sandboxes`（默认 profile 不得 `readonlyRoot:false`、
+  系统目录与相对 `work_dir` 一律拒绝、可写根缺开关被拒）。
+
+### 2. 验证
+
+- `go vet ./...` 全绿；`go test ./internal/{handlers,sandbox,registry,config}` 与
+  `tests/` 的 `TestEveryRouteIsDocumented` / `TestNoDocumentedRouteIsDead` /
+  `TestEveryErrorCodeIsDocumented` 全绿（本机 Windows 无 cgo，`-race` 交 CI）。
+- 新增单测：`handlers/api_paging_test.go`（正常 + 非法窗口 + 批量读 401/404 不泄露 + 上限边界）、
+  `sandbox` 的 Limits/HostPolicy 与 docker/bwrap 参数、`registry` 的 `WithSandboxPolicy`、
+  `config` 的六个新变量；web 侧补 `store` 分页参数/`resourceTotal`/`resolveResourceNames`
+  正常与失败路径、`api-endpoints` 的 URL 断言。
+- 控制台：`bunx vitest run` **24 文件 / 475 用例**全绿（`docs-content` 的路由计数断言同步到 145）。
+- e2e：`bun run api/index.js --coverage-only` → **145/145 documented routes have a case**。
+- 路由总数 144 → 145 的六处计数（`web/tests/docs-content.spec.js`、中英 `README`、
+  `requirements.md`、`AGENTS.md`）已同步；`docs/docs.md` 与 `docs/docs_cn.md` 由 `make docs-md`
+  重新生成，不手改。
+- 文档同步：`requirements.md`（分页/批量读契约、计数语义、下推取舍）、`requirements-sandbox.md`
+  （文件系统隔离与资源配额两节 + 环境变量表）、`AGENTS.md`（四个 CI job 与分页/闸门约定）、
+  中英 `README`、`releasenotes_emoji.md`、`e2e/README.md`（新增「Continuous integration」节）、
+  `.gitignore`（`server.log` / `.e2e-files`）、`task.md`（本条）。

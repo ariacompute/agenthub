@@ -75,6 +75,22 @@ func (s *memResourceStore) Get(_ context.Context, id string) (*Entry, error) {
 	return &cp, nil
 }
 
+func (s *memResourceStore) GetMany(_ context.Context, ids []string) (map[string]*Entry, error) {
+	if err := s.err("get_many"); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]*Entry, len(ids))
+	for _, id := range ids {
+		if e, ok := s.byID[id]; ok {
+			cp := *e
+			out[id] = &cp
+		}
+	}
+	return out, nil
+}
+
 func (s *memResourceStore) List(_ context.Context, f Filter) ([]*Entry, error) {
 	if err := s.err("list"); err != nil {
 		return nil, err

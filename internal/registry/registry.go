@@ -138,6 +138,11 @@ type ResourceStore interface {
 	// filter, sorted by id. An empty field means no constraint; Query is
 	// applied by the caller because it is a text match, not a column.
 	List(ctx context.Context, f Filter) ([]*Entry, error)
+	// GetMany returns the entries whose ids exist, keyed by id. Unknown ids are
+	// simply absent: a batch read must not fail because one record was deleted
+	// between the list and the read, and the caller decides what "missing" means
+	// on the wire. It exists so a batch of N ids is one query, not N.
+	GetMany(ctx context.Context, ids []string) (map[string]*Entry, error)
 	Delete(ctx context.Context, id string) error
 	SetHealth(ctx context.Context, id string, h Health) error
 	// Counts returns per-kind and per-health totals. Both maps are pre-filled
@@ -327,7 +332,8 @@ type Registry struct {
 	// resource cannot be saved pointing at a backend this host does not have.
 	// Nil means the check is not wired in (no control plane), and registration
 	// then accepts any syntactically valid name.
-	sandboxCheck SandboxChecker
+	sandboxCheck  SandboxChecker
+	sandboxPolicy SandboxPolicy
 }
 
 // SandboxChecker reports whether an execution provider is registered and can run
@@ -390,6 +396,42 @@ func (r *Registry) WithSandboxChecker(check SandboxChecker) *Registry {
 	r.sandboxCheck = check
 	r.mu.Unlock()
 	return r
+}
+
+// SandboxPolicy is the registration-time gate for a resource's execution policy:
+// the instance ceiling on its limits, and the host paths it may name. It receives
+// the sandbox block exactly as the operator wrote it, so the registry keeps its
+// hands off the control plane's vocabulary — same shape as SandboxChecker.
+//
+// Wiring it here rather than in the handler is deliberate: struct-path creates,
+// upstream registry syncs and the demo seed all go through Upsert, and a policy
+// that only one of those three paths honoured would be worse than none.
+type SandboxPolicy func(cfg *SandboxConfig) error
+
+// WithSandboxPolicy attaches the instance-wide execution-policy gate. An instance
+// without one accepts every profile that passes ValidateKind, which is the
+// historical behaviour.
+func (r *Registry) WithSandboxPolicy(gate SandboxPolicy) *Registry {
+	r.mu.Lock()
+	r.sandboxPolicy = gate
+	r.mu.Unlock()
+	return r
+}
+
+// checkSandboxPolicy applies the gate to the entry's per-resource sandbox block.
+// An entry that names no sandbox block is not gated: it inherits the instance
+// defaults, and those are the operator's own values.
+func (r *Registry) checkSandboxPolicy(e *Entry) error {
+	if e == nil || e.KindConfig == nil || e.KindConfig.Sandbox == nil {
+		return nil
+	}
+	r.mu.RLock()
+	gate := r.sandboxPolicy
+	r.mu.RUnlock()
+	if gate == nil {
+		return nil
+	}
+	return gate(e.KindConfig.Sandbox)
 }
 
 // checkSandboxProvider refuses a resource that names an execution provider which
@@ -457,6 +499,12 @@ func (r *Registry) Upsert(in *Entry) (*Entry, error) {
 	// it: refusing at registration is what stops the first execution from being
 	// the moment an operator learns the backend is missing.
 	if err := r.checkSandboxProvider(in); err != nil {
+		return nil, err
+	}
+	// The instance ceiling and the host-path rules are enforced at write time so
+	// the operator learns about an impossible profile while saving it, instead of
+	// when a task first tries to run.
+	if err := r.checkSandboxPolicy(in); err != nil {
 		return nil, err
 	}
 	ns, err := ParseNamespaceID(in.Namespace)
@@ -720,6 +768,33 @@ func (r *Registry) Get(id string) (*Entry, bool) {
 	}
 	cp := *e
 	return &cp, true
+}
+
+// GetMany returns the entries that exist among ids, keyed by id. Order is the
+// caller's business: the batch handler answers in request order, so a map is the
+// shape that cannot accidentally suggest one.
+func (r *Registry) GetMany(ids []string) map[string]*Entry {
+	if len(ids) == 0 {
+		return map[string]*Entry{}
+	}
+	if r.store != nil {
+		got, err := r.store.GetMany(context.Background(), ids)
+		if err != nil {
+			slog.Error("registry: load entries", "ids", len(ids), "error", err)
+			return map[string]*Entry{}
+		}
+		return got
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]*Entry, len(ids))
+	for _, id := range ids {
+		if e, ok := r.entries[id]; ok {
+			cp := *e
+			out[id] = &cp
+		}
+	}
+	return out
 }
 
 // Delete removes an entry.

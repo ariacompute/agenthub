@@ -114,7 +114,22 @@ const statusLabel = (value) => enumLabel('userStatus', value)
 const permissionLabel = (code) => enumLabel('permission', code)
 const roleName = (id) => auth.rolesCatalogue.find((role) => role.id === id)?.name ?? id
 const groupName = (id) => auth.groupsCatalogue.find((group) => group.id === id)?.name ?? id
-const resourceName = (id) => hub.resources.find((resource) => resource.id === id)?.name ?? id
+
+// Names for the resources the grant table points at but the loaded catalogue does
+// not contain. The registry list is paged, so this is the normal case rather than
+// an edge one: the batch read is what keeps the table from showing raw ids.
+const foreignResourceNames = ref({})
+const resourceName = (id) =>
+  hub.resources.find((resource) => resource.id === id)?.name ?? foreignResourceNames.value[id] ?? id
+
+async function loadForeignResourceNames() {
+  const known = new Set(hub.resources.map((resource) => resource.id))
+  const wanted = [...new Set(auth.grants.map((grant) => grant.resourceId))]
+    .filter((id) => id && !known.has(id))
+    .slice(0, 100)
+  if (!wanted.length) return
+  foreignResourceNames.value = { ...foreignResourceNames.value, ...(await hub.resolveResourceNames(wanted)) }
+}
 
 const users = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -353,8 +368,15 @@ onMounted(async () => {
     auth.loadPermissions(),
     auth.loadAPIKeys(),
   ])
-  if (!hub.resources.length) hub.refreshResources()
+  // The grant form offers every record, so this screen reads the whole catalogue
+  // rather than inheriting the registry list's page.
+  await hub.refreshAllResources()
+  await loadForeignResourceNames()
 })
+
+// Grants can arrive after the catalogue (or change while the tab is open), and
+// each new row may point outside the loaded page.
+watch(() => auth.grants, loadForeignResourceNames, { deep: true })
 
 // The search runs against the backend so a large directory is never paged into
 // the browser; debouncing keeps one keystroke from becoming one request burst.

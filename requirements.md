@@ -352,8 +352,10 @@ RAG 检索保持确定性 mock 并标 `TODO(real)`。
 `Listeners()` 与 `listen_test.go` 的 `probes`。下列为 M1–M2 的逐条清单，M2.5 起按组给出索引（§4.2.1）。
 
 ```
-GET    /api/resources[?kind=&q=&namespace=&status=] → {resources, counts, health}
+GET    /api/resources[?kind=&q=&namespace=&status=&limit=&offset=]
+                                               → {resources, counts, health, total, limit, offset}
 POST   /api/resources                          → 201 Entry（重复 id 或 (namespace,name,version) → 400）
+POST   /api/resources/batch                    → {resources, missing}（≤100 个 id，按请求顺序；不可见即 missing）
 GET    /api/resources/{id}                     → Entry | 404
 PUT    /api/resources/{id}                     → Entry | 404
 DELETE /api/resources/{id}                     → 204 | 404
@@ -419,7 +421,7 @@ POST   /api/router/passes                     → 202 {kicked:true}（tasks:writ
 GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 router_event，先回放再实时）
 ```
 
-#### 4.2.1 路由分组索引（当前 138 条 `/api` 路由）
+#### 4.2.1 路由分组索引（当前 139 条 `/api` 路由）
 
 不逐条罗列，避免与 `handlers.go` 反复漂移；每条路径的请求/响应示例由控制台 `/docs` 屏给出
 （`web/src/lib/docs-content.js`），路由搬动时两处必须同步。
@@ -428,7 +430,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | --- | --- | --- | --- |
 | 身份 | 9 | `/api/auth/config`、`register`、`login`、`logout`、`me`、`sessions`、`sessions/{id}`、`oauth/{provider}`、`oauth/{provider}/callback` | 前三条匿名；其余 `requireAuth` |
 | 审计 | 3 | `/api/audit`、`/api/audit/verify`、`/api/audit/{id}` | `audit:read` |
-| 资源 | 8 | `/api/resources`（GET/POST）、`{id}`（GET/PUT/DELETE）、`{id}/health`、`{id}/probe`、`{id}/status` | `resources:read` / `resources:write`；status 为 `registry:curate` |
+| 资源 | 9 | `/api/resources`（GET/POST）、`batch`（POST）、`{id}`（GET/PUT/DELETE）、`{id}/health`、`{id}/probe`、`{id}/status` | `resources:read` / `resources:write`；status 为 `registry:curate` |
 | 命名空间 | 5 | `/api/registries`（GET/POST）、`{id}`（PUT/DELETE）、`/api/registries/approvals` | `registries:manage`；approvals 为 `registry:curate` |
 | 上游源 | 5 | `/api/registry-sources`（GET/POST）、`{id}`（PUT/DELETE）、`{id}/sync` | `sources:manage` |
 | 任务 | 6 | `/api/tasks`、`{id}`、`{id}/spans`、`{id}/events`、`{id}/cancel`、`{id}/resume` | `tasks:read` / `tasks:write` |
@@ -448,13 +450,31 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | API Key | 5 | `/api/api-keys`（GET/POST）、`{id}`（GET/PUT/DELETE） | `requireAuth`（各自持有者的 key） |
 | 共享文件 | 5 | `/api/files`（GET/POST）、`{id}`（GET/DELETE）、`{id}/content` | `tasks:read` / `tasks:write`；下载支持 `Range` |
 
-上表分组条数合计 **138** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
+上表分组条数合计 **139** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
 另有 5 条协议面路由（`POST /a2a`、`GET /a2a/stream`、`GET /a2a/agent-card`、
-`GET /.well-known/agent.json`、`GET /healthz`），合计 **144** 条 `mux.HandleFunc`。
+`GET /.well-known/agent.json`、`GET /healthz`），合计 **145** 条 `mux.HandleFunc`。
 `/docs` 屏与 `docs/*.md` 的分组口径略有不同（把 `/api/schedules/{id}/run` 归入调度器组，
 故该组为 14 条），但端点集合一致。
 
 分组内不新增权限码：沙盒复用 `resources:*` / `tasks:*`，审计新增唯一的 `audit:read`。
+
+#### 4.2.2 目录分页与批量读（`GET /api/resources`、`POST /api/resources/batch`）
+
+- **默认不变**：不传 `limit` 时返回全量，`total == len(resources)`，既有调用方零改动。
+- **窗口语义**：`limit` 取 0–200（0 = 全量）、`offset` ≥ 0；非法或越界 → 400 `bad_request`；
+  `offset` 超过末尾返回空数组（`[]`，不是 `null`）且 `total` 仍准确。
+- **切在可见性之后**：授权过滤（grants ∪ `visibility=public`）先于切片，所以非 owner 拿到的页
+  不会因为"过滤掉了看不见的记录"而变短——这是本节唯一不可让步的正确性约束。
+- **计数口径**：`counts` / `health` 描述**调用者可见目录**（同样的过滤条件但**去掉 `kind`**），
+  因此选定某个 kind 时其它标签页计数不归零；它们与 `total` 分别回答"目录里各有多少"和
+  "目录里一共多少"。
+- **未下推 SQL 的理由**：`q` 是跨 jsonb 列的自由文本（`registry.matches`），可见性是 Go 侧
+  grants ∪ public 决定的；把 `LIMIT` 下推到 SQL 会在过滤之前切片、返回长度不定的页。
+  代价是每次列表仍是 O(N log N) 排序 + O(N) 过滤（N 为目录规模，数千量级可接受），收益是
+  响应体被 `limit` 真正限住；keyset / 授权集下推列为后续项。
+- **批量读**：`{ids:[...]}` 去重保序；空数组、超过 100、含空白 id → 400 `bad_request`；
+  存在但不可见的 id 与不存在一样进 `missing`（与 `/api/resources/{id}` 回落 404 而非 403 同一约定，
+  不做存在性预言机）；仓库实现是单条 `WHERE id IN (...)`，不是 N 次查询。
 
 ### 4.3 健康检查
 
@@ -926,9 +946,9 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
 
 - `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`tests/docs_endpoints_test.go` 的
   双向差集通过。
-- `web/src/lib/docs-content.js` 登记该端点（tasks 组，全表 **144** 条），`docs-copy.js` 13 语
+- `web/src/lib/docs-content.js` 登记该端点（tasks 组，全表 **145** 条），`docs-copy.js` 13 语
   `epTasksClear` 齐全且均不同于英文；重新生成两份 md 后无漂移。
-- `AGENTS.md` / 中英 README / §4.2 的路由总数同步到 **144**。
+- `AGENTS.md` / 中英 README / §4.2 的路由总数同步到 **145**。
 - 用例覆盖：内存模式的删除与保留、重复调用、归属隔离（他人 / 无主记录不动）、仓库模式委托与
   故障 5xx、处理器层 200 + `{deleted,kept}` + 清理后详情 404；`DATABASE_URL` 门控用例验证
   级联删除子表与归属隔离。

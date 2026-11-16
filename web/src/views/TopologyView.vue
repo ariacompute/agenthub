@@ -56,8 +56,10 @@ async function loadEdges() {
 
 onMounted(async () => {
   // Same reason as the registry view: a run or probe rewrites health, so the
-  // cached list is stale by the time this view is re-entered.
-  await store.refreshResources()
+  // cached list is stale by the time this view is re-entered. The graph is drawn
+  // from the whole catalogue, so it asks for all of it rather than for whatever
+  // page the registry list was last showing.
+  await store.refreshAllResources()
   await store.refreshTasks()
   await loadEdges()
 })

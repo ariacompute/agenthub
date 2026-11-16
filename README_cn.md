@@ -156,7 +156,7 @@ curl localhost:3500/.well-known/agent.json
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
-文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 144 条 HTTP 路由。同一份内容
+文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 145 条 HTTP 路由。同一份内容
 由 `make docs-md` 渲染到 [`docs/docs_cn.md`](docs/docs_cn.md)；该文件是**生成的**——来源是文档屏
 所读的两个模块（`web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`），要改就改这两处
 再重跑，不要直接编辑 markdown。
@@ -470,7 +470,7 @@ store 分支不需要数据库就能覆盖；而 `internal/store` 只有在设�
 它的用例是 skip，而不是伪造结果。
 
 对着运行中实例的端到端测试——`e2e/` 下两套彼此独立的「用户视角」套件（完整开关清单与报告格式见
-[`e2e/README.md`](e2e/README.md)）。接口套件是声明式用例表，覆盖**全部 144 条文档端点**：发现、
+[`e2e/README.md`](e2e/README.md)）。接口套件是声明式用例表，覆盖**全部 145 条文档端点**：发现、
 认证与会话、资源与治理、A2A 各方法（含 HITL park → resume / cancel）、流式与 `since` 回放、任务、
 权限与 API 密钥、渠道/连接器、线程/语音、文件、沙箱、调度/计算机/知识、路由、审计与检查点；界面套件
 用 Playwright 跑六段真实控制台旅程（登录、登记资源、试跑、任务追踪、治理审批、后台管理）。两者都只
@@ -869,7 +869,7 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 | AWS Agent Registry | agenthub |
 | --- | --- |
 | **Hybrid search**：语义 + 关键词 | 仅关键词检索——见下方「明确不做」 |
-| **Catalog browsing**：分页 list + 按 recordType 过滤 + `Get` / `BatchGet` | `GET /api/resources?kind=&q=&namespace=&status=`；暂无分页与批量读 |
+| **Catalog browsing**：分页 list + 按 recordType 过滤 + `Get` / `BatchGet` | `GET /api/resources?kind=&q=&namespace=&status=&limit=&offset=`（回 `total`，计数仍按整目录口径）与 `POST /api/resources/batch`（≤100 个 id，按请求顺序） |
 | **原生 MCP endpoint**（`InvokeRegistryMcp`，任意 MCP 客户端直连） | `GET /api/export/mcp` 只**导出** MCP server 描述，不自建 MCP 服务端 |
 | Agent Card | `GET /api/export/agent-card` 与 `/.well-known/agent.json`——每个 approved 记录渲染为一个 advertised skill |
 
@@ -929,7 +929,8 @@ agenthub 一直有 AWS 交给另一个服务的那一半——注册即运行（
 
 1. **中**：语义检索缺失 —— 目录规模上千后关键词检索召回不足；建议以「外部检索源」形态接入，
    而非内嵌嵌入模型。
-2. **中**：批量读接口与列表分页 —— 目录变大后列表接口无分页会拖慢控制台。
+2. **低**：分页未下推 —— 窗口已经限住响应体，但扫描仍是「先读后过滤」（可见性在 Go 侧判定、
+   `q` 跨 jsonb 列），目录上万后需要 keyset 或授权集下推。
 3. **低**：审计面 —— 缺全量 API 调用留痕，合规场景需要。
 4. **低**：定时同步的调度表达式目前手写 5 段 cron，与 EventBridge 规则表达力不对等，但自部署够用。
 

@@ -56,7 +56,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'A resource that runs something can narrow the instance default through kind_config.sandbox. Every field is optional: an absent field inherits what the operator set, so a resource can lower a limit but never raise one by omission. The block is validated when the record is saved, not when a task first runs into it.',
     sandboxPolicyNote:
-      'Network is the one field that is not a promise of reach. Only bridge and platform hand out connectivity; egress_allowlist records the hosts a resource would like and is executed as none until an egress proxy exists, because accepting the value must not turn into a filter that is not there. readonly_root is tri-state: unset inherits a read-only root, and an explicit false is the only way to ask for a writable one.',
+      'Network is the one field that is not a promise of reach. Only bridge and platform hand out connectivity; egress_allowlist records the hosts a resource would like and is executed as none until an egress proxy exists, because accepting the value must not turn into a filter that is not there. readonly_root is tri-state: unset inherits a read-only root, and an explicit false is the only way to ask for a writable one. Filesystem and quotas pass the same gate: work_dir is a host path inside AGENTHUB_SANDBOX_WORKDIR_ROOTS, an explicit false needs AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, and cpu/memory/pids are clipped to AGENTHUB_SANDBOX_MAX_* when the lease is created.',
     sandboxNetworkTitle: 'Network modes',
     colSandboxMode: 'Mode',
     sandboxNetworkNoneDesc:
@@ -183,6 +183,7 @@ export const docsCopy = {
     epOAuthCallback: 'Finish it and land back on the console.',
     epHealthSet: 'Write a health value by hand.',
     epProbe: 'Measure the resource now and store whatever was found.',
+    epResourceBatch: 'Read a set of records by id in one request; unreadable ids come back as missing.',
     epStatusSet: 'Move a record along the curation state machine.',
     epApprovals: 'Records that are waiting for a curator.',
     epSync: 'Pull one upstream registry right now.',
@@ -309,7 +310,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       '会执行东西的资源可以用 kind_config.sandbox 收窄实例默认值。每个字段都可选：留空即继承运维的设定，所以资源能调低上限，却不会因为省略而抬高。校验发生在保存记录时，而不是任务第一次撞上它时。',
     sandboxPolicyNote:
-      'network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发放连通性；egress_allowlist 只是记下资源希望访问的主机，在出网代理落地之前一律按 none 执行，因为接受这个取值不能变成一层并不存在的过滤。readonly_root 是三态：不写即继承只读根，只有显式 false 才是申请可写的方式。',
+      'network 是唯一不承诺「能通」的字段。只有 bridge 与 platform 发放连通性；egress_allowlist 只是记下资源希望访问的主机，在出网代理落地之前一律按 none 执行，因为接受这个取值不能变成一层并不存在的过滤。readonly_root 是三态：不写即继承只读根，只有显式 false 才是申请可写的方式。文件系统与配额走同一道闸门：work_dir 是宿主路径且必须落在 AGENTHUB_SANDBOX_WORKDIR_ROOTS 内，显式 false 需要实例打开 AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT，cpu/memory/pids 在创建租约时被夹到 AGENTHUB_SANDBOX_MAX_*。',
     sandboxNetworkTitle: '网络模式',
     colSandboxMode: '模式',
     sandboxNetworkNoneDesc: '完全没有网络接口。未设置或无法识别的取值也归到这里，因为拼错不能变成放行。',
@@ -428,6 +429,7 @@ export const docsCopy = {
     epOAuthCallback: '完成往返并回到控制台。',
     epHealthSet: '手工写入一个健康值。',
     epProbe: '立即实测该资源并保存测到的结果。',
+    epResourceBatch: '按 id 一次读取多条记录；读不到的 id 以 missing 返回。',
     epStatusSet: '让一条记录沿审批状态机前进一步。',
     epApprovals: '等待审批人处理的记录。',
     epSync: '立即拉取一个上游注册中心。',
@@ -551,7 +553,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       '會執行東西的資源可以用 kind_config.sandbox 收窄執行個體預設值。每個欄位都可選：留空即繼承維運的設定，所以資源能調低上限，卻不會因為省略而抬高。驗證發生在儲存記錄時，而不是任務第一次撞上它時。',
     sandboxPolicyNote:
-      'network 是唯一不承諾「能通」的欄位。只有 bridge 與 platform 發放連線能力；egress_allowlist 只是記下資源希望存取的主機，在出網代理落地之前一律以 none 執行，因為接受這個取值不能變成一層並不存在的過濾。readonly_root 是三態：不寫即繼承唯讀根，只有明確 false 才是申請可寫的方式。',
+      'network 是唯一不承諾「能通」的欄位。只有 bridge 與 platform 發放連線能力；egress_allowlist 只是記下資源希望存取的主機，在出網代理落地之前一律以 none 執行，因為接受這個取值不能變成一層並不存在的過濾。readonly_root 是三態：不寫即繼承唯讀根，只有明確 false 才是申請可寫的方式。檔案系統與配額走同一道閘門：work_dir 是宿主路徑且必須落在 AGENTHUB_SANDBOX_WORKDIR_ROOTS 內，顯式 false 需要實例開啟 AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT，cpu/memory/pids 在建立租約時被夾到 AGENTHUB_SANDBOX_MAX_*。',
     sandboxNetworkTitle: '網路模式',
     colSandboxMode: '模式',
     sandboxNetworkNoneDesc: '完全沒有網路介面。未設定或無法辨識的取值也歸到這裡，因為打錯字不能變成放行。',
@@ -670,6 +672,7 @@ export const docsCopy = {
     epOAuthCallback: '完成往返並回到主控台。',
     epHealthSet: '手動寫入一個健康值。',
     epProbe: '立即實測該資源並保存測到的結果。',
+    epResourceBatch: '依 id 一次讀取多筆記錄；讀不到的 id 以 missing 回傳。',
     epStatusSet: '讓一筆記錄沿審核狀態機前進一步。',
     epApprovals: '等待審核者處理的記錄。',
     epSync: '立即拉取一個上游註冊中心。',
@@ -793,7 +796,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'Un recurso que ejecuta algo puede estrechar el valor por defecto de la instancia mediante kind_config.sandbox. Todos los campos son opcionales: el campo ausente hereda lo que fijó el operador, así que un recurso puede bajar un límite pero nunca subirlo por omisión. El bloque se valida al guardar el registro, no cuando una tarea choca con él.',
     sandboxPolicyNote:
-      'network es el único campo que no promete alcance. Solo bridge y platform entregan conectividad; egress_allowlist anota los hosts que el recurso desearía y se ejecuta como none hasta que exista un proxy de salida, porque aceptar el valor no debe convertirse en un filtro que no está. readonly_root tiene tres estados: sin definir hereda una raíz de solo lectura, y un false explícito es la única forma de pedir una escribible.',
+      'network es el único campo que no promete alcance. Solo bridge y platform entregan conectividad; egress_allowlist anota los hosts que el recurso desearía y se ejecuta como none hasta que exista un proxy de salida, porque aceptar el valor no debe convertirse en un filtro que no está. readonly_root tiene tres estados: sin definir hereda una raíz de solo lectura, y un false explícito es la única forma de pedir una escribible. El sistema de archivos y las cuotas pasan por la misma puerta: work_dir es una ruta del host dentro de AGENTHUB_SANDBOX_WORKDIR_ROOTS, un false explícito exige AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, y cpu/memory/pids se recortan a AGENTHUB_SANDBOX_MAX_* al crear el lease.',
     sandboxNetworkTitle: 'Modos de conexión',
     colSandboxMode: 'Modo',
     sandboxNetworkNoneDesc:
@@ -920,6 +923,7 @@ export const docsCopy = {
     epOAuthCallback: 'Terminarlo y volver a la consola.',
     epHealthSet: 'Escribir un valor de salud a mano.',
     epProbe: 'Medir el recurso ahora y guardar lo que se halle.',
+    epResourceBatch: 'Leer varios registros por id en una sola petición; los ilegibles vuelven como missing.',
     epStatusSet: 'Avanzar un registro por la máquina de curación.',
     epApprovals: 'Registros que esperan a un curador.',
     epSync: 'Descargar ahora un registro ascendente.',
@@ -1043,7 +1047,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'Une ressource qui exécute quelque chose peut resserrer la valeur par défaut de l’instance via kind_config.sandbox. Tous les champs sont facultatifs : un champ absent hérite du réglage de l’exploitant, donc une ressource peut abaisser une limite mais jamais la relever par omission. Le bloc est validé à l’enregistrement, pas au moment où une tâche s’y heurte.',
     sandboxPolicyNote:
-      'network est le seul champ qui ne promet pas d’accès. Seuls bridge et platform accordent de la connectivité ; egress_allowlist note les hôtes souhaités par la ressource et s’exécute comme none tant qu’aucun proxy de sortie n’existe, car accepter la valeur ne doit pas se transformer en filtre absent. readonly_root a trois états : non défini hérite d’une racine en lecture seule, et un false explicite est le seul moyen d’en demander une inscriptible.',
+      'network est le seul champ qui ne promet pas d’accès. Seuls bridge et platform accordent de la connectivité ; egress_allowlist note les hôtes souhaités par la ressource et s’exécute comme none tant qu’aucun proxy de sortie n’existe, car accepter la valeur ne doit pas se transformer en filtre absent. readonly_root a trois états : non défini hérite d’une racine en lecture seule, et un false explicite est le seul moyen d’en demander une inscriptible. Le système de fichiers et les quotas passent la même porte : work_dir est un chemin hôte sous AGENTHUB_SANDBOX_WORKDIR_ROOTS, un false explicite exige AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, et cpu/memory/pids sont ramenés à AGENTHUB_SANDBOX_MAX_* à la création du bail.',
     sandboxNetworkTitle: 'Modes réseau',
     colSandboxMode: 'Mode réseau',
     sandboxNetworkNoneDesc:
@@ -1170,6 +1174,7 @@ export const docsCopy = {
     epOAuthCallback: 'Le terminer et revenir à la console.',
     epHealthSet: 'Écrire une valeur de santé à la main.',
     epProbe: 'Mesurer la ressource maintenant et enregistrer le résultat.',
+    epResourceBatch: 'Lire plusieurs enregistrements par id en une requête ; les ids illisibles reviennent en missing.',
     epStatusSet: 'Faire avancer un enregistrement dans la machine de curation.',
     epApprovals: 'Enregistrements en attente d’un curateur.',
     epSync: 'Tirer un registre amont immédiatement.',
@@ -1293,7 +1298,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'Eine Ressource, die etwas ausführt, kann den Instanzstandard über kind_config.sandbox einengen. Jedes Feld ist optional: ein fehlendes Feld erbt die Einstellung des Betriebs, eine Ressource kann ein Limit also senken, durch Auslassen aber nie erhöhen. Der Block wird beim Speichern des Eintrags geprüft, nicht wenn eine Aufgabe darauf trifft.',
     sandboxPolicyNote:
-      'network ist das einzige Feld, das keine Erreichbarkeit verspricht. Nur bridge und platform vergeben Konnektivität; egress_allowlist merkt sich die gewünschten Hosts und wird als none ausgeführt, bis es einen Egress-Proxy gibt – den Wert anzunehmen darf nicht zu einem Filter werden, den es nicht gibt. readonly_root hat drei Zustände: nicht gesetzt erbt ein schreibgeschütztes Root, nur ein ausdrückliches false fordert ein beschreibbares an.',
+      'network ist das einzige Feld, das keine Erreichbarkeit verspricht. Nur bridge und platform vergeben Konnektivität; egress_allowlist merkt sich die gewünschten Hosts und wird als none ausgeführt, bis es einen Egress-Proxy gibt – den Wert anzunehmen darf nicht zu einem Filter werden, den es nicht gibt. readonly_root hat drei Zustände: nicht gesetzt erbt ein schreibgeschütztes Root, nur ein ausdrückliches false fordert ein beschreibbares an. Dateisystem und Quoten laufen durch dasselbe Tor: work_dir ist ein Hostpfad unter AGENTHUB_SANDBOX_WORKDIR_ROOTS, ein ausdrückliches false verlangt AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, und cpu/memory/pids werden beim Anlegen des Lease auf AGENTHUB_SANDBOX_MAX_* gekappt.',
     sandboxNetworkTitle: 'Netzwerkmodi',
     colSandboxMode: 'Modus',
     sandboxNetworkNoneDesc:
@@ -1420,6 +1425,7 @@ export const docsCopy = {
     epOAuthCallback: 'Ihn abschließen und zur Konsole zurückkehren.',
     epHealthSet: 'Einen Gesundheitswert von Hand schreiben.',
     epProbe: 'Die Ressource jetzt messen und das Ergebnis speichern.',
+    epResourceBatch: 'Mehrere Datensätze per id in einer Anfrage lesen; unlesbare ids kommen als missing zurück.',
     epStatusSet: 'Einen Datensatz in der Kurationsmaschine weiterbewegen.',
     epApprovals: 'Datensätze, die auf einen Kurator warten.',
     epSync: 'Ein vorgelagertes Register jetzt abziehen.',
@@ -1543,7 +1549,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'Una risorsa che esegue qualcosa può restringere il valore predefinito dell’istanza tramite kind_config.sandbox. Ogni campo è facoltativo: il campo assente eredita ciò che ha fissato chi gestisce, quindi una risorsa può abbassare un limite ma mai alzarlo per omissione. Il blocco viene validato al salvataggio, non quando un’attività lo incontra.',
     sandboxPolicyNote:
-      'network è l’unico campo che non promette raggiungibilità. Solo bridge e platform concedono connettività; egress_allowlist annota gli host desiderati e viene eseguito come none finché non esisterà un proxy di uscita, perché accettare il valore non deve diventare un filtro che non c’è. readonly_root ha tre stati: non impostato eredita una radice in sola lettura, e un false esplicito è l’unico modo per chiederne una scrivibile.',
+      'network è l’unico campo che non promette raggiungibilità. Solo bridge e platform concedono connettività; egress_allowlist annota gli host desiderati e viene eseguito come none finché non esisterà un proxy di uscita, perché accettare il valore non deve diventare un filtro che non c’è. readonly_root ha tre stati: non impostato eredita una radice in sola lettura, e un false esplicito è l’unico modo per chiederne una scrivibile. File system e quote passano dalla stessa porta: work_dir è un percorso host dentro AGENTHUB_SANDBOX_WORKDIR_ROOTS, un false esplicito richiede AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, e cpu/memory/pids vengono ridotti ad AGENTHUB_SANDBOX_MAX_* alla creazione del lease.',
     sandboxNetworkTitle: 'Modalità di rete',
     colSandboxMode: 'Modalità',
     sandboxNetworkNoneDesc:
@@ -1670,6 +1676,7 @@ export const docsCopy = {
     epOAuthCallback: 'Concluderlo e tornare alla console.',
     epHealthSet: 'Scrivere un valore di salute a mano.',
     epProbe: 'Misurare la risorsa ora e salvare ciò che è stato trovato.',
+    epResourceBatch: 'Leggere più record per id in una sola richiesta; gli id illeggibili tornano come missing.',
     epStatusSet: 'Far avanzare un record nella macchina di cura.',
     epApprovals: 'Record in attesa di un curatore.',
     epSync: 'Sincronizzare subito un registro a monte.',
@@ -1793,7 +1800,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'Ресурс, который что-то выполняет, может сузить значение по умолчанию инстанса через kind_config.sandbox. Все поля необязательны: отсутствующее поле наследует настройку эксплуатации, поэтому ресурс может понизить лимит, но не поднять его умолчанием. Блок проверяется при сохранении записи, а не тогда, когда задача в него упрётся.',
     sandboxPolicyNote:
-      'network — единственное поле, которое не обещает доступности. Связность дают только bridge и platform; egress_allowlist запоминает желаемые хосты и выполняется как none, пока не появится прокси выхода, потому что принятое значение не должно превращаться в фильтр, которого нет. readonly_root имеет три состояния: пусто — наследуется корень только для чтения, и только явный false запрашивает записываемый.',
+      'network — единственное поле, которое не обещает доступности. Связность дают только bridge и platform; egress_allowlist запоминает желаемые хосты и выполняется как none, пока не появится прокси выхода, потому что принятое значение не должно превращаться в фильтр, которого нет. readonly_root имеет три состояния: пусто — наследуется корень только для чтения, и только явный false запрашивает записываемый. Файловая система и квоты проходят через те же ворота: work_dir — путь хоста внутри AGENTHUB_SANDBOX_WORKDIR_ROOTS, явный false требует AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, а cpu/memory/pids при выдаче аренды урезаются до AGENTHUB_SANDBOX_MAX_*.',
     sandboxNetworkTitle: 'Режимы сети',
     colSandboxMode: 'Режим',
     sandboxNetworkNoneDesc:
@@ -1920,6 +1927,7 @@ export const docsCopy = {
     epOAuthCallback: 'Завершить его и вернуться в консоль.',
     epHealthSet: 'Записать значение состояния вручную.',
     epProbe: 'Измерить ресурс сейчас и сохранить найденное.',
+    epResourceBatch: 'Прочитать несколько записей по id одним запросом; недоступные id возвращаются в missing.',
     epStatusSet: 'Продвинуть запись по машине состояний модерации.',
     epApprovals: 'Записи, ожидающие модератора.',
     epSync: 'Забрать вышестоящий реестр прямо сейчас.',
@@ -2043,7 +2051,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       '何かを実行するリソースは kind_config.sandbox でインスタンス既定値を狭められます。各フィールドは任意で、省略した項目は運用側の設定を継承します。つまりリソースは上限を下げられても、省略によって上げることはできません。検証は保存時に行われ、タスクが初めて突き当たったときではありません。',
     sandboxPolicyNote:
-      'network は「到達できる」を約束しない唯一のフィールドです。接続性を与えるのは bridge と platform だけです。egress_allowlist は希望するホストを記録するだけで、外向きプロキシができるまでは none として実行されます。値を受け付けることが、存在しないフィルタに化けてはいけないからです。readonly_root は三状態で、未設定なら読み取り専用のルートを継承し、明示的な false だけが書き込み可能を要求します。',
+      'network は「到達できる」を約束しない唯一のフィールドです。接続性を与えるのは bridge と platform だけです。egress_allowlist は希望するホストを記録するだけで、外向きプロキシができるまでは none として実行されます。値を受け付けることが、存在しないフィルタに化けてはいけないからです。readonly_root は三状態で、未設定なら読み取り専用のルートを継承し、明示的な false だけが書き込み可能を要求します。ファイルシステムとクォータも同じ関門を通ります。work_dir は AGENTHUB_SANDBOX_WORKDIR_ROOTS 配下のホストパスで、明示的な false には AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT が必要、cpu/memory/pids はリース作成時に AGENTHUB_SANDBOX_MAX_* へ切り詰められます。',
     sandboxNetworkTitle: 'ネットワークモード',
     colSandboxMode: 'モード',
     sandboxNetworkNoneDesc:
@@ -2170,6 +2178,7 @@ export const docsCopy = {
     epOAuthCallback: 'それを完了してコンソールに戻る。',
     epHealthSet: '健全性の値を手動で書き込む。',
     epProbe: 'リソースを今すぐ測定し、得られた結果を保存する。',
+    epResourceBatch: '複数のレコードを id で一括取得する。読めない id は missing で返る。',
     epStatusSet: 'レコードをキュレーション状態機械に沿って進める。',
     epApprovals: 'キュレーターの処理を待っているレコード。',
     epSync: '上流レジストリを今すぐ取得する。',
@@ -2293,7 +2302,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       '무언가를 실행하는 리소스는 kind_config.sandbox로 인스턴스 기본값을 좁힐 수 있습니다. 모든 필드는 선택 사항이고 비어 있는 필드는 운영자가 정한 값을 상속합니다. 즉 리소스는 상한을 낮출 수는 있어도 생략으로 높일 수는 없습니다. 검증은 작업이 처음 부딪힐 때가 아니라 레코드를 저장할 때 이루어집니다.',
     sandboxPolicyNote:
-      'network는 “연결된다”를 약속하지 않는 유일한 필드입니다. 연결성을 주는 것은 bridge와 platform뿐입니다. egress_allowlist는 원하는 호스트를 적어 둘 뿐이며, 이그레스 프록시가 생기기 전까지는 none으로 실행됩니다. 값을 받아들인다는 이유로 없는 필터가 되어서는 안 되기 때문입니다. readonly_root는 세 가지 상태로, 비우면 읽기 전용 루트를 상속하고 명시적인 false만이 쓰기 가능을 요청합니다.',
+      'network는 “연결된다”를 약속하지 않는 유일한 필드입니다. 연결성을 주는 것은 bridge와 platform뿐입니다. egress_allowlist는 원하는 호스트를 적어 둘 뿐이며, 이그레스 프록시가 생기기 전까지는 none으로 실행됩니다. 값을 받아들인다는 이유로 없는 필터가 되어서는 안 되기 때문입니다. readonly_root는 세 가지 상태로, 비우면 읽기 전용 루트를 상속하고 명시적인 false만이 쓰기 가능을 요청합니다. 파일 시스템과 쿼터도 같은 관문을 지납니다. work_dir는 AGENTHUB_SANDBOX_WORKDIR_ROOTS 안의 호스트 경로이고, 명시적 false에는 AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT가 필요하며, cpu/memory/pids는 리스 생성 시 AGENTHUB_SANDBOX_MAX_*로 잘립니다.',
     sandboxNetworkTitle: '네트워크 모드',
     colSandboxMode: '모드',
     sandboxNetworkNoneDesc:
@@ -2420,6 +2429,7 @@ export const docsCopy = {
     epOAuthCallback: '이를 마치고 콘솔로 복귀.',
     epHealthSet: '상태 값을 직접 기록.',
     epProbe: '리소스를 지금 측정하고 결과를 저장.',
+    epResourceBatch: '여러 레코드를 id로 한 번에 읽습니다. 읽을 수 없는 id는 missing으로 돌아옵니다.',
     epStatusSet: '레코드를 큐레이션 상태 기계에 따라 진행.',
     epApprovals: '큐레이터를 기다리는 레코드.',
     epSync: '상위 레지스트리를 지금 가져오기.',
@@ -2543,7 +2553,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'Um recurso que executa algo pode estreitar o padrão da instância através de kind_config.sandbox. Todos os campos são opcionais: o campo ausente herda o que o operador definiu, então um recurso pode baixar um limite mas nunca aumentá-lo por omissão. O bloco é validado ao guardar o registo, não quando uma tarefa esbarra nele.',
     sandboxPolicyNote:
-      'network é o único campo que não promete alcance. Só bridge e platform concedem conectividade; egress_allowlist anota os hosts desejados e é executado como none até existir um proxy de saída, porque aceitar o valor não pode transformar-se num filtro que não existe. readonly_root tem três estados: sem valor herda uma raiz só de leitura, e um false explícito é a única forma de pedir uma escrevível.',
+      'network é o único campo que não promete alcance. Só bridge e platform concedem conectividade; egress_allowlist anota os hosts desejados e é executado como none até existir um proxy de saída, porque aceitar o valor não pode transformar-se num filtro que não existe. readonly_root tem três estados: sem valor herda uma raiz só de leitura, e um false explícito é a única forma de pedir uma escrevível. O sistema de ficheiros e as quotas passam pela mesma porta: work_dir é um caminho do host dentro de AGENTHUB_SANDBOX_WORKDIR_ROOTS, um false explícito exige AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, e cpu/memory/pids são reduzidos a AGENTHUB_SANDBOX_MAX_* na criação do lease.',
     sandboxNetworkTitle: 'Modos de rede',
     colSandboxMode: 'Modo',
     sandboxNetworkNoneDesc:
@@ -2670,6 +2680,7 @@ export const docsCopy = {
     epOAuthCallback: 'Concluí-lo e voltar ao console.',
     epHealthSet: 'Escrever um valor de saúde manualmente.',
     epProbe: 'Medir o recurso agora e salvar o que foi encontrado.',
+    epResourceBatch: 'Ler vários registros por id numa só requisição; ids ilegíveis voltam como missing.',
     epStatusSet: 'Avançar um registro pela máquina de curadoria.',
     epApprovals: 'Registros aguardando um curador.',
     epSync: 'Sincronizar um registro upstream agora.',
@@ -2793,7 +2804,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'المورد الذي ينفّذ شيئًا يمكنه تضييق القيمة الافتراضية للنُسخة عبر kind_config.sandbox. كل الحقول اختيارية: الحقل الغائب يرث ما ضبطه المشغّل، أي أن المورد يستطيع خفض حدّ لكنه لا يستطيع رفعه بالإغفال. يُتحقّق من الكتلة عند حفظ السجل، لا عندما تصطدم بها مهمة لأول مرة.',
     sandboxPolicyNote:
-      'network هو الحقل الوحيد الذي لا يَعِد بالوصول. لا يمنح الاتصال إلا bridge وplatform؛ أما egress_allowlist فيسجّل المضيفين المرغوبة ويُنفَّذ بوصفه none حتى يوجد وكيل خروج، لأن قبول القيمة يجب ألا يتحوّل إلى مُرشِّح غير موجود. وreadonly_root ثلاثيّ الحالات: تركه فارغًا يرث جذرًا للقراءة فقط، وfalse الصريح هو السبيل الوحيد لطلب جذر قابل للكتابة.',
+      'network هو الحقل الوحيد الذي لا يَعِد بالوصول. لا يمنح الاتصال إلا bridge وplatform؛ أما egress_allowlist فيسجّل المضيفين المرغوبة ويُنفَّذ بوصفه none حتى يوجد وكيل خروج، لأن قبول القيمة يجب ألا يتحوّل إلى مُرشِّح غير موجود. وreadonly_root ثلاثيّ الحالات: تركه فارغًا يرث جذرًا للقراءة فقط، وfalse الصريح هو السبيل الوحيد لطلب جذر قابل للكتابة. يمرّ نظام الملفات والحصص من البوابة نفسها: work_dir مسار على المضيف داخل AGENTHUB_SANDBOX_WORKDIR_ROOTS، وfalse الصريح يتطلب AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT، وتُقصّ cpu/memory/pids إلى AGENTHUB_SANDBOX_MAX_* عند إنشاء الإجازة.',
     sandboxNetworkTitle: 'أنماط الشبكة',
     colSandboxMode: 'النمط',
     sandboxNetworkNoneDesc:
@@ -2920,6 +2931,7 @@ export const docsCopy = {
     epOAuthCallback: 'إنهاؤها والعودة إلى وحدة التحكم.',
     epHealthSet: 'كتابة قيمة حالة يدوياً.',
     epProbe: 'قياس المورد الآن وحفظ ما وُجد.',
+    epResourceBatch: 'قراءة عدة سجلات بالمعرّف في طلب واحد؛ المعرّفات غير المقروءة تعود في missing.',
     epStatusSet: 'تقديم سجل عبر آلة حالة الإشراف.',
     epApprovals: 'سجلات تنتظر مشرفاً.',
     epSync: 'سحب سجل أولي الآن.',
@@ -3043,7 +3055,7 @@ export const docsCopy = {
     sandboxPolicyBody:
       'जो संसाधन कुछ चलाता है, वह kind_config.sandbox के ज़रिए इंस्टेंस के डिफ़ॉल्ट को सँकरा कर सकता है। हर फ़ील्ड वैकल्पिक है: छूटा हुआ फ़ील्ड ऑपरेटर की सेटिंग विरासत में लेता है, इसलिए संसाधन सीमा घटा सकता है पर छोड़कर कभी बढ़ा नहीं सकता। जाँच रिकॉर्ड सहेजते समय होती है, तब नहीं जब कोई कार्य पहली बार उससे टकराए।',
     sandboxPolicyNote:
-      'network ही एकमात्र फ़ील्ड है जो पहुँच का वादा नहीं करता। कनेक्टिविटी केवल bridge और platform देते हैं; egress_allowlist सिर्फ़ मनचाहे होस्ट दर्ज करता है और ईग्रेस प्रॉक्सी बनने तक none की तरह चलता है, क्योंकि मान स्वीकार करना ऐसा फ़िल्टर नहीं बन सकता जो मौजूद ही न हो। readonly_root तीन अवस्थाओं वाला है: खाली छोड़ने पर केवल-पढ़ने योग्य रूट विरासत में मिलता है, और स्पष्ट false ही लिखने योग्य रूट माँगने का एकमात्र तरीका है।',
+      'network ही एकमात्र फ़ील्ड है जो पहुँच का वादा नहीं करता। कनेक्टिविटी केवल bridge और platform देते हैं; egress_allowlist सिर्फ़ मनचाहे होस्ट दर्ज करता है और ईग्रेस प्रॉक्सी बनने तक none की तरह चलता है, क्योंकि मान स्वीकार करना ऐसा फ़िल्टर नहीं बन सकता जो मौजूद ही न हो। readonly_root तीन अवस्थाओं वाला है: खाली छोड़ने पर केवल-पढ़ने योग्य रूट विरासत में मिलता है, और स्पष्ट false ही लिखने योग्य रूट माँगने का एकमात्र तरीका है। फ़ाइल सिस्टम और कोटा भी उसी द्वार से गुज़रते हैं: work_dir AGENTHUB_SANDBOX_WORKDIR_ROOTS के भीतर एक होस्ट पथ है, स्पष्ट false के लिए AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT चाहिए, और cpu/memory/pids लीज़ बनते समय AGENTHUB_SANDBOX_MAX_* तक सिकोड़ दिए जाते हैं।',
     sandboxNetworkTitle: 'नेटवर्क मोड',
     colSandboxMode: 'मोड',
     sandboxNetworkNoneDesc:
@@ -3170,6 +3182,7 @@ export const docsCopy = {
     epOAuthCallback: 'उसे पूरा करें और कंसोल पर लौटें।',
     epHealthSet: 'स्वास्थ्य मान हाथ से लिखें।',
     epProbe: 'संसाधन को अभी मापें और जो मिला उसे सहेजें।',
+    epResourceBatch: 'कई रिकॉर्ड एक ही अनुरोध में id से पढ़ें; जो id नहीं पढ़े जा सके वे missing में लौटते हैं।',
     epStatusSet: 'रिकॉर्ड को क्यूरेशन स्थिति-मशीन पर आगे बढ़ाएँ।',
     epApprovals: 'क्यूरेटर की प्रतीक्षा कर रहे रिकॉर्ड।',
     epSync: 'अभी एक अपस्ट्रीम रजिस्ट्री खींचें।',

@@ -82,8 +82,8 @@ func TestDockerCreateArgsCarryTheSecurityFlags(t *testing.T) {
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
 		"--user", "65534:65534",
-		"--tmpfs", "/tmp:rw,noexec,nosuid,nodev",
-		"--tmpfs", "/work:rw,nosuid,nodev,mode=1777",
+		"--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=" + tmpfsSizeTmp,
+		"--tmpfs", "/work:rw,nosuid,nodev,mode=1777,size=" + tmpfsSizeWork,
 	} {
 		if !hasElement(argv, want) {
 			t.Fatalf("create argv is missing %q: %v", want, argv)
@@ -95,16 +95,23 @@ func TestDockerCreateArgsCarryTheSecurityFlags(t *testing.T) {
 		{"--network", NetworkNone},
 		{"--pids-limit", "64"},
 		{"--memory", "512m"},
+		// Swap is pinned to the same value, so the memory ceiling cannot be
+		// sidestepped by paging out.
+		{"--memory-swap", "512m"},
 		{"--cpus", "1.5"},
 		{"--pull", "missing"},
 		{"-w", "/work"},
+		// A read-only root leaves nowhere to write, and most CLIs write under
+		// $HOME before they do anything useful.
+		{"--env", "HOME=/tmp"},
+		{"--env", "TMPDIR=/tmp"},
 	} {
 		if !hasPair(argv, pair[0], pair[1]) {
 			t.Fatalf("create argv is missing %s %s: %v", pair[0], pair[1], argv)
 		}
 	}
 	// No host directory was named, so there must be no bind mount at all.
-	if hasElement(argv, "-v") {
+	if hasElement(argv, "-v") || hasElement(argv, "--mount") {
 		t.Fatalf("an unnamed workdir must not mount the host: %v", argv)
 	}
 	tailArgv := tail(argv, len(argv)-3)
@@ -138,7 +145,12 @@ func TestDockerCreateArgsMountTheWorkdirAsRequested(t *testing.T) {
 	if !hasPair(argv, "--network", NetworkBridge) {
 		t.Fatalf("a bridge profile must reach the daemon: %v", argv)
 	}
-	if !hasPair(argv, "-v", "/host/work:/work") {
+	// --mount, not -v: -v would silently create a missing host directory and
+	// treat a second colon as the in-container path.
+	if hasElement(argv, "-v") {
+		t.Fatalf("a workdir must be a --mount, not a -v: %v", argv)
+	}
+	if !hasPair(argv, "--mount", "type=bind,src=/host/work,dst=/work") {
 		t.Fatalf("a writable workdir must not be marked read-only: %v", argv)
 	}
 	if hasPrefixElement(argv, "/work:rw,nosuid") {
@@ -152,7 +164,7 @@ func TestDockerCreateArgsMountTheWorkdirAsRequested(t *testing.T) {
 func TestDockerCreateArgsMarkAReadonlyWorkdirAsReadonly(t *testing.T) {
 	provider := NewDockerProvider(ProviderDocker, "", "", "")
 	argv := provider.createArgs(Spec{LeaseID: "l1", Profile: Profile{WorkDir: "/host/work"}})
-	if !hasPair(argv, "-v", "/host/work:/work:ro") {
+	if !hasPair(argv, "--mount", "type=bind,src=/host/work,dst=/work,readonly") {
 		t.Fatalf("read-only is the default, so the mount must say so: %v", argv)
 	}
 }
@@ -254,6 +266,44 @@ func TestDockerProbeReportsAMissingBinaryInsteadOfFailing(t *testing.T) {
 	// The reason is what the console prints, so it must say something.
 	if strings.TrimSpace(availability.Reason) == "" {
 		t.Fatal("an unavailable backend must carry a reason")
+	}
+}
+
+// TestProviderDescriptorsDeclareTheLimitsTheyApply is the quota half of "sell
+// only what runs": a container applies all three, a bare process and bubblewrap
+// apply none, and a layer this process cannot observe says so.
+func TestProviderDescriptorsDeclareTheLimitsTheyApply(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "tool")
+	declarative, err := NewDeclarativeProvider(DeclarativeSpec{
+		Name:     "nsjail-ish",
+		Binary:   bin,
+		ExecArgs: [][]string{{bin, "--mem={memory_mb}", "{command}"}, {"{arg}"}},
+	})
+	if err != nil {
+		t.Fatalf("build declarative: %v", err)
+	}
+
+	cases := []struct {
+		provider Provider
+		want     []string
+	}{
+		{NewDockerProvider(ProviderDocker, "", "", ""), []string{LimitCPU, LimitMemory, LimitPids}},
+		// bubblewrap has no cgroup, so it claims none: an operator reading the
+		// catalogue must not think the memory ceiling is applied there.
+		{NewBwrapProvider(), nil},
+		{NewLocalProvider(), nil},
+		{NewRemoteProvider(NewJobQueue()), []string{LimitDelegated}},
+		// Only the placeholders the template actually forwards.
+		{declarative, []string{LimitMemory}},
+	}
+	for _, tc := range cases {
+		described, err := tc.provider.Describe(context.Background())
+		if err != nil {
+			t.Fatalf("describe %s: %v", tc.provider.Name(), err)
+		}
+		if !equalStrings(described.Limits, tc.want) {
+			t.Fatalf("%s limits = %v, want %v", tc.provider.Name(), described.Limits, tc.want)
+		}
 	}
 }
 
@@ -532,8 +582,10 @@ func TestBwrapBindsTheWorkdirAndOnlyForwardsAllowedEnvironment(t *testing.T) {
 		},
 	)
 
-	if !hasPair(argv, "--bind", "/host/work") || !hasElement(argv, "/work") {
-		t.Fatalf("a named workdir must be bound into the sandbox: %v", argv)
+	// Read-only is the default for the root, and the work directory inherits it:
+	// a read-only profile must not receive a writable share of the host.
+	if !hasPair(argv, "--ro-bind", "/host/work") || !hasElement(argv, "/work") {
+		t.Fatalf("a named workdir must be bound into the sandbox read-only by default: %v", argv)
 	}
 	if !hasPair(argv, "--setenv", "LANG") || !hasPair(argv, "LANG", "C") {
 		t.Fatalf("an allow-listed variable must be forwarded: %v", argv)
@@ -545,6 +597,35 @@ func TestBwrapBindsTheWorkdirAndOnlyForwardsAllowedEnvironment(t *testing.T) {
 	command := tail(argv, len(argv)-2)
 	if !equalStrings(command, []string{"printf", "a b"}) {
 		t.Fatalf("the command line must not be joined, got %v", command)
+	}
+}
+
+// TestBwrapHonoursTheReadonlyRootFlag pins the inconsistency this replaced:
+// bubblewrap always emitted --ro-bind / /, so `readonly_root: false` produced a
+// writable container under docker and a read-only namespace here. Same profile,
+// same answer, on both backends.
+func TestBwrapHonoursTheReadonlyRootFlag(t *testing.T) {
+	readOnly := bwrapArgs(Profile{Network: NetworkNone}, ExecRequest{Command: "true"})
+	if !hasPair(readOnly, "--ro-bind", "/") {
+		t.Fatalf("an unset flag must mean a read-only root: %v", readOnly)
+	}
+
+	writable := false
+	argv := bwrapArgs(
+		Profile{WorkDir: "/host/work", ReadonlyRoot: &writable},
+		ExecRequest{Command: "true"},
+	)
+	if !hasPair(argv, "--bind", "/") || hasPrefixElement(argv, "--ro-bind") {
+		t.Fatalf("an explicit writable root must bind the root read-write: %v", argv)
+	}
+	// The work directory follows the root: a writable profile gets a writable
+	// share instead of the read-only one the default produces.
+	if !hasPair(argv, "--bind", "/host/work") {
+		t.Fatalf("a writable profile must bind its workdir read-write: %v", argv)
+	}
+	// HOME and TMPDIR point into the namespace tmpfs, never into the image.
+	if !hasPair(argv, "--setenv", "HOME") || !hasPair(argv, "--setenv", "TMPDIR") {
+		t.Fatalf("the sandbox must dictate its own HOME and TMPDIR: %v", argv)
 	}
 }
 

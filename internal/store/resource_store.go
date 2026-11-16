@@ -104,6 +104,28 @@ func (s *resourceStore) List(ctx context.Context, f registry.Filter) ([]*registr
 	return out, nil
 }
 
+// GetMany is one query for the whole batch. Fetching N ids one at a time would
+// make a "batch read" endpoint a loop of round trips, which is the thing it was
+// added to avoid.
+func (s *resourceStore) GetMany(ctx context.Context, ids []string) (map[string]*registry.Entry, error) {
+	out := make(map[string]*registry.Entry, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []model.Resource
+	if err := s.db.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		e, err := entryFromResource(&rows[i])
+		if err != nil {
+			return nil, err
+		}
+		out[e.ID] = e
+	}
+	return out, nil
+}
+
 func (s *resourceStore) Delete(ctx context.Context, id string) error {
 	res := s.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Resource{})
 	if res.Error != nil {

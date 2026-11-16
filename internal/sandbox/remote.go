@@ -214,6 +214,9 @@ func (r *RemoteProvider) Describe(context.Context) (Descriptor, error) {
 		// and the node's own policy is the enforcement point, recorded in the
 		// audit trail on that node.
 		Network: []string{NetworkDelegated},
+		// Same reasoning as the network: the node's runtime applies whatever
+		// cgroup limits it has, and this process cannot verify them.
+		Limits:  []string{LimitDelegated},
 		Source:  SourceBuiltin,
 		License: "n/a",
 		DocsURL: "/docs",

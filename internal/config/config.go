@@ -306,6 +306,28 @@ type Config struct {
 	// network". Setting it is not an access control, and the server says so in a
 	// startup warning rather than letting the setting look like one.
 	SandboxEgressAllowlist []string
+	// SandboxWorkDirRoots is the host tree a resource's work_dir must live
+	// under. Empty keeps the shipped denylist only (system trees stay refused,
+	// any other absolute path is allowed), which is what existing records were
+	// written against; setting it turns work_dir into an allowlist.
+	SandboxWorkDirRoots []string
+	// SandboxAllowWritableRoot permits a resource to opt out of the read-only
+	// root (readonly_root: false). Off by default: a resource that can widen its
+	// own filesystem view is the one decision an operator should have to make.
+	SandboxAllowWritableRoot bool
+	// SandboxCPU / SandboxMemoryMB / SandboxPidsLimit are the instance defaults a
+	// resource inherits when it names nothing. They used to be literals in main;
+	// a deployment with a smaller or larger host had no way to say so.
+	SandboxCPU       float64
+	SandboxMemoryMB  int
+	SandboxPidsLimit int
+	// SandboxMaxCPU / SandboxMaxMemoryMB / SandboxMaxPidsLimit are the ceiling a
+	// resource cannot talk its way past. A resource may tighten a limit and never
+	// widen it: above the ceiling is refused when the record is written, and a
+	// lease that predates a lowered ceiling is reclaimed rather than kept.
+	SandboxMaxCPU       float64
+	SandboxMaxMemoryMB  int
+	SandboxMaxPidsLimit int
 	// SandboxNodePollTimeout bounds a node's long poll. It has to stay under the
 	// idle timeout of whatever proxy sits in front of agenthub.
 	SandboxNodePollTimeout time.Duration
@@ -481,19 +503,27 @@ func Load() (*Config, error) {
 		// Execution environments. On by default with docker as the provider: an
 		// instance that has not decided where commands run must not run them on
 		// the host. mock and off are explicit settings, never fallbacks.
-		SandboxEnabled:         envBool("AGENTHUB_SANDBOX_ENABLED", true),
-		SandboxProvider:        envStr("AGENTHUB_SANDBOX_PROVIDER", sandbox.ProviderDocker),
-		SandboxDefaultImage:    envStr("AGENTHUB_SANDBOX_DEFAULT_IMAGE", sandbox.DefaultImage),
-		SandboxDockerHost:      envStr("AGENTHUB_SANDBOX_DOCKER_HOST", ""),
-		SandboxRuntime:         envStr("AGENTHUB_SANDBOX_RUNTIME", ""),
-		SandboxIdleTTL:         envDur("AGENTHUB_SANDBOX_IDLE_TTL", 30*time.Minute),
-		SandboxMaxTTL:          envDur("AGENTHUB_SANDBOX_MAX_TTL", 2*time.Hour),
-		SandboxMaxPerOwner:     envInt("AGENTHUB_SANDBOX_MAX_PER_OWNER", 4),
-		SandboxMaxTotal:        envInt("AGENTHUB_SANDBOX_MAX_TOTAL", 16),
-		SandboxEgressAllowlist: envList("AGENTHUB_SANDBOX_EGRESS_ALLOWLIST", nil),
-		SandboxNodePollTimeout: envDur("AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT", 25*time.Second),
-		SandboxSweepInterval:   envDur("AGENTHUB_SANDBOX_SWEEP_INTERVAL", 30*time.Second),
-		SandboxProvidersJSON:   os.Getenv("AGENTHUB_SANDBOX_PROVIDERS"),
+		SandboxEnabled:           envBool("AGENTHUB_SANDBOX_ENABLED", true),
+		SandboxProvider:          envStr("AGENTHUB_SANDBOX_PROVIDER", sandbox.ProviderDocker),
+		SandboxDefaultImage:      envStr("AGENTHUB_SANDBOX_DEFAULT_IMAGE", sandbox.DefaultImage),
+		SandboxDockerHost:        envStr("AGENTHUB_SANDBOX_DOCKER_HOST", ""),
+		SandboxRuntime:           envStr("AGENTHUB_SANDBOX_RUNTIME", ""),
+		SandboxIdleTTL:           envDur("AGENTHUB_SANDBOX_IDLE_TTL", 30*time.Minute),
+		SandboxMaxTTL:            envDur("AGENTHUB_SANDBOX_MAX_TTL", 2*time.Hour),
+		SandboxMaxPerOwner:       envInt("AGENTHUB_SANDBOX_MAX_PER_OWNER", 4),
+		SandboxMaxTotal:          envInt("AGENTHUB_SANDBOX_MAX_TOTAL", 16),
+		SandboxEgressAllowlist:   envList("AGENTHUB_SANDBOX_EGRESS_ALLOWLIST", nil),
+		SandboxWorkDirRoots:      envList("AGENTHUB_SANDBOX_WORKDIR_ROOTS", nil),
+		SandboxNodePollTimeout:   envDur("AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT", 25*time.Second),
+		SandboxSweepInterval:     envDur("AGENTHUB_SANDBOX_SWEEP_INTERVAL", 30*time.Second),
+		SandboxAllowWritableRoot: envBool("AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT", false),
+		SandboxCPU:               envFloat("AGENTHUB_SANDBOX_CPU", 1),
+		SandboxMemoryMB:          envInt("AGENTHUB_SANDBOX_MEMORY_MB", 1024),
+		SandboxPidsLimit:         envInt("AGENTHUB_SANDBOX_PIDS_LIMIT", 128),
+		SandboxMaxCPU:            envFloat("AGENTHUB_SANDBOX_MAX_CPU", 4),
+		SandboxMaxMemoryMB:       envInt("AGENTHUB_SANDBOX_MAX_MEMORY_MB", 4096),
+		SandboxMaxPidsLimit:      envInt("AGENTHUB_SANDBOX_MAX_PIDS_LIMIT", 512),
+		SandboxProvidersJSON:     os.Getenv("AGENTHUB_SANDBOX_PROVIDERS"),
 	}
 	// Declarative providers are parsed here rather than in main so a malformed
 	// template is a startup failure with the variable's name in the message.
@@ -801,6 +831,48 @@ func (c *Config) Validate() error {
 		if c.SandboxSweepInterval <= 0 || c.SandboxSweepInterval > 10*time.Minute {
 			return fmt.Errorf("AGENTHUB_SANDBOX_SWEEP_INTERVAL must be 1s..10m, got %s", c.SandboxSweepInterval)
 		}
+		// Quotas: the default is what a resource inherits, the ceiling is what it
+		// may never exceed. Both halves are configurable because "1 CPU and 1 GiB"
+		// is a guess about the host, and a guess that a resource could widen on its
+		// own was the bug this replaced.
+		//
+		// A wholly zeroed block is a hand-built Config (a test, an embedder), not a
+		// deployment: it gets the shipped numbers, the same way an unset
+		// AGENTHUB_SANDBOX_PROVIDER becomes docker just above.
+		if c.SandboxCPU == 0 && c.SandboxMemoryMB == 0 && c.SandboxPidsLimit == 0 {
+			c.SandboxCPU, c.SandboxMemoryMB, c.SandboxPidsLimit = 1, 1024, 128
+		}
+		if c.SandboxMaxCPU == 0 && c.SandboxMaxMemoryMB == 0 && c.SandboxMaxPidsLimit == 0 {
+			c.SandboxMaxCPU, c.SandboxMaxMemoryMB, c.SandboxMaxPidsLimit = 4, 4096, 512
+		}
+		if c.SandboxCPU <= 0 || c.SandboxMemoryMB <= 0 || c.SandboxPidsLimit <= 0 {
+			return fmt.Errorf("AGENTHUB_SANDBOX_CPU, AGENTHUB_SANDBOX_MEMORY_MB and AGENTHUB_SANDBOX_PIDS_LIMIT must be positive")
+		}
+		if c.SandboxMaxCPU <= 0 || c.SandboxMaxMemoryMB <= 0 || c.SandboxMaxPidsLimit <= 0 {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_CPU, AGENTHUB_SANDBOX_MAX_MEMORY_MB and AGENTHUB_SANDBOX_MAX_PIDS_LIMIT must be positive")
+		}
+		if c.SandboxMaxCPU < c.SandboxCPU || c.SandboxMaxMemoryMB < c.SandboxMemoryMB ||
+			c.SandboxMaxPidsLimit < c.SandboxPidsLimit {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_* must be at least the instance default (cpu %g/%g, memory %d/%d MB, pids %d/%d)",
+				c.SandboxCPU, c.SandboxMaxCPU, c.SandboxMemoryMB, c.SandboxMaxMemoryMB,
+				c.SandboxPidsLimit, c.SandboxMaxPidsLimit)
+		}
+		if c.SandboxMaxCPU > 256 || c.SandboxMaxMemoryMB > 1<<20 || c.SandboxMaxPidsLimit > 1<<16 {
+			return fmt.Errorf("AGENTHUB_SANDBOX_MAX_* is out of range (cpu ≤ 256, memory ≤ %d MB, pids ≤ %d)",
+				1<<20, 1<<16)
+		}
+		// A work-directory root is a host path the sandbox may be handed, so a
+		// relative one would resolve against the server's cwd and mean something
+		// else after a restart. Absolute or nothing.
+		for _, root := range c.SandboxWorkDirRoots {
+			trimmed := strings.TrimSpace(root)
+			if trimmed == "" {
+				continue
+			}
+			if !filepath.IsAbs(trimmed) && !strings.HasPrefix(filepath.ToSlash(trimmed), "/") {
+				return fmt.Errorf("AGENTHUB_SANDBOX_WORKDIR_ROOTS entries must be absolute paths, got %q", root)
+			}
+		}
 	}
 	return nil
 }
@@ -826,6 +898,21 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// envFloat reads a fractional setting such as a CPU count. An unparsable value
+// falls back to the default, like every other env helper here: a typo must not
+// become a zero CPU ceiling.
+func envFloat(key string, def float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return def
+	}
+	return f
 }
 
 func envBool(key string, def bool) bool {

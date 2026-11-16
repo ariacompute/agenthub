@@ -36,9 +36,12 @@ func (l *LocalProvider) Describe(context.Context) (Descriptor, error) {
 		Layer:     LayerProcess,
 		Isolation: IsolationNone,
 		Network:   []string{NetworkPlatform},
-		Source:    SourceBuiltin,
-		License:   "n/a",
-		DocsURL:   "/docs",
+		// A plain child process has no cgroup and no rlimit applied by agenthub:
+		// the profile's cpu/memory/pids ceiling does not apply here either.
+		Limits:  nil,
+		Source:  SourceBuiltin,
+		License: "n/a",
+		DocsURL: "/docs",
 	}, nil
 }
 

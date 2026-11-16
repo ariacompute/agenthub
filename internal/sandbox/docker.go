@@ -51,7 +51,10 @@ func (d *DockerProvider) Describe(context.Context) (Descriptor, error) {
 		// needs an egress sidecar to mean anything, and a descriptor must not
 		// claim a filter that does not exist. All three named modes are real here:
 		// createArgs maps them onto --network none / bridge / the daemon default.
-		Network:  []string{NetworkNone, NetworkBridge, NetworkPlatform},
+		Network: []string{NetworkNone, NetworkBridge, NetworkPlatform},
+		// All three limits are real here: createArgs passes --cpus, --memory with
+		// a matching --memory-swap, and --pids-limit to the daemon.
+		Limits:   []string{LimitCPU, LimitMemory, LimitPids},
 		Requires: []string{d.bin},
 		Source:   SourceBuiltin,
 		License:  "Apache-2.0",
@@ -191,6 +194,15 @@ func (d *DockerProvider) Status(ctx context.Context, h Handle) (string, error) {
 	return StateExpired, nil
 }
 
+// Anonymous writable areas are tmpfs, which lives in memory: without a ceiling a
+// single runaway process would consume the host's RAM through the page cache. The
+// numbers are deliberately generous for build/CLI work and small enough that a
+// mistake is a failed command rather than a dead host.
+const (
+	tmpfsSizeTmp  = "64m"
+	tmpfsSizeWork = "512m"
+)
+
 // createArgs is pure so the security-relevant flags can be asserted in a unit
 // test without a daemon: --network=none, read-only root, dropped capabilities,
 // no-new-privileges, a numeric non-root user and the resource limits.
@@ -215,12 +227,24 @@ func (d *DockerProvider) createArgs(spec Spec) []string {
 	if p.Readonly() {
 		args = append(args, "--read-only")
 	}
-	args = append(args, "--tmpfs", "/tmp:rw,noexec,nosuid,nodev")
+	// /tmp is the only writable place a read-only root leaves behind, so it is
+	// narrowed to exactly what a temp directory needs: no execution, no device
+	// nodes, no setuid and a size ceiling so a runaway process cannot fill the
+	// host's memory through the page cache.
+	args = append(args, "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size="+tmpfsSizeTmp)
+	// Many CLIs write under $HOME before they read anything; without these they
+	// fail with a permission error that reads like a bug in the resource. They
+	// point at the tmpfs, never at the (read-only) image.
+	args = append(args, "--env", "HOME=/tmp", "--env", "TMPDIR=/tmp")
 	if p.PidsLimit > 0 {
 		args = append(args, "--pids-limit", strconv.Itoa(p.PidsLimit))
 	}
 	if p.MemoryMB > 0 {
 		args = append(args, "--memory", strconv.Itoa(p.MemoryMB)+"m")
+		// --memory alone leaves swap unlimited on a host that has it, which makes
+		// the memory ceiling advisory. Setting both to the same value is the
+		// documented way to forbid swap for one container.
+		args = append(args, "--memory-swap", strconv.Itoa(p.MemoryMB)+"m")
 	}
 	if p.CPU > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(p.CPU, 'f', -1, 64))
@@ -228,16 +252,21 @@ func (d *DockerProvider) createArgs(spec Spec) []string {
 	args = append(args, "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "65534:65534")
 
 	if p.WorkDir != "" {
-		mount := p.WorkDir + ":/work"
+		// --mount rather than -v: -v silently creates a missing host directory,
+		// which turns a typo into an empty (and, when the root is writable,
+		// host-owned) share instead of a failure. It also parses "," as an option
+		// separator, which is why ValidateHostPolicy refuses commas in a path.
+		mount := "type=bind,src=" + p.WorkDir + ",dst=/work"
 		if p.Readonly() {
-			mount += ":ro"
+			mount += ",readonly"
 		}
-		args = append(args, "-v", mount)
+		args = append(args, "--mount", mount)
 	} else {
 		// No host directory was named, so the working area is a writable tmpfs
 		// inside the container: it disappears with the container instead of
-		// leaving state on the host.
-		args = append(args, "--tmpfs", "/work:rw,nosuid,nodev,mode=1777")
+		// leaving state on the host, and it is capped so it cannot become an
+		// unbounded write target.
+		args = append(args, "--tmpfs", "/work:rw,nosuid,nodev,mode=1777,size="+tmpfsSizeWork)
 	}
 	image := p.Image
 	if image == "" {

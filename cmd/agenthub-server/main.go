@@ -154,6 +154,19 @@ func main() {
 			_, _, err := sandboxSvc.Registry().RequireAvailable(context.Background(), name)
 			return err
 		})
+		// The filesystem gate: a resource may name a work directory and may ask
+		// for a writable root only inside what the instance allows. Enforced here
+		// as well as on the lease so the rejection happens while the record is
+		// being written.
+		reg.WithSandboxPolicy(func(c *registry.SandboxConfig) error {
+			profile := c.Profile()
+			if err := sandbox.ValidateHostPolicy(profile, sandboxHostPolicy(cfg)); err != nil {
+				return err
+			}
+			// And the quota ceiling: a resource may tighten a limit, never widen
+			// it past what this instance allows.
+			return sandboxLimits(cfg).Exceeds(profile)
+		})
 		sandboxCtx, stopSandbox := context.WithCancel(context.Background())
 		// Registered before the router's defer, so shutdown runs it *after* the
 		// router stopped: no new task can arrive while the sweep is still up,
@@ -416,12 +429,29 @@ func newSandboxStack(cfg *config.Config, db *gorm.DB) (*sandbox.Service, error) 
 			"hint", "use the docker provider with an egress sidecar, or leave the setting unset")
 	}
 
+	// Say out loud what a sandbox may touch on the host. Without this line the
+	// answer to "can a resource mount / ?" lives only in the denylist source.
+	hostPolicy := sandboxHostPolicy(cfg)
+	if len(hostPolicy.WorkDirRoots) == 0 {
+		slog.Info("sandbox: work_dir is limited by the built-in denylist only",
+			"effect", "an absolute path outside the system trees (/proc /sys /dev /etc /root /usr /var/lib …) may be shared with a sandbox",
+			"hint", "set AGENTHUB_SANDBOX_WORKDIR_ROOTS to a data path to turn work_dir into an allowlist")
+	} else {
+		slog.Info("sandbox: work_dir is allowlisted", "roots", len(hostPolicy.WorkDirRoots))
+	}
+	if !hostPolicy.AllowWritableRoot {
+		slog.Info("sandbox: the root filesystem stays read-only",
+			"hint", "set AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT=true to let a resource ask for readonly_root=false")
+	}
+
 	sbStore := store.NewSandboxStore(db)
 	bus := sandbox.NewBus(sbStore, time.Now)
 	manager := sandbox.NewManager(sandbox.ManagerOptions{
 		Registry: catalogue,
 		Store:    sbStore,
 		Defaults: sandboxDefaults(cfg),
+		Policy:   sandboxHostPolicy(cfg),
+		Limits:   sandboxLimits(cfg),
 		IdleTTL:  cfg.SandboxIdleTTL,
 		MaxTTL:   cfg.SandboxMaxTTL,
 		// The ceilings are what keeps one tenant from filling the host, and the
@@ -457,7 +487,13 @@ func newSandboxStack(cfg *config.Config, db *gorm.DB) (*sandbox.Service, error) 
 		slog.Info("sandbox: control plane ready",
 			"provider", cfg.SandboxProvider, "layer", info.Layer, "isolation", info.Isolation,
 			"providers", len(catalogue.Names()),
-			"maxTotal", cfg.SandboxMaxTotal, "idleTTL", cfg.SandboxIdleTTL)
+			"maxTotal", cfg.SandboxMaxTotal, "idleTTL", cfg.SandboxIdleTTL,
+			// The numbers a resource inherits and the ones it may never exceed,
+			// plus what the default backend can actually apply: "cpu,memory,pids"
+			// for a container, an empty list for a bare process.
+			"default", sandboxDefaults(cfg).Profile().String(),
+			"ceiling", sandboxLimits(cfg).String(),
+			"enforces", info.Limits)
 	}
 	return service, nil
 }
@@ -490,6 +526,38 @@ func builtinSandboxProviders(cfg *config.Config, queue *sandbox.JobQueue) []sand
 	return providers
 }
 
+// sandboxHostPolicy is the instance's filesystem answer for sandboxes: where a
+// resource's work_dir may live and whether it may opt out of the read-only root.
+// The zero value is safe, so an unset environment means "read-only root, host
+// directories only where the shipped denylist allows".
+func sandboxHostPolicy(cfg *config.Config) sandbox.HostPolicy {
+	return sandbox.HostPolicy{
+		WorkDirRoots:      cfg.SandboxWorkDirRoots,
+		AllowWritableRoot: cfg.SandboxAllowWritableRoot,
+	}
+}
+
+// sandboxLimits is the ceiling a resource cannot talk its way past. Kept next to
+// sandboxDefaults because the two are read together: the first says what a
+// resource inherits, the second says how far past it the operator allows.
+func sandboxLimits(cfg *config.Config) sandbox.Limits {
+	return sandbox.Limits{
+		CPU:       defaultIfZero(cfg.SandboxMaxCPU, 4),
+		MemoryMB:  defaultIfZero(cfg.SandboxMaxMemoryMB, 4096),
+		PidsLimit: defaultIfZero(cfg.SandboxMaxPidsLimit, 512),
+	}
+}
+
+// defaultIfZero keeps a hand-built Config usable: an unset quota falls back to the
+// shipped number instead of creating a sandbox with zero of everything.
+func defaultIfZero[T comparable](v, def T) T {
+	var zero T
+	if v == zero {
+		return def
+	}
+	return v
+}
+
 // sandboxDefaults is the instance-wide policy a resource inherits. Its whole
 // purpose is that a resource which names nothing still gets a closed sandbox:
 // no network, a read-only root, a capped output and no caller-supplied arguments.
@@ -499,14 +567,18 @@ func sandboxDefaults(cfg *config.Config) sandbox.Defaults {
 		timeout = 15 * time.Second
 	}
 	return sandbox.Defaults{
-		Provider:       cfg.SandboxProvider,
-		Runtime:        cfg.SandboxRuntime,
-		Image:          cfg.SandboxDefaultImage,
-		Network:        sandbox.NetworkNone,
-		EgressAllow:    cfg.SandboxEgressAllowlist,
-		CPU:            1,
-		MemoryMB:       1024,
-		PidsLimit:      128,
+		Provider:    cfg.SandboxProvider,
+		Runtime:     cfg.SandboxRuntime,
+		Image:       cfg.SandboxDefaultImage,
+		Network:     sandbox.NetworkNone,
+		EgressAllow: cfg.SandboxEgressAllowlist,
+		// The quotas are operator settings rather than literals: "1 CPU and 1 GiB"
+		// is a guess about the host, and a resource used to be able to overwrite
+		// the guess with any number it liked. A hand-built Config that leaves them
+		// zeroed still gets the shipped floor.
+		CPU:            defaultIfZero(cfg.SandboxCPU, 1),
+		MemoryMB:       defaultIfZero(cfg.SandboxMemoryMB, 1024),
+		PidsLimit:      defaultIfZero(cfg.SandboxPidsLimit, 128),
 		TimeoutMS:      int(timeout / time.Millisecond),
 		MaxOutputBytes: cfg.MaxOutputBytes,
 		// PATH only, plus the four variables every CLI expects to find. The

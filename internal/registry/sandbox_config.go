@@ -84,6 +84,10 @@ func (c *SandboxConfig) EffectiveArgsPolicy(cli *CLIConfig) string {
 
 // validateSandbox rejects a policy that cannot be honoured. It runs at
 // registration time so an operator learns about a bad limit while writing it.
+//
+// The instance-dependent half — the CPU/memory ceiling and the work-directory
+// allowlist — lives behind Registry.WithSandboxPolicy, because it needs operator
+// configuration this package deliberately does not read.
 func validateSandbox(c *SandboxConfig) error {
 	if c == nil {
 		return nil
@@ -95,11 +99,28 @@ func validateSandbox(c *SandboxConfig) error {
 	if strings.TrimSpace(c.Provider) != "" && strings.ContainsAny(c.Provider, " \t/\\") {
 		return kindConfigErr("sandbox.provider")
 	}
+	if strings.TrimSpace(c.WorkDir) != "" {
+		if _, err := sandbox.CleanWorkDir(c.WorkDir); err != nil {
+			return kindConfigErr("sandbox.work_dir")
+		}
+	}
 	if c.TimeoutMS < 0 || c.MaxOutputBytes < 0 || c.CPU < 0 || c.MemoryMB < 0 || c.PidsLimit < 0 || c.IdleTTLSeconds < 0 {
 		return kindConfigErr("sandbox")
 	}
 	if sandbox.NormalizeArgsPolicy(c.ArgsPolicy) == sandbox.ArgsPrefix && len(c.ArgsAllowlist) == 0 {
 		return kindConfigErr("sandbox.args_allowlist")
+	}
+	return nil
+}
+
+// validateLegacyWorkDir applies the same structural checks to the pre-sandbox
+// cli.work_dir field, which still contributes to the resolved profile.
+func validateLegacyWorkDir(cli *CLIConfig) error {
+	if cli == nil || strings.TrimSpace(cli.WorkDir) == "" {
+		return nil
+	}
+	if _, err := sandbox.CleanWorkDir(cli.WorkDir); err != nil {
+		return kindConfigErr("sandbox.work_dir")
 	}
 	return nil
 }

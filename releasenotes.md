@@ -147,6 +147,21 @@ search, CloudTrail-equivalent auditing, cross-account RAM sharing, VPC PrivateLi
 - **CRUD and discovery**: `GET/POST /api/resources`, `GET/PUT/DELETE /api/resources/{id}`,
   `POST /api/resources/{id}/health`, with `?kind=`, `?q=`, `?namespace=` and `?status=`
   filtering and counts.
+- **Paging**: `GET /api/resources` also takes `?limit=` (0…200, `0` or absent keeps the
+  historical "everything") and `?offset=`, and reports `total` / `limit` / `offset` back.
+  A nonsensical window (`limit=abc`, `limit=201`, `offset=-1`) is a `400 bad_request` rather
+  than something silently ignored. The window is applied **after** visibility, because that
+  is decided in Go (grants ∪ public) — slicing first would hand a non-owner a page whose
+  length says nothing. `counts` and `health` are computed from the kind-agnostic visible
+  set, so a filtered tab no longer reports zero for the others. `LIMIT` is deliberately not
+  pushed into SQL: `q` spans jsonb columns and visibility is Go-side, so a pushdown would
+  change the answer; the trade-off is recorded in `requirements.md` and keyset paging stays
+  a separate future item.
+- **Batch read**: `POST /api/resources/batch` takes `{"ids": […]}` (up to 100, deduplicated,
+  answered in request order) and returns `{resources, missing}`. Absent ids and ids the
+  caller cannot see both land in `missing`, the same way a `GET` of somebody else's record
+  is a `404` rather than a `403` — a batch must not become an existence oracle. An empty
+  list, more than 100 ids or a blank id is a `400`.
 - **Measured health probe**: `POST /api/resources/{id}/probe` asks the resource's own
   connector how it is actually doing (an agent's Agent Card is fetched, an MCP server's
   `initialize` is pinged) and stores the answer; a probe that cannot be answered records
@@ -379,7 +394,12 @@ screen and a visual inspector for the A2A contract.
   filters, health indicators and a stats bar, and a per-resource "trial run". The register
   drawer now switches per kind — a model shows its router, an MCP server its transport, a
   skill its steps and manual — and every card carries a curation badge that offers exactly
-  the transitions the status allows.
+  the transitions the status allows. Filtering is now **server-side** (keystrokes are
+  debounced) and the list is **paged**: previous / next, 25 / 50 / 100 per page, and a
+  "1–25 of 137" summary taken from the server's `total` rather than inferred. A mutation
+  refreshes the page it was made on, while topology, playground, the grant table and the
+  boot prefetch ask for the whole catalogue explicitly — so paging one screen never
+  starves another.
 - **Registries**: namespaces with their approval policy, plus the curator's
   pending-review queue with approve / reject in place.
 - **Sources**: upstream registry sources, a manual "sync now", and the imported /
@@ -410,9 +430,10 @@ screen and a visual inspector for the A2A contract.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
   sticky index that follows the reader. The endpoint table covers the full route table
-  (141 routes) with method, path, required permission and request/response samples taken
-  from the handlers themselves — now including the agent-capability, channel, connector,
-  speech and API-key endpoints. It sits after Administration in the sidebar and is
+  (145 routes, batch reads included) with method, path, required permission and
+  request/response samples taken from the handlers themselves — now including the
+  agent-capability, channel, connector, speech and API-key endpoints. It sits after
+  Administration in the sidebar and is
   deliberately **not**
   permission-gated: anyone who can sign in may read it, while Administration itself still
   appears and disappears with its permissions.
@@ -559,12 +580,13 @@ screen and a visual inspector for the A2A contract.
 - **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
   legs (startup check → discovery → send a task → streaming run → suspend/resume →
   control-plane round trip).
-- **Frontend**: `bunx vitest run`, 417 tests passing across 21 files (languages /
+- **Frontend**: `bunx vitest run`, 475 tests passing across 24 files (languages /
   copy-fallback / enums-copy / api / api-endpoints / audit / auth-store / format /
   errors / backup-api / docs-content / playground / store / user-form / use-copy /
-  use-dismiss / style guard, plus the sandbox, router and files surfaces).
-  `bun run test:coverage` (v8) reports 100% of statements, 95.8% of branches and 100% of
-  functions; the uncovered branches are the defensive arms a screen never reaches.
+  use-dismiss / style guard, plus the sandbox, router, files, paging and setup surfaces).
+  `bun run test:coverage` (v8) reports 100% of statements, 99.36% of branches and 100% of
+  functions over `src/lib/**`; the uncovered branches are the defensive arms a screen never
+  reaches.
 - **The suite runs as the production role too**: a second CI job provisions
   `agenthub_migrator` / `agenthub_app` from `scripts/provision-db-roles.sql`, migrates as the
   migrator and then runs the whole `go test ./...` as `agenthub_app` — DML only, no
@@ -573,6 +595,20 @@ screen and a visual inspector for the A2A contract.
   turns "this role cannot create tables" into a skip that names the reason
   (`production role: no DDL, use a migrator DSN`) instead of a failure. Without that, the
   first production-shaped run would have reported a permission error as a defect.
+- **The assembled product runs in CI too**: a fourth job builds the console and the binary
+  (`make build`), then runs the route-coverage guard, the API suite and the six Playwright
+  journeys against a real Postgres and the real process — the parts are unit-tested, this is
+  the product. The guard goes first because it needs no server: a route added to `docs/`
+  without a case fails the job, not a review. Chromium and the sandbox default image are
+  installed up front (a first lease spent on a pull fails on a timeout, which reads like a
+  defect), and on failure the reports, the Playwright HTML report and the server log are
+  archived together.
+- **Catalogue paging and batch reads**: `internal/handlers/api_paging_test.go` pins the window
+  (echoed `limit` / `offset`, accurate `total`, an offset past the end as an empty page, 400s
+  for `abc`, `-1`, `201` and a negative offset), the kind-agnostic counts, the batch read
+  (request order, deduplication, `missing` for both absent and not-visible ids at the cap of
+  100, 400 for empty / blank / 101 ids) and that a refused record never leaks through either
+  path. `e2e/api/cases/02-resources.js` re-pins the same contract over real HTTP.
 - **A2A & control-plane smoke**: send (once per kind), stream (no `[DONE]`, terminal frame
   last), `input-required` → `tasks/resume`, `tasks/get` history trimming, v0.1 aliases,
   flow branch and parallel, error-code paths, and the register → invoke → delete round
@@ -831,9 +867,13 @@ agent runs as the host process any more.
   interface; `docker` advertises `none|bridge|platform` and `createArgs` matches it, passing the
   daemon's own default for `platform` instead of the literal `bridge`; remote nodes, hosted shims
   and undeclared templates advertise **`delegated`**, because this process constrains nothing and
-  the node does. `Descriptor` also gained `EnvKeys` (environment-variable names a shim needs) and
-  the new `SourcePlatform`, so a shim compiled into the binary no longer pretends to be a
-  declarative template with a binary in `Requires`.
+  the node does. `Descriptor` also gained `EnvKeys` (environment-variable names a shim needs),
+  `Limits` (which quota knobs the backend really applies: `cpu` / `memory` / `pids` for a
+  container runtime, nothing for `bwrap` or `local`, `delegated` for remote nodes and hosted
+  shims) and the new `SourcePlatform`, so a shim compiled into the binary no longer pretends to
+  be a declarative template with a binary in `Requires`. `Limits` is **informational on
+  purpose**: the default profile always carries cpu and memory, so gating on it the way network
+  modes are gated would make bubblewrap unusable entirely.
 - **Admission is fail-closed**: `Manager.Acquire` describes the resolved provider and refuses a
   profile whose network mode the backend never declared — `sandbox_capability_unavailable`, with
   the backend never called. Asking bubblewrap for `bridge` used to receive the host's network
@@ -853,6 +893,50 @@ agent runs as the host process any more.
   and a refused lease is a retryable `sandbox_limit_reached` for the scheduler's back-off.
 - **Credentials stay out of the model**: remote agent calls inject `credential_env` server-side;
   task metadata and artifacts keep only the variable name.
+
+### Host filesystem gate
+
+- **Where a sandbox may touch the host is operator policy, not resource policy**: a resource names
+  a directory, the instance decides whether that directory is reachable at all.
+  `sandbox.HostPolicy` + `ValidateHostPolicy` refuse a `work_dir` that is not absolute, carries a
+  `..` element, a control character / NUL, or a comma (which `--mount` reads as an option
+  separator), that is a volume root, or that lives under a system tree (`/etc`, `/proc`, `/sys`, …).
+  `AGENTHUB_SANDBOX_WORKDIR_ROOTS` (absolute, comma-separated) turns that into an allowlist —
+  matched per path segment, so `/srv/work` is not the parent of `/srv/workshop`, and an unusable
+  prefix is **skipped instead of relaxed**.
+- **A writable root needs the operator's key**: `AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT` defaults to
+  **false**, because a resource that can widen its own filesystem view is exactly the one that
+  should not decide it. `readonly_root: false` without the switch is `sandbox_policy_denied` at
+  save time and again at lease time. This is a deliberate tightening: a record that relied on it
+  needs the switch turned on.
+- **Both backends mean the same thing by it**: docker mounts with
+  `--mount type=bind,src=…,dst=/work[,readonly]` instead of `-v` — a missing source now fails
+  instead of being silently created on the host, which used to turn a typo into an empty
+  host-owned share — and sets `HOME` / `TMPDIR` to the tmpfs, so a CLI that writes to `$HOME`
+  fails for its own reasons instead of reporting a permission error from the read-only image.
+  `bwrap` now reads `Profile.Readonly()` instead of always emitting `--ro-bind /`, so one policy
+  produces one sandbox on both backends, and a read-only profile gets a read-only work directory.
+
+### Quotas
+
+- **Three numbers, one ceiling**: `sandbox.Limits{CPU, MemoryMB, PidsLimit}` with a `Clamp` that
+  only ever lowers a profile and an `Exceeds` used at registration. `AGENTHUB_SANDBOX_CPU` (1) /
+  `_MEMORY_MB` (1024) / `_PIDS_LIMIT` (128) are what a resource inherits;
+  `AGENTHUB_SANDBOX_MAX_CPU` (4) / `_MAX_MEMORY_MB` (4096) / `_MAX_PIDS_LIMIT` (512) are what it
+  may never exceed. Both sets are validated only when the sandbox is switched on, so an instance
+  that never enables it stays exactly as valid as it was.
+- **Oversize is refused where it is written**: registration goes through
+  `Registry.WithSandboxPolicy`, wired from the same `AGENTHUB_SANDBOX_*` values the manager uses,
+  so the handler, an upstream sync and the demo seed share one gate and a rejected profile never
+  reaches a lease. The registry still does not import the control plane.
+- **Oversize in a stored record is clamped, not failed**: `Manager.Acquire` clamps to the ceiling,
+  logs it (lease and resource ids plus both numbers, never the command) and carries
+  `limitsClamped` on the lease event, so "the resource asked for 64 CPUs and got 4" is visible. A
+  live lease that now sits above a lowered ceiling is reclaimed and rebuilt rather than left
+  enjoying the older budget.
+- **Swap cannot buy back the memory ceiling**: docker passes `--memory-swap` equal to `--memory`,
+  the documented way to forbid swap for one container; `--memory` alone leaves swap unlimited and
+  makes the ceiling advisory.
 
 ### Closed execution surfaces
 
@@ -882,6 +966,14 @@ agent runs as the host process any more.
 - `tests/sandbox_e2e_test.go`: the console endpoints over real HTTP, an empty command refused, an
   unknown lease 404, another owner's lease invisible, `503` when not wired, node enroll → claim →
   report (and a second node refused), and the SSE replay.
+- `internal/sandbox/policy_test.go` and `manager_test.go`: the host-path gate (relative path, `..`,
+  system tree, volume root, comma, allowlist hit and miss, an unusable prefix that is skipped), the
+  writable-root switch from both sides, `Limits.Clamp` / `Exceeds`, the clamp carried on the lease
+  event, and a live lease above a lowered ceiling being rebuilt.
+- `e2e/api/cases/11-sandboxes.js`: the default profile must not opt out of the read-only root, a
+  system-tree or relative `work_dir` is refused with a machine code, and a writable root without
+  the instance switch is refused — a permissive instance is skipped with that reason rather than
+  failed.
 - agenthub web: `docs-content.spec.js` pins the sandbox docs group across all 13 languages, and the
   monochrome guard still runs over the new copy.
 

@@ -5,6 +5,7 @@ const apiMock = vi.hoisted(() => {
   const make = () => vi.fn().mockResolvedValue({})
   return {
     listResources: make(),
+    getResourcesBatch: make(),
     listTasks: make(),
     healthz: make(),
     createResource: make(),
@@ -73,6 +74,83 @@ describe('refreshResources', () => {
     await store.refreshResources()
     expect(store.errorCode).toBe('internal_error')
     expect(store.loading).toBe(false)
+  })
+})
+
+// The registry list is a server-side window now. Three properties matter and all
+// three are easy to lose: the window reaches the server, a mutation re-reads the
+// same window (otherwise saving a record dumps the whole directory into the grid),
+// and a view that needs everything can still say so.
+describe('catalogue paging', () => {
+  it('sends the window and stores the total', async () => {
+    api.listResources.mockResolvedValue({ resources: [{ id: 'r1' }], total: 137, limit: 25, offset: 50 })
+    const store = useHubStore()
+
+    expect(await store.refreshResources({ limit: 25, offset: 50 })).toBe(true)
+
+    expect(api.listResources).toHaveBeenCalledWith({ limit: 25, offset: 50 })
+    expect(store.resourceTotal).toBe(137)
+  })
+
+  it('re-reads the remembered window when a caller passes none', async () => {
+    api.listResources.mockResolvedValue({ resources: [], total: 0 })
+    const store = useHubStore()
+    await store.refreshResources({ limit: 25, offset: 50 })
+
+    api.listResources.mockClear()
+    await store.refreshResources()
+
+    expect(api.listResources).toHaveBeenCalledWith({ limit: 25, offset: 50 })
+  })
+
+  it('forgets the window when the whole catalogue is asked for', async () => {
+    api.listResources.mockResolvedValue({ resources: [], total: 0 })
+    const store = useHubStore()
+    await store.refreshResources({ limit: 25, offset: 50 })
+
+    await store.refreshAllResources()
+    api.listResources.mockClear()
+    await store.refreshResources()
+
+    expect(api.listResources).toHaveBeenCalledWith({})
+  })
+
+  it('falls back to the page length when the answer carries no total', async () => {
+    api.listResources.mockResolvedValue({ resources: [{ id: 'a' }, { id: 'b' }] })
+    const store = useHubStore()
+    await store.refreshResources({ limit: 25 })
+    expect(store.resourceTotal).toBe(2)
+  })
+})
+
+describe('resolveResourceNames', () => {
+  it('resolves a batch in one request, deduplicated', async () => {
+    api.getResourcesBatch.mockResolvedValue({
+      resources: [
+        { id: 'r1', name: 'Alpha' },
+        { id: 'r2', name: 'Beta' },
+      ],
+      missing: [],
+    })
+    const store = useHubStore()
+
+    expect(await store.resolveResourceNames(['r1', 'r2', 'r1', '', null])).toEqual({ r1: 'Alpha', r2: 'Beta' })
+    expect(api.getResourcesBatch).toHaveBeenCalledWith(['r1', 'r2'])
+  })
+
+  it('does not call the server when there is nothing to resolve', async () => {
+    const store = useHubStore()
+    expect(await store.resolveResourceNames([])).toEqual({})
+    expect(await store.resolveResourceNames()).toEqual({})
+    expect(api.getResourcesBatch).not.toHaveBeenCalled()
+  })
+
+  it('fails soft so the table can fall back to the id it already has', async () => {
+    api.getResourcesBatch.mockRejectedValue({ code: 'internal_error' })
+    const store = useHubStore()
+
+    expect(await store.resolveResourceNames(['r1'])).toEqual({})
+    expect(store.errorCode).toBe('internal_error')
   })
 })
 

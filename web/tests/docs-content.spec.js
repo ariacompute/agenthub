@@ -129,15 +129,16 @@ describe('docs content', () => {
   })
 
   it('keeps the whole route table in the docs screen', () => {
-    // 144 is the route registry's count. The pin is deliberate: the sandbox block
+    // 145 is the route registry's count. The pin is deliberate: the sandbox block
     // (15 routes) and the router block used to be absent from this table even
     // though the handlers were live, and a count makes the next route land here
     // instead of only in the Go source.
-    expect(httpEndpoints.length).toBe(144)
+    expect(httpEndpoints.length).toBe(145)
     const counts = {}
     for (const endpoint of httpEndpoints) {
       counts[endpoint.group] = (counts[endpoint.group] || 0) + 1
     }
+    expect(counts.resources).toBe(9)
     expect(counts.sandbox).toBe(15)
     expect(counts.router).toBe(14)
     expect(counts.files).toBe(5)

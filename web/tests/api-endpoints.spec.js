@@ -51,6 +51,13 @@ describe('resource and registry endpoints', () => {
     ['listResources', () => api.listResources(), '/api/resources', undefined],
     ['listResources filters', () => api.listResources({ kind: 'agent', namespace: 'team-a' }),
       '/api/resources?kind=agent&namespace=team-a', undefined],
+    // Paging is opt-in: a window is only put on the wire when the caller asked
+    // for one, so an unpaged view keeps the URL it always had.
+    ['listResources page', () => api.listResources({ limit: 25, offset: 50 }),
+      '/api/resources?limit=25&offset=50', undefined],
+    ['listResources first page', () => api.listResources({ limit: 25 }),
+      '/api/resources?limit=25', undefined],
+    ['getResourcesBatch', () => api.getResourcesBatch(['r1', 'r2']), '/api/resources/batch', 'POST'],
     ['createResource', () => api.createResource({ name: 'a' }), '/api/resources', 'POST'],
     ['updateResource', () => api.updateResource('r 1', { name: 'a' }), '/api/resources/r%201', 'PUT'],
     ['deleteResource', () => api.deleteResource('r1'), '/api/resources/r1', 'DELETE'],

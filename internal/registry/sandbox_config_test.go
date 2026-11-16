@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"agenthub/internal/httputil"
 	"agenthub/internal/sandbox"
 )
 
@@ -148,6 +149,12 @@ func TestValidateSandboxRefusesWhatItCannotHonour(t *testing.T) {
 		// ValidateProfile already refuses a prefix policy with no prefixes, so the
 		// narrower check below it stays as belt and braces.
 		{"prefix with no prefixes", &SandboxConfig{ArgsPolicy: sandbox.ArgsPrefix}, "sandbox"},
+		// A work directory is a handle on the host, so it is judged when the
+		// record is written rather than when the task runs.
+		{"the volume root as a workdir", &SandboxConfig{WorkDir: "/"}, "sandbox.work_dir"},
+		{"a system tree as a workdir", &SandboxConfig{WorkDir: "/etc/ssl"}, "sandbox.work_dir"},
+		{"a relative workdir", &SandboxConfig{WorkDir: "work"}, "sandbox.work_dir"},
+		{"a workdir with an option separator", &SandboxConfig{WorkDir: "/srv/work,rw"}, "sandbox.work_dir"},
 	}
 	for _, tc := range cases {
 		err := validateSandbox(tc.cfg)
@@ -164,6 +171,28 @@ func TestValidateSandboxRefusesWhatItCannotHonour(t *testing.T) {
 	// loading without gaining network it was never granted.
 	if err := validateSandbox(&SandboxConfig{Network: "wide-open"}); err != nil {
 		t.Fatalf("an unknown network must degrade to none, not fail: %v", err)
+	}
+}
+
+// TestValidateLegacyWorkDirMatchesTheSandboxBlock keeps the two places a host
+// directory may be named from drifting apart: cli.work_dir predates the sandbox
+// block but still feeds the resolved profile.
+func TestValidateLegacyWorkDirMatchesTheSandboxBlock(t *testing.T) {
+	if err := validateLegacyWorkDir(nil); err != nil {
+		t.Fatalf("a resource without a cli block has no work directory: %v", err)
+	}
+	if err := validateLegacyWorkDir(&CLIConfig{}); err != nil {
+		t.Fatalf("an empty work directory means an in-sandbox tmpfs: %v", err)
+	}
+	if err := validateLegacyWorkDir(&CLIConfig{WorkDir: " /srv/work "}); err != nil {
+		t.Fatalf("a data path must be accepted: %v", err)
+	}
+	err := validateLegacyWorkDir(&CLIConfig{WorkDir: "/root"})
+	if err == nil {
+		t.Fatal("a system tree must be refused")
+	}
+	if got := FieldOf(err); got != "sandbox.work_dir" {
+		t.Fatalf("field = %q, want sandbox.work_dir", got)
 	}
 }
 
@@ -237,5 +266,56 @@ func TestUpsertWithoutACheckerAcceptsAnyProviderName(t *testing.T) {
 	// lease is where an unusable provider shows up.
 	if _, err := New().Upsert(sandboxEntry("anything-goes")); err != nil {
 		t.Fatalf("nil checker must not refuse the provider: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// the sandbox policy port
+// ---------------------------------------------------------------------------
+
+// TestUpsertConsultsTheSandboxPolicyGate is the registration half of "a resource
+// may only ask for what the instance allows": the same closure main wires from
+// AGENTHUB_SANDBOX_* decides here, while the record is being written, so a
+// rejected profile never reaches a lease.
+func TestUpsertConsultsTheSandboxPolicyGate(t *testing.T) {
+	var seen int
+	reg := New().WithSandboxPolicy(func(cfg *SandboxConfig) error {
+		seen++
+		return sandbox.ValidateHostPolicy(cfg.Profile(), sandbox.HostPolicy{})
+	})
+
+	// A writable root is not allowed by that policy, so the save is refused.
+	readWrite := false
+	refused := sandboxEntry("")
+	refused.KindConfig.Sandbox.ReadonlyRoot = &readWrite
+	if _, err := reg.Upsert(refused); err == nil {
+		t.Fatal("a profile the instance forbids must be refused at registration")
+	} else if code := httputil.AsError(err).Code; code != sandbox.CodePolicyDenied {
+		t.Fatalf("code = %s, want %s", code, sandbox.CodePolicyDenied)
+	}
+	if seen != 1 {
+		t.Fatalf("gate calls = %d, want one", seen)
+	}
+
+	// The same entry with the default (read-only) root passes.
+	if _, err := reg.Upsert(sandboxEntry("")); err != nil {
+		t.Fatalf("a profile the instance allows must be accepted: %v", err)
+	}
+	if seen != 2 {
+		t.Fatalf("gate calls = %d, want two", seen)
+	}
+
+	// An entry without a sandbox block inherits the instance defaults, which are
+	// the operator's own values: it is not gated.
+	if _, err := reg.Upsert(&Entry{Kind: KindMCP, Name: "no-sandbox-block", Endpoint: "stdio://plain"}); err != nil {
+		t.Fatalf("an entry without a sandbox block must be accepted: %v", err)
+	}
+	if seen != 2 {
+		t.Fatalf("gate must not run for an entry without a sandbox block, ran %d times", seen)
+	}
+
+	// And an instance with no gate wired keeps the historical behaviour.
+	if _, err := New().Upsert(refused); err != nil {
+		t.Fatalf("nil gate must accept the profile: %v", err)
 	}
 }

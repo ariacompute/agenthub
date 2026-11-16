@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCopy, enumLabel } from '../lib/use-copy.js'
 import { useHubStore, KINDS } from '../lib/store.js'
@@ -50,8 +50,16 @@ const form = reactive({
 
 const errorMessageText = computed(() => errorMessage(store.errorCode))
 
+// Paging is a server-side window: the console asks for one page and the answer
+// carries the total, so a directory of thousands never lands in the browser. The
+// counts stay whole-catalogue (the server computes them without the kind filter),
+// which is why the tab strip still reads correctly while one kind is selected.
+const PAGE_SIZES = [25, 50, 100]
+const pageSize = ref(PAGE_SIZES[0])
+const pageIndex = ref(0)
+
 const tabs = computed(() => [
-  { key: '', label: t('tabAll'), count: store.resources.length },
+  { key: '', label: t('tabAll'), count: store.resourceTotal },
   ...KINDS.map((kind) => ({
     key: kind,
     label: enumLabel('kind', kind),
@@ -61,18 +69,62 @@ const tabs = computed(() => [
 
 const namespaces = computed(() => store.registries.map((ns) => ns.id))
 
-const visible = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  return store.resources.filter((resource) => {
-    if (kindFilter.value && resource.kind !== kindFilter.value) return false
-    if (namespaceFilter.value && (resource.namespace || 'default') !== namespaceFilter.value) return false
-    if (statusFilter.value && (resource.status || 'approved') !== statusFilter.value) return false
-    if (!q) return true
-    return [resource.name, resource.endpoint, ...(resource.tags ?? [])]
-      .filter(Boolean)
-      .some((field) => String(field).toLowerCase().includes(q))
+// rows is exactly the page the server sent: no second filter pass, so what the
+// pager says and what the grid shows cannot disagree.
+const rows = computed(() => store.resources)
+
+const pageCount = computed(() => Math.max(1, Math.ceil(store.resourceTotal / pageSize.value)))
+const rangeStart = computed(() => (store.resourceTotal === 0 ? 0 : pageIndex.value * pageSize.value + 1))
+const rangeEnd = computed(() => Math.min(store.resourceTotal, pageIndex.value * pageSize.value + rows.value.length))
+const canPrev = computed(() => pageIndex.value > 0)
+const canNext = computed(() => pageIndex.value + 1 < pageCount.value)
+const rangeLabel = computed(() =>
+  t('pageRange')
+    .replace('{from}', String(rangeStart.value))
+    .replace('{to}', String(rangeEnd.value))
+    .replace('{total}', String(store.resourceTotal)),
+)
+
+function load() {
+  return store.refreshResources({
+    kind: kindFilter.value,
+    namespace: namespaceFilter.value,
+    status: statusFilter.value,
+    q: query.value.trim(),
+    limit: pageSize.value,
+    offset: pageIndex.value * pageSize.value,
   })
+}
+
+// A filter change starts at the first page: staying on page four of a result set
+// that just shrank to two pages would show an empty grid and an honest "0 of 40".
+function reloadFromFirstPage() {
+  pageIndex.value = 0
+  return load()
+}
+
+// The store re-reads through the remembered window after a write, so the only
+// thing left to fix up is the page cursor: deleting the last record on the last
+// page must step back one page instead of showing "no records" over a catalogue
+// that still has some.
+async function settlePage() {
+  if (!rows.value.length && pageIndex.value > 0) {
+    pageIndex.value = Math.min(pageIndex.value - 1, pageCount.value - 1)
+    await load()
+  }
+}
+
+watch([kindFilter, namespaceFilter, statusFilter], reloadFromFirstPage)
+watch(pageSize, reloadFromFirstPage)
+
+// The search runs against the backend, so one keystroke must not become one
+// request: 250ms is short enough to feel live and long enough to type a word.
+let searchTimer = null
+watch(query, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(reloadFromFirstPage, 250)
 })
+onBeforeUnmount(() => clearTimeout(searchTimer))
 
 // Curation is a state machine, so the console only offers the edges that exist:
 // a draft is submitted, a pending record is approved or rejected, an approved
@@ -91,7 +143,7 @@ onMounted(() => {
   // old guard ("only when empty") left a card showing "unknown" after a Try run
   // that had just proved it healthy, because coming back from the trace view
   // never refetched.
-  store.refreshResources()
+  load()
   store.refreshRegistries()
 })
 
@@ -206,17 +258,21 @@ async function saveAndClose() {
 
 async function submit() {
   const ok = editing.value ? await store.update(editing.value.id, payload()) : await store.register(payload())
-  if (ok) closeDrawer()
+  if (!ok) return
+  closeDrawer()
+  await settlePage()
 }
 
 async function destroy(resource) {
   if (!window.confirm(t('confirmDelete'))) return
   await store.remove(resource.id)
+  await settlePage()
 }
 
 async function curate(resource, status) {
   if (status === 'deprecated' && !window.confirm(t('confirmDeprecate'))) return
   await store.curate(resource.id, status)
+  await settlePage()
 }
 
 function labelFor(status) {
@@ -248,7 +304,8 @@ async function tryRun(resource) {
   } finally {
     // The run itself is the measurement: the hub records healthy or unhealthy
     // from what the call proved, so the list has to be re-read for the card's
-    // dot to show it instead of the stale "unknown".
+    // dot to show it instead of the stale "unknown". The call passes no window,
+    // so the store re-reads the page this screen asked for.
     await store.refreshResources()
     running.value = ''
   }
@@ -316,8 +373,8 @@ async function probe(resource) {
       </select>
     </div>
 
-    <div v-if="visible.length" class="grid">
-      <article v-for="resource in visible" :key="resource.id" class="card resource-card">
+    <div v-if="rows.length" class="grid">
+      <article v-for="resource in rows" :key="resource.id" class="card resource-card">
         <div class="resource-head">
           <span class="kind-icon" :class="resource.kind">
             <component :is="iconFor(resource.kind)" :size="16" />
@@ -387,8 +444,38 @@ async function probe(resource) {
     </div>
     <div v-else class="empty">{{ t('empty') }}</div>
 
+    <!-- The pager states the window it is showing and how much exists: a page of
+         25 out of 137 is a fact the server reports, not one the console infers. -->
+    <nav v-if="store.resourceTotal > 0" class="pager" :aria-label="t('paginationLabel')">
+      <button
+        class="btn btn-ghost pager-btn"
+        type="button"
+        :disabled="!canPrev"
+        :aria-label="t('pagePrev')"
+        @click="pageIndex = Math.max(0, pageIndex - 1)"
+      >
+        {{ t('pagePrev') }}
+      </button>
+      <span class="pager-range mono">{{ rangeLabel }}</span>
+      <button
+        class="btn btn-ghost pager-btn"
+        type="button"
+        :disabled="!canNext"
+        :aria-label="t('pageNext')"
+        @click="pageIndex = pageIndex + 1"
+      >
+        {{ t('pageNext') }}
+      </button>
+      <label class="pager-size">
+        <span>{{ t('pageSize') }}</span>
+        <select v-model.number="pageSize" :aria-label="t('pageSize')">
+          <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }}</option>
+        </select>
+      </label>
+    </nav>
+
     <div class="stats card">
-      <span>{{ t('statsTotal') }} <b>{{ store.resources.length }}</b></span>
+      <span>{{ t('statsTotal') }} <b>{{ store.resourceTotal }}</b></span>
       <span>{{ t('statsHealthy') }} <b>{{ store.healthCounts.healthy ?? 0 }}</b></span>
       <span class="mono">{{ t('healthLabel') }}: {{ JSON.stringify(store.healthCounts) }}</span>
     </div>
@@ -551,5 +638,45 @@ async function probe(resource) {
   margin-block-start: 6px;
   padding-block-start: 8px;
   border-top: 1px solid var(--stroke-1);
+}
+
+/* The pager sits above the stats strip: same row rhythm as the toolbars, logical
+   properties throughout so the Arabic layout mirrors without a second rule. */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-block: 12px 0;
+}
+
+.pager-btn {
+  min-block-size: 44px;
+  min-inline-size: 96px;
+}
+
+.pager-range {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.pager-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.pager-size select {
+  min-block-size: 44px;
+  padding-inline: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
 }
 </style>

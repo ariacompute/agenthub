@@ -16,9 +16,16 @@ import (
 
 // ManagerOptions configures lease handling.
 type ManagerOptions struct {
-	Registry    *Registry
-	Store       Store
-	Defaults    Defaults
+	Registry *Registry
+	Store    Store
+	Defaults Defaults
+	// Policy is what the instance allows a profile to ask for on the host
+	// filesystem. Its zero value is the safe one: a read-only root, and no host
+	// directory the shipped denylist refuses.
+	Policy HostPolicy
+	// Limits is the ceiling on cpu, memory and pids. Its zero value means "no
+	// ceiling", which is what a hand-built manager in a test wants.
+	Limits      Limits
 	IdleTTL     time.Duration
 	MaxTTL      time.Duration
 	MaxPerOwner int
@@ -87,15 +94,32 @@ func (m *Manager) Acquire(ctx context.Context, req LeaseRequest) (*Lease, error)
 	if req.Provider != "" {
 		profile.Provider = req.Provider
 	}
+	// The host-filesystem gate runs on the resolved profile, not on the
+	// override: a resource may only ask for a work directory or a writable root
+	// the operator has already allowed, and Resolve cannot know that.
+	if err := ValidateHostPolicy(profile, m.opts.Policy); err != nil {
+		return nil, err
+	}
 	if err := ValidateProfile(profile); err != nil {
 		return nil, err
+	}
+	// And the ceiling, applied rather than refused: a lease that asks for more
+	// than the instance allows runs with the instance's number instead of
+	// failing, because the record may predate the ceiling (or have been written
+	// by an upstream sync that never saw it). The clamp is logged and carried on
+	// the lease event so "the resource asked for 64 CPUs" is still visible.
+	profile, clamped := m.opts.Limits.Clamp(profile)
+	if clamped && m.opts.Log != nil {
+		m.opts.Log.Warn("sandbox: resource limits clamped to the instance ceiling",
+			"resource", req.ResourceID, "owner", req.OwnerID,
+			"applied", profile.String(), "ceiling", m.opts.Limits.String())
 	}
 	scope := NormalizeScope(req.Scope)
 	if strings.TrimSpace(req.OwnerID) == "" {
 		// Anonymous callers never reuse: the evaluation report's "unnamed
 		// resource is anonymously reachable" must not grow into "anonymous
 		// long-lived container".
-		return m.create(ctx, req.OwnerID, req.ResourceID, scope, profile)
+		return m.create(ctx, req.OwnerID, req.ResourceID, scope, profile, clamped)
 	}
 
 	key := strings.Join([]string{req.OwnerID, req.ResourceID, scope, profile.Provider}, "\x00")
@@ -109,7 +133,7 @@ func (m *Manager) Acquire(ctx context.Context, req LeaseRequest) (*Lease, error)
 	m.flights[key] = f
 	m.mu.Unlock()
 
-	lease, err := m.acquireLocked(ctx, req.OwnerID, req.ResourceID, scope, profile)
+	lease, err := m.acquireLocked(ctx, req.OwnerID, req.ResourceID, scope, profile, clamped)
 	f.lease, f.err = lease, err
 	close(f.done)
 	m.mu.Lock()
@@ -118,13 +142,25 @@ func (m *Manager) Acquire(ctx context.Context, req LeaseRequest) (*Lease, error)
 	return lease, err
 }
 
-func (m *Manager) acquireLocked(ctx context.Context, ownerID, resourceID, scope string, profile Profile) (*Lease, error) {
+func (m *Manager) acquireLocked(ctx context.Context, ownerID, resourceID, scope string, profile Profile, clamped bool) (*Lease, error) {
 	existing, err := m.opts.Store.FindLease(ctx, ownerID, resourceID, scope, profile.Provider)
 	if err != nil {
 		return nil, err
 	}
 	now := m.opts.Clock()
 	if existing != nil && existing.State == StateReady && !existing.Expired(now) {
+		if err := m.opts.Limits.Exceeds(existing.Profile); err != nil {
+			// The ceiling moved below this lease (an operator lowered it, or the
+			// record was written by a version that did not check). Keeping it
+			// alive would mean the budget only applies to new work, so it is
+			// reclaimed and rebuilt inside the ceiling.
+			if m.opts.Log != nil {
+				m.opts.Log.Warn("sandbox: reclaiming a lease above the instance ceiling",
+					"lease", existing.ID, "resource", resourceID, "ceiling", m.opts.Limits.String())
+			}
+			_ = m.Terminate(ctx, existing.ID)
+			return m.create(ctx, ownerID, resourceID, scope, profile, clamped)
+		}
 		existing.RenewedAt = now
 		existing.ExpiresAt = m.nextExpiry(existing, now)
 		if err := m.opts.Store.SaveLease(ctx, existing); err != nil {
@@ -137,11 +173,13 @@ func (m *Manager) acquireLocked(ctx context.Context, ownerID, resourceID, scope 
 		}
 		return existing, nil
 	}
-	return m.create(ctx, ownerID, resourceID, scope, profile)
+	return m.create(ctx, ownerID, resourceID, scope, profile, clamped)
 }
 
-// create allocates a new environment and records it.
-func (m *Manager) create(ctx context.Context, ownerID, resourceID, scope string, profile Profile) (*Lease, error) {
+// create allocates a new environment and records it. clamped says the resolved
+// profile was reduced to the instance ceiling, so the event stream can say so: an
+// operator whose resource asked for 64 CPUs should be able to see that it got 4.
+func (m *Manager) create(ctx context.Context, ownerID, resourceID, scope string, profile Profile, clamped bool) (*Lease, error) {
 	if err := m.checkLimits(ctx, ownerID); err != nil {
 		return nil, err
 	}
@@ -187,7 +225,9 @@ func (m *Manager) create(ctx context.Context, ownerID, resourceID, scope string,
 	}
 	if m.opts.Bus != nil {
 		m.opts.Bus.Publish(Event{Kind: EventLeaseCreated, Subject: subjectFor(ownerID), LeaseID: lease.ID,
-			Payload: map[string]any{"provider": lease.Provider, "layer": info.Layer, "isolation": info.Isolation, "resourceId": resourceID}})
+			Payload: map[string]any{"provider": lease.Provider, "layer": info.Layer, "isolation": info.Isolation,
+				"resourceId": resourceID, "cpu": profile.CPU, "memoryMB": profile.MemoryMB,
+				"pidsLimit": profile.PidsLimit, "limitsClamped": clamped}})
 	}
 	return lease, nil
 }

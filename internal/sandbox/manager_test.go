@@ -283,6 +283,84 @@ func TestExecOnReportsACeiling(t *testing.T) {
 	}
 }
 
+// TestAcquireClampsToTheInstanceCeiling is the runtime half of the quota rule: a
+// resource that asks for 64 CPUs gets the instance's number, and the lease row
+// carries what actually runs — not what was asked for.
+func TestAcquireClampsToTheInstanceCeiling(t *testing.T) {
+	store := NewMemoryStore()
+	manager, _ := newManager(t, testRegistry(t, NewMockProvider()), store, func(o *ManagerOptions) {
+		o.Defaults.CPU, o.Defaults.MemoryMB, o.Defaults.PidsLimit = 1, 512, 64
+		o.Limits = Limits{CPU: 2, MemoryMB: 1024, PidsLimit: 128}
+	})
+	ctx := context.Background()
+
+	lease, err := manager.Acquire(ctx, LeaseRequest{
+		OwnerID: "u1", ResourceID: "greedy",
+		Profile: Profile{CPU: 64, MemoryMB: 65536, PidsLimit: 4096},
+	})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if lease.Profile.CPU != 2 || lease.Profile.MemoryMB != 1024 || lease.Profile.PidsLimit != 128 {
+		t.Fatalf("lease profile = %+v, want the instance ceiling", lease.Profile)
+	}
+	stored, err := store.GetLease(ctx, lease.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored.Profile.CPU != 2 {
+		t.Fatalf("the stored lease must carry the clamped value, got %g", stored.Profile.CPU)
+	}
+
+	// A profile inside the ceiling is left exactly as the resource wrote it.
+	small, err := manager.Acquire(ctx, LeaseRequest{OwnerID: "u1", ResourceID: "frugal", Profile: Profile{CPU: 0.5}})
+	if err != nil {
+		t.Fatalf("acquire small: %v", err)
+	}
+	if small.Profile.CPU != 0.5 {
+		t.Fatalf("a profile inside the ceiling must not be rewritten: %g", small.Profile.CPU)
+	}
+}
+
+// TestAcquireReclaimsALeaseAboveALoweredCeiling: lowering the ceiling must not
+// leave yesterday's over-budget lease running until it expires.
+func TestAcquireReclaimsALeaseAboveALoweredCeiling(t *testing.T) {
+	store := NewMemoryStore()
+	manager, _ := newManager(t, testRegistry(t, NewMockProvider()), store, func(o *ManagerOptions) {
+		o.Limits = Limits{CPU: 2}
+	})
+	ctx := context.Background()
+
+	first, err := manager.Acquire(ctx, LeaseRequest{OwnerID: "u1", ResourceID: "a", Scope: "s"})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	// A lease written while a larger ceiling was in force.
+	over := *first
+	over.Profile.CPU = 8
+	if err := store.SaveLease(ctx, &over); err != nil {
+		t.Fatalf("save over-budget lease: %v", err)
+	}
+
+	second, err := manager.Acquire(ctx, LeaseRequest{OwnerID: "u1", ResourceID: "a", Scope: "s"})
+	if err != nil {
+		t.Fatalf("second acquire: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("a lease above the ceiling must be reclaimed, not reused")
+	}
+	if second.Profile.CPU > 2 {
+		t.Fatalf("the replacement lease is still over the ceiling: %g", second.Profile.CPU)
+	}
+	reclaimed, err := store.GetLease(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("read reclaimed lease: %v", err)
+	}
+	if reclaimed.State != StateTerminated {
+		t.Fatalf("state = %q, want terminated", reclaimed.State)
+	}
+}
+
 func TestExecRebuildsAHandleFromTheLeaseRow(t *testing.T) {
 	store := NewMemoryStore()
 	manager, tick := newManager(t, testRegistry(t, NewMockProvider()), store, nil)

@@ -101,6 +101,99 @@ export default [
     // The cleanup stack still holds an idempotent delete; a 404 counts as clean.
   }),
 
+  // ---- the page window -----------------------------------------------------
+  // The console asks for one page at a time; these cases pin the three facts it
+  // relies on: the window is honoured, the total describes the catalogue rather
+  // than the page, and a nonsensical window is refused instead of ignored.
+  c('the catalogue can be paged', 'GET /api/resources', async (ctx) => {
+    const res = await ctx.api('GET', '/api/resources', { query: { limit: 2, offset: 0 } })
+    expectAvailable(res, 'paged catalogue')
+    expectArray(res, 'resources', 'paged catalogue')
+    expectShape(res, ['total', 'limit', 'offset'], 'paged catalogue')
+    if (res.json.resources.length > 2) {
+      throw new Error(`limit=2 returned ${res.json.resources.length} records`)
+    }
+    expectValue(res.json.limit, 2, 'limit echoed back')
+    expectValue(res.json.offset, 0, 'offset echoed back')
+    if (!(res.json.total >= res.json.resources.length)) {
+      throw new Error(`total ${res.json.total} is smaller than the page`)
+    }
+  }),
+
+  c('the second page continues where the first stopped', 'GET /api/resources', async (ctx) => {
+    const first = await ctx.api('GET', '/api/resources', { query: { limit: 1, offset: 0 } })
+    const second = await ctx.api('GET', '/api/resources', { query: { limit: 1, offset: 1 } })
+    expectStatus(first, 200, 'first page')
+    expectStatus(second, 200, 'second page')
+    if (first.json.total !== second.json.total) {
+      throw new Error('the total changed between two pages of the same catalogue')
+    }
+    if (first.json.total > 1) {
+      if (!first.json.resources.length || !second.json.resources.length) {
+        throw new Error('a catalogue with more than one record returned an empty page')
+      }
+      if (first.json.resources[0].id === second.json.resources[0].id) {
+        throw new Error('page two repeated a record from page one')
+      }
+    }
+  }),
+
+  c('an offset past the end is an empty page, not an error', 'GET /api/resources', async (ctx) => {
+    const res = await ctx.api('GET', '/api/resources', { query: { limit: 5, offset: 100000 } })
+    expectStatus(res, 200, 'offset past the end')
+    expectArray(res, 'resources', 'offset past the end')
+    if (res.json.resources.length !== 0) {
+      throw new Error('an offset past the end returned records')
+    }
+    if (!(res.json.total >= 1)) {
+      // There is at least the resource this suite created.
+      throw new Error(`total ${res.json.total} should still describe the catalogue`)
+    }
+  }),
+
+  c('an unusable page window is refused', 'GET /api/resources', async (ctx) => {
+    for (const query of ['limit=abc', 'limit=-1', 'limit=201', 'offset=-1']) {
+      const params = new URLSearchParams(query)
+      const res = await ctx.api('GET', '/api/resources', {
+        query: Object.fromEntries(params.entries()),
+      })
+      expectStatus(res, 400, `page window ${query}`)
+      if (!res.code) throw new Error(`page window ${query} returned no machine code`)
+    }
+  }),
+
+  // ---- the batch read ------------------------------------------------------
+  c('a batch read returns the requested records in order', 'POST /api/resources/batch', async (ctx) => {
+    const id = requireState(ctx, 'resourceId')
+    const res = await ctx.api('POST', '/api/resources/batch', {
+      // The repeat proves deduplication; the unknown id proves a deleted record
+      // is reported rather than failing the whole batch.
+      body: { ids: [id, 'e2e-does-not-exist', id] },
+    })
+    expectStatus(res, 200, 'batch read')
+    expectShape(res, ['resources', 'missing'], 'batch read')
+    if (res.json.resources.length !== 1 || res.json.resources[0].id !== id) {
+      throw new Error(`batch returned ${JSON.stringify(res.json.resources.map((e) => e.id))}`)
+    }
+    if (res.json.missing.length !== 1 || res.json.missing[0] !== 'e2e-does-not-exist') {
+      throw new Error(`missing = ${JSON.stringify(res.json.missing)}`)
+    }
+  }),
+
+  c('an unusable batch is refused', 'POST /api/resources/batch', async (ctx) => {
+    const tooMany = Array.from({ length: 101 }, (_, i) => `e2e-batch-${i}`)
+    const bodies = [
+      { ids: [] },
+      { ids: [''] },
+      { ids: tooMany },
+    ]
+    for (const body of bodies) {
+      const res = await ctx.api('POST', '/api/resources/batch', { body })
+      expectStatus(res, 400, `batch with ${body.ids.length} ids`)
+      if (!res.code) throw new Error('an unusable batch returned no machine code')
+    }
+  }),
+
   c('MCP export contains only approved records', 'GET /api/export/mcp', async (ctx) => {
     const res = await ctx.api('GET', '/api/export/mcp')
     expectAvailable(res, 'MCP export')

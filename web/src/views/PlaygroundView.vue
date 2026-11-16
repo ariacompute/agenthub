@@ -196,7 +196,9 @@ async function runOnce() {
     // Re-read the discoverable view too, so a record approved or deprecated
     // while the run was in flight changes the picker without a page reload.
     await store.refreshTasks()
-    await store.refreshResources()
+    // The resource picker lists the whole catalogue, so it asks for all of it
+    // rather than for the page the registry list happened to be on.
+    await store.refreshAllResources()
     await store.refreshDiscoverableResources()
   }
 }

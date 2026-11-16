@@ -63,6 +63,48 @@ bun run api/index.js --coverage-only
 
 `./scripts/test-api.sh` is kept as a thin compatibility shim that forwards here.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs both suites in the `e2e` job (alongside `go`,
+`go-restricted` and `web`), so the assembled product is verified on every push:
+one Postgres service, `make build` for the console and the binary, then the two
+suites against that real instance. Nothing here is mocked and no case is skipped
+just because it is CI.
+
+What the job does, in order:
+
+1. `make build` — `web-install` + `vite build` into `backend/static`, then the Go
+   binary at `bin/agenthub-server`. The UI journeys drive the real console, so a
+   stale/absent bundle would fail as a UI bug rather than a missing build.
+2. `bun install` in this directory and `bun x playwright install --with-deps
+   chromium` (the pinned revision from `package.json`).
+3. `docker pull debian:bookworm-slim` — the sandbox default image. Pre-pulling
+   keeps the first lease from spending its budget on a pull and failing on a
+   timeout instead of on a defect.
+4. `make e2e-coverage` **before** the server starts: the static guard needs no
+   service and is the cheapest signal. This is the regression the job exists for —
+   a route added to `docs/` without a case fails here.
+5. Start the server in the background and poll `GET /healthz` for up to 60s
+   (dumping `server.log` on failure) instead of sleeping a fixed interval.
+6. `make e2e-api`, then `make e2e-ui`.
+7. Always stop the server; on failure print `server.log` and upload
+   `e2e/reports/`, `e2e/playwright-report/` and `server.log` as the
+   `e2e-reports` artifact (7-day retention).
+
+The job's environment is the contract the suites expect:
+
+| variable | value | why |
+| --- | --- | --- |
+| `DATABASE_URL` | the service's `postgres://agenthub:…@localhost:5432/agenthub` | the binary migrates on start |
+| `AGENTHUB_HTTP_PORT` / `BASE_URL` | `3500` / `http://127.0.0.1:3500` | one fixed port for both suites |
+| `AGENTHUB_STATIC_DIR` | `./backend/static` | serves the console `make build` produced |
+| `AGENTHUB_SEED_DEMO` | `true` | demo fixtures are preferred but no longer required |
+| `AGENTHUB_BOOTSTRAP_ADMIN_EMAIL` / `…_PASSWORD` | the `e2e.config.js` defaults | owner-equivalent identity; the suites read the same names |
+| `AGENTHUB_FILES_STORE` / `AGENTHUB_FILES_DIR` | `local` / `./.e2e-files` | without a files backend the five `/api/files*` routes answer `files_disabled` and never get tested |
+| `AGENTHUB_E2E_STRICT_COVERAGE` | `1` | a documented route without a case fails the job |
+| `AGENTHUB_E2E_SANDBOX_EXEC` | `1` | the runner has Docker, so the execution case runs for real |
+| `AGENTHUB_E2E_LANG` | `en` | freezes console copy for the UI selectors |
+
 ## Identity and environment
 
 | variable | default | purpose |

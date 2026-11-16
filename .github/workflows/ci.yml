@@ -1,6 +1,6 @@
 # agenthub — continuous integration.
 #
-# Two jobs, mirroring the documented test targets:
+# Four jobs, mirroring the documented test targets:
 #   • go     → `go test -race ./...` under the repo root. Unit cases run
 #              offline; the store/hub integration cases skip themselves when
 #              DATABASE_URL is unset, so a Postgres service is provided to let
@@ -16,6 +16,9 @@
 #              reason instead of failing with "permission denied".
 #   • web     → `bunx vitest run` under web/ (the console's Vitest suite:
 #              monochrome guard, 13-language copy completeness, smoke).
+#   • e2e     → the assembled product: real Postgres, real binary, built console,
+#              then `make e2e-coverage` (every documented route has a case),
+#              `make e2e-api` and `make e2e-ui`. Failure reports are archived.
 #
 # The console is built and served from backend/static at runtime; CI does not
 # need to build it to run the web unit tests, so only the test runner is set up.
@@ -180,3 +183,129 @@ jobs:
 
       - name: Vitest (run)
         run: bunx vitest run
+
+  # ------------------------------------------------ e2e (a real server, twice)
+  #
+  # The unit suites prove the parts; this job proves the assembled product: a real
+  # Postgres, a real binary, the built console, and both user-facing suites from
+  # e2e/. The API suite is a declarative table over every documented route, and
+  # `e2e-coverage` fails the job when a route in docs/*.md has no case — that is
+  # the regression the job exists for, so it runs before the suite that needs a
+  # server. Docker is available on the runner, so the sandbox cases run for real
+  # instead of skipping.
+  e2e:
+    name: e2e — api + ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agenthub
+          POSTGRES_PASSWORD: agenthub
+          POSTGRES_DB: agenthub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U agenthub"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgres://agenthub:agenthub@localhost:5432/agenthub?sslmode=disable
+      AGENTHUB_ENV: dev
+      AGENTHUB_HTTP_PORT: "3500"
+      AGENTHUB_STATIC_DIR: ./backend/static
+      AGENTHUB_SEED_DEMO: "true"
+      # The credentials the suites sign in with (e2e/e2e.config.js defaults).
+      AGENTHUB_BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      AGENTHUB_BOOTSTRAP_ADMIN_PASSWORD: agenthub-admin-pass
+      # Without a files backend every /api/files* route answers files_disabled,
+      # which would turn five documented endpoints into permanent SKIPs.
+      AGENTHUB_FILES_STORE: local
+      AGENTHUB_FILES_DIR: ./.e2e-files
+      # A missing case for a documented route fails the run instead of warning.
+      AGENTHUB_E2E_STRICT_COVERAGE: "1"
+      # The runner has Docker, so the one command-execution case runs for real.
+      AGENTHUB_E2E_SANDBOX_EXEC: "1"
+      AGENTHUB_E2E_LANG: en
+      BASE_URL: http://127.0.0.1:3500
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      # The UI journeys drive the real console, so it has to be built: `make build`
+      # runs web-install + vite build into backend/static and then the Go binary.
+      - name: Build console and server
+        run: make build
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: bun install
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: bun x playwright install --with-deps chromium
+
+      # The default sandbox image: a first lease otherwise spends its budget on a
+      # pull and the case fails on a timeout rather than on a defect.
+      - name: Pre-pull the sandbox image
+        run: docker pull debian:bookworm-slim
+
+      # The static guard needs no server, and it is the cheapest thing to fail on.
+      - name: Route coverage guard
+        run: make e2e-coverage
+
+      - name: Start the server
+        run: |
+          set -euo pipefail
+          mkdir -p .e2e-files
+          ./bin/agenthub-server > server.log 2>&1 &
+          echo $! > server.pid
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${AGENTHUB_HTTP_PORT}/healthz" > /dev/null; then
+              echo "server is up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server did not become healthy in 60s" >&2
+          cat server.log >&2
+          exit 1
+
+      - name: API suite
+        run: make e2e-api
+
+      - name: UI suite
+        run: make e2e-ui
+
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill "$(cat server.pid)" 2>/dev/null || true; fi
+
+      - name: Server log
+        if: failure()
+        run: cat server.log || true
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: |
+            e2e/reports/
+            e2e/playwright-report/
+            server.log
+          if-no-files-found: warn
+          retention-days: 7

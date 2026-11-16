@@ -122,6 +122,22 @@ const (
 	ArgsPassthrough = "passthrough"
 )
 
+// Resource limits a provider may be able to apply. The vocabulary is the one the
+// profile carries, so the console can print "this backend enforces cpu/memory/pids"
+// — or "delegated", for a layer this process cannot police.
+//
+// It is a declaration, not a gate: unlike Network, a missing entry does not make
+// Manager.Acquire refuse the profile. The default profile always carries cpu and
+// memory, so gating on it would make every non-cgroup backend unusable rather
+// than honest. What it buys is that the catalogue stops implying that bubblewrap
+// applies a memory ceiling it has no mechanism for.
+const (
+	LimitCPU       = "cpu"
+	LimitMemory    = "memory"
+	LimitPids      = "pids"
+	LimitDelegated = "delegated"
+)
+
 // Descriptor is what a provider says about itself without touching the outside
 // world. Probe answers the other half: can it actually run here.
 type Descriptor struct {
@@ -129,6 +145,12 @@ type Descriptor struct {
 	Layer     Layer    `json:"layer"`
 	Isolation string   `json:"isolation"`
 	Network   []string `json:"network,omitempty"`
+	// Limits names the resource limits this provider actually applies: cpu,
+	// memory, pids, or "delegated" when the enforcement happens in a layer this
+	// process cannot observe (a node, a hosted runtime). An empty list means the
+	// backend applies none of them, which is the honest answer for a bare
+	// process and for bubblewrap without cgroups.
+	Limits []string `json:"limits,omitempty"`
 	// Requires names the binaries a probe looks for, so an unavailable entry can
 	// say "bwrap is not installed" instead of "unavailable". Only binaries belong
 	// here: the platform providers used to put an environment variable name in

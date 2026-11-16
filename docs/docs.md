@@ -134,8 +134,9 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 
 | Method | Path | Permission | What it does | Request | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/resources` | `resources:read` — Read resources | List all resources | `?kind=&q=&namespace=&status=&discoverable=` | `{ resources: [Entry], counts: { kind }, health: { state } }` |
+| `GET` | `/api/resources` | `resources:read` — Read resources | List all resources | `?kind=&q=&namespace=&status=&discoverable=&limit=&offset=` | `{ resources: [Entry], counts: { kind }, health: { state }, total, limit, offset }` |
 | `POST` | `/api/resources` | `resources:write` — Change resources | Create a new entry among the resources | `{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }` | `Entry — 201` |
+| `POST` | `/api/resources/batch` | `resources:read` — Read resources | Read a set of records by id in one request; unreadable ids come back as missing. | `{ ids: [string] } — up to 100, duplicates dropped, order preserved` | `{ resources: [Entry], missing: [id] }` |
 | `GET` | `/api/resources/{id}` | `resources:read` — Read resources | Read one of the resources by id | — | `Entry` |
 | `PUT` | `/api/resources/{id}` | `resources:write` — Change resources | Replace one of the resources outright | `Entry — the path id wins over the body` | `Entry` |
 | `DELETE` | `/api/resources/{id}` | `resources:write` — Change resources | Delete one of the resources | — | `204, no body` |
@@ -404,8 +405,7 @@ A resource that runs something can narrow the instance default through kind_conf
       "provider": "docker",
       "runtime": "runsc",
       "image": "python:3.12-slim",
-      "work_dir": "/work",
-      "readonly_root": false,
+      "work_dir": "/srv/agenthub/work/ruff",
       "network": "none",
       "cpu": 1.5,
       "memory_mb": 512,
@@ -420,7 +420,7 @@ A resource that runs something can narrow the instance default through kind_conf
 }
 ```
 
-Network is the one field that is not a promise of reach. Only bridge and platform hand out connectivity; egress_allowlist records the hosts a resource would like and is executed as none until an egress proxy exists, because accepting the value must not turn into a filter that is not there. readonly_root is tri-state: unset inherits a read-only root, and an explicit false is the only way to ask for a writable one.
+Network is the one field that is not a promise of reach. Only bridge and platform hand out connectivity; egress_allowlist records the hosts a resource would like and is executed as none until an egress proxy exists, because accepting the value must not turn into a filter that is not there. readonly_root is tri-state: unset inherits a read-only root, and an explicit false is the only way to ask for a writable one. Filesystem and quotas pass the same gate: work_dir is a host path inside AGENTHUB_SANDBOX_WORKDIR_ROOTS, an explicit false needs AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, and cpu/memory/pids are clipped to AGENTHUB_SANDBOX_MAX_* when the lease is created.
 
 ### Network modes
 

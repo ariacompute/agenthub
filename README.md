@@ -166,7 +166,7 @@ Console: `make web-dev` (development) or `make web-build && make run` (the bundl
 by the Go process).
 
 Documentation: the console documents itself on a **`/docs`** screen — concepts, the seven A2A
-methods and all 144 HTTP routes. The same content is rendered to
+methods and all 145 HTTP routes. The same content is rendered to
 [`docs/docs.md`](docs/docs.md) by `make docs-md`; that file is **generated** from the two modules
 the screen reads (`web/src/lib/docs-content.js` and `web/src/lib/copy/docs-copy.js`), so edit those
 and re-run rather than editing the markdown.
@@ -525,7 +525,7 @@ its cases skip rather than fabricate.
 
 End-to-end test against a running instance — two independent user-facing suites in `e2e/`
 (see [`e2e/README.md`](e2e/README.md) for the full switch list and report format). The API suite is
-a declarative case table covering **every documented route** (144): discovery, auth/session,
+a declarative case table covering **every documented route** (145): discovery, auth/session,
 resources and governance, the A2A methods with HITL park → resume / cancel, streaming and `since`
 replay, tasks, RBAC and API keys, channels/connectors, threads/speech, files, sandboxes,
 schedules/computers/knowledge, router, audit and checkpoints. The UI suite drives six real console
@@ -997,7 +997,7 @@ synchronisation from an external registry.
 | AWS Agent Registry | agenthub |
 | --- | --- |
 | **Hybrid search**: semantic + keyword | Keyword search only — see *deliberately not* below |
-| **Catalogue browsing**: paginated list, filter by recordType, `Get` / `BatchGet` | `GET /api/resources?kind=&q=&namespace=&status=`; no pagination and no batch read yet |
+| **Catalogue browsing**: paginated list, filter by recordType, `Get` / `BatchGet` | `GET /api/resources?kind=&q=&namespace=&status=&limit=&offset=` (returns `total`, counts stay whole-catalogue) and `POST /api/resources/batch` for up to 100 ids in request order |
 | **Native MCP endpoint** (`InvokeRegistryMcp`) any MCP client can call | `GET /api/export/mcp` **exports** MCP server descriptions; agenthub does not run an MCP server |
 | Agent Card | `GET /api/export/agent-card` and `/.well-known/agent.json`, one advertised skill per approved record |
 
@@ -1060,8 +1060,9 @@ namespaces; the `(namespace, name, version)` dedup key; and the `custom` record 
 
 1. **Semantic retrieval** (medium): keyword search recalls poorly once a catalogue runs to thousands
    of records; the fix would be an external search source rather than an embedded model.
-2. **Batch read and pagination** (medium): the listing has neither yet, which will slow the console
-   down as the catalogue grows.
+2. **Pagination pushdown** (low): the window bounds the response, but the scan is still
+   filter-after-read (visibility is decided in Go and `q` spans jsonb columns), so a keyset or
+   grant-set pushdown is the next step once a catalogue outgrows a few thousand records.
 3. **Audit surface** (low): no record of every API call, which compliance scenarios ask for.
 4. **Schedule expressiveness** (low): a sync schedule is a hand-rolled five-field cron, less
    expressive than EventBridge rules but enough for a self-hosted instance.

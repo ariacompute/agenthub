@@ -76,7 +76,18 @@ export const sandboxNetworkModes = [
   { mode: 'platform', descKey: 'sandboxNetworkPlatformDesc' },
 ]
 
-/** A resource-level policy written the way the drawer writes it: snake_case. */
+/**
+ * A resource-level policy written the way the drawer writes it: snake_case.
+ *
+ * `work_dir` is a *host* path — the directory the operator shares with the
+ * sandbox, which is mounted read-only at /work unless the root is writable. It is
+ * not a path inside the container, and it must be inside one of
+ * AGENTHUB_SANDBOX_WORKDIR_ROOTS when the instance configures an allowlist.
+ * `readonly_root` is omitted here because leaving it out is what asks for a
+ * read-only root; `false` is refused unless the instance sets
+ * AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT, and the limits are clipped to
+ * AGENTHUB_SANDBOX_MAX_* at lease time.
+ */
 export const sandboxPolicySample = `{
   "kind": "cli",
   "name": "ruff",
@@ -85,8 +96,7 @@ export const sandboxPolicySample = `{
       "provider": "docker",
       "runtime": "runsc",
       "image": "python:3.12-slim",
-      "work_dir": "/work",
-      "readonly_root": false,
+      "work_dir": "/srv/agenthub/work/ruff",
       "network": "none",
       "cpu": 1.5,
       "memory_mb": 512,
@@ -395,8 +405,8 @@ export const httpEndpoints = [
     permission: 'resources:read',
     descKey: 'verbList',
     nounKey: 'nounResources',
-    request: '?kind=&q=&namespace=&status=&discoverable=',
-    response: '{ resources: [Entry], counts: { kind }, health: { state } }',
+    request: '?kind=&q=&namespace=&status=&discoverable=&limit=&offset=',
+    response: '{ resources: [Entry], counts: { kind }, health: { state }, total, limit, offset }',
   },
   {
     group: 'resources',
@@ -407,6 +417,15 @@ export const httpEndpoints = [
     nounKey: 'nounResources',
     request: '{ kind, name, display_name?, endpoint?, transport?, namespace?, kind_config? }',
     response: 'Entry — 201',
+  },
+  {
+    group: 'resources',
+    method: 'POST',
+    path: '/api/resources/batch',
+    permission: 'resources:read',
+    descKey: 'epResourceBatch',
+    request: '{ ids: [string] } — up to 100, duplicates dropped, order preserved',
+    response: '{ resources: [Entry], missing: [id] }',
   },
   {
     group: 'resources',

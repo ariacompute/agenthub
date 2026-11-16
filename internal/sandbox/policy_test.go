@@ -275,6 +275,117 @@ func TestValidateProfileRejectsImpossibleLimits(t *testing.T) {
 	}
 }
 
+// TestValidateHostPolicyIsTheFilesystemGate is the answer to "may a resource
+// hand a host directory to the sandbox, and may it make the root writable".
+// Both questions used to be answered by the resource itself.
+func TestValidateHostPolicyIsTheFilesystemGate(t *testing.T) {
+	writable := false
+	open := HostPolicy{AllowWritableRoot: true, WorkDirRoots: []string{"/srv/agenthub/work/"}}
+
+	accepted := []struct {
+		name    string
+		profile Profile
+		policy  HostPolicy
+	}{
+		{"read-only root, no host directory", Profile{}, HostPolicy{}},
+		{"read-only root, allowlisted directory", Profile{WorkDir: "/srv/agenthub/work/job-1"}, open},
+		// The root itself is a legitimate name for the allowlist entry.
+		{"the allowlisted root itself", Profile{WorkDir: "/srv/agenthub/work"}, open},
+		{"a writable root the operator allowed", Profile{ReadonlyRoot: &writable, WorkDir: "/srv/agenthub/work/x"}, open},
+		// The denylist is not the allowlist: with no roots configured any absolute
+		// path outside the system trees still works, which is what keeps existing
+		// records running after an upgrade.
+		{"a data path with no allowlist", Profile{WorkDir: "/home/deploy/work"}, HostPolicy{}},
+		// Prefix matching is by whole segment: /etcetera is not /etc.
+		{"a path that merely starts like a denied one", Profile{WorkDir: "/etcetera/work"}, HostPolicy{}},
+	}
+	for _, tc := range accepted {
+		if err := ValidateHostPolicy(tc.profile, tc.policy); err != nil {
+			t.Fatalf("%s must be accepted: %v", tc.name, err)
+		}
+	}
+
+	refused := []struct {
+		name    string
+		profile Profile
+		policy  HostPolicy
+	}{
+		{"a writable root nobody allowed", Profile{ReadonlyRoot: &writable}, HostPolicy{}},
+		{"the volume root", Profile{WorkDir: "/"}, HostPolicy{}},
+		{"a system tree", Profile{WorkDir: "/etc"}, HostPolicy{}},
+		{"a file in a system tree", Profile{WorkDir: "/etc/ssl/private"}, HostPolicy{}},
+		{"the docker socket directory", Profile{WorkDir: "/var/run/docker.sock"}, HostPolicy{}},
+		{"a traversal", Profile{WorkDir: "/srv/agenthub/work/../../etc"}, open},
+		{"a relative path", Profile{WorkDir: "work"}, open},
+		{"a comma in the path", Profile{WorkDir: "/srv/agenthub/work,a"}, open},
+		{"a newline in the path", Profile{WorkDir: "/srv/agenthub/work\nx"}, open},
+		{"outside the allowlist", Profile{WorkDir: "/home/deploy/work"}, open},
+	}
+	for _, tc := range refused {
+		err := ValidateHostPolicy(tc.profile, tc.policy)
+		if err == nil {
+			t.Fatalf("%s must be refused", tc.name)
+		}
+		if code := codeOf(t, err); code != CodePolicyDenied {
+			t.Fatalf("%s: expected %s, got %s", tc.name, CodePolicyDenied, code)
+		}
+	}
+
+	// An allowlist entry that is itself unusable (a volume root) is skipped
+	// rather than matched, so a typo cannot widen the allowlist to everything.
+	broken := HostPolicy{WorkDirRoots: []string{"/", "srv"}}
+	if err := ValidateHostPolicy(Profile{WorkDir: "/home/deploy/work"}, broken); err == nil {
+		t.Fatal("an unusable allowlist entry must not match anything")
+	}
+}
+
+// TestLimitsClampOnlyTightens pins the quota rule: a resource may ask for less
+// than the instance allows and never for more, and a zero ceiling means the
+// instance did not configure one rather than "nothing is allowed".
+func TestLimitsClampOnlyTightens(t *testing.T) {
+	limits := Limits{CPU: 2, MemoryMB: 1024, PidsLimit: 128}
+
+	within := Profile{CPU: 1, MemoryMB: 512, PidsLimit: 64}
+	got, changed := limits.Clamp(within)
+	if changed || got.CPU != within.CPU || got.MemoryMB != within.MemoryMB || got.PidsLimit != within.PidsLimit {
+		t.Fatalf("a profile inside the ceiling must pass untouched: %+v (changed %v)", got, changed)
+	}
+	if err := limits.Exceeds(within); err != nil {
+		t.Fatalf("a profile inside the ceiling must register: %v", err)
+	}
+
+	over := Profile{CPU: 64, MemoryMB: 65536, PidsLimit: 4096}
+	clamped, changed := limits.Clamp(over)
+	if !changed {
+		t.Fatal("a profile above the ceiling must report that it was clamped")
+	}
+	if clamped.CPU != 2 || clamped.MemoryMB != 1024 || clamped.PidsLimit != 128 {
+		t.Fatalf("clamped = %+v, want the ceiling on all three", clamped)
+	}
+	if err := limits.Exceeds(over); err == nil {
+		t.Fatal("a profile above the ceiling must be refused at registration")
+	} else if code := codeOf(t, err); code != CodePolicyDenied {
+		t.Fatalf("expected %s, got %s", CodePolicyDenied, code)
+	}
+
+	// One dimension over is enough: the gates are independent.
+	if err := limits.Exceeds(Profile{CPU: 1, MemoryMB: 1025, PidsLimit: 64}); err == nil {
+		t.Fatal("exceeding only memory must still be refused")
+	}
+
+	// No ceiling configured: nothing is clamped and nothing is refused.
+	unbounded := Limits{}
+	if _, changed := unbounded.Clamp(over); changed {
+		t.Fatal("a zero ceiling must not clamp anything")
+	}
+	if err := unbounded.Exceeds(over); err != nil {
+		t.Fatalf("a zero ceiling must not refuse anything: %v", err)
+	}
+	if line := (Limits{CPU: 1.5, MemoryMB: 512, PidsLimit: 64}).String(); !strings.Contains(line, "cpu=1.50") {
+		t.Fatalf("log line = %q", line)
+	}
+}
+
 func TestArgsAllowedHonoursThePolicy(t *testing.T) {
 	none := Profile{ArgsPolicy: ArgsNone}
 	if !ArgsAllowed(none, nil) {

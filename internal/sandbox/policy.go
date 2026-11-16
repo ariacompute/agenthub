@@ -2,6 +2,8 @@ package sandbox
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -149,6 +151,196 @@ func Resolve(base Profile, override Profile) Profile {
 // Readonly reports the resolved read-only root flag: unset means read-only.
 func (p Profile) Readonly() bool {
 	return p.ReadonlyRoot == nil || *p.ReadonlyRoot
+}
+
+// Limits is the instance ceiling on the resources a sandbox may consume. It is
+// the second half of "a resource cannot widen its own sandbox": Defaults says
+// what a resource inherits, Limits says how far past that it may go.
+//
+// The zero value means "no ceiling", so a hand-built ManagerOptions in a unit
+// test behaves as before and an instance that never set AGENTHUB_SANDBOX_MAX_*
+// is not silently given one.
+type Limits struct {
+	CPU       float64
+	MemoryMB  int
+	PidsLimit int
+}
+
+// Clamp lowers a profile to the ceiling and reports whether it had to. It only
+// ever tightens: a profile below the ceiling passes through untouched, and a
+// zero field in the ceiling means "unbounded" rather than "zero".
+func (l Limits) Clamp(p Profile) (Profile, bool) {
+	changed := false
+	if l.CPU > 0 && p.CPU > l.CPU {
+		p.CPU = l.CPU
+		changed = true
+	}
+	if l.MemoryMB > 0 && p.MemoryMB > l.MemoryMB {
+		p.MemoryMB = l.MemoryMB
+		changed = true
+	}
+	if l.PidsLimit > 0 && p.PidsLimit > l.PidsLimit {
+		p.PidsLimit = l.PidsLimit
+		changed = true
+	}
+	return p, changed
+}
+
+// Exceeds reports a profile that asks for more than the ceiling. It is the
+// registration-time half of Clamp: the operator hears about an impossible limit
+// while writing the record instead of seeing it silently reduced at run time.
+func (l Limits) Exceeds(p Profile) error {
+	if (l.CPU > 0 && p.CPU > l.CPU) ||
+		(l.MemoryMB > 0 && p.MemoryMB > l.MemoryMB) ||
+		(l.PidsLimit > 0 && p.PidsLimit > l.PidsLimit) {
+		return Error(CodePolicyDenied)
+	}
+	return nil
+}
+
+// String renders the ceiling for a log line or a startup summary.
+func (l Limits) String() string {
+	return fmt.Sprintf("cpu=%.2f mem=%dMB pids=%d", l.CPU, l.MemoryMB, l.PidsLimit)
+}
+
+// HostPolicy is the instance's answer to "where may a sandbox touch the host
+// filesystem". It is operator configuration, never resource configuration: a
+// resource names a directory, the instance decides whether that directory is
+// reachable at all. Both fields are tightening knobs with a safe zero value, so
+// a hand-built ManagerOptions in a unit test keeps working.
+type HostPolicy struct {
+	// WorkDirRoots is the host tree a resource's work_dir must live under. An
+	// empty list means "the shipped denylist only": existing records that already
+	// name a directory keep working, and the system trees below stay refused. Set
+	// it to the real work root (for example /srv/agenthub/work) to turn
+	// work_dir into an allowlist.
+	WorkDirRoots []string
+	// AllowWritableRoot permits a resource to opt out of the read-only root. It is
+	// false by default on purpose: "read-only unless the operator says otherwise"
+	// is the only default that survives a resource written by somebody else.
+	AllowWritableRoot bool
+}
+
+// hostDeniedPrefixes are the host trees a sandbox never gets a handle on, even
+// as a read-only bind: they hold credentials (/etc, /root, /var/lib), kernel
+// interfaces (/proc, /sys, /dev) or the binaries the sandbox is already running
+// from. The list is about *identity and integrity*, not convenience — a work
+// directory belongs in a data path.
+var hostDeniedPrefixes = []string{
+	"/proc", "/sys", "/dev", "/boot", "/etc", "/root", "/run",
+	"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64",
+	"/var/lib", "/var/run", "/var/log",
+}
+
+// ValidateHostPolicy refuses a profile whose filesystem request the instance
+// does not allow. It covers the two questions a profile can ask about the host:
+//
+//   - may the root filesystem be writable at all (AllowWritableRoot), and
+//   - is the named work directory a place this instance shares (WorkDirRoots plus
+//     the denylist).
+//
+// The checks are deliberately structural rather than best-effort: a relative
+// path, a comma (the separator in `--mount` options, so it would smuggle another
+// option in), a control character, a volume root or a system tree is refused
+// outright, because every one of them has been a container-escape primitive
+// somewhere. Traversal is normalised before the comparison rather than refused,
+// so "a/b/../etc" is judged as "/etc" — the path the runtime would mount.
+// Symlinks are not resolved here: the providers hand the path to the runtime, and
+// following a link is the runtime's decision — an operator who pins WorkDirRoots
+// has already bounded where the link may point.
+func ValidateHostPolicy(p Profile, hp HostPolicy) error {
+	if !p.Readonly() && !hp.AllowWritableRoot {
+		// The root is read-only unless a resource explicitly opts out; allowing
+		// that opt-out with no operator gate would make the flag advisory.
+		return Error(CodePolicyDenied)
+	}
+	dir := strings.TrimSpace(p.WorkDir)
+	if dir == "" {
+		// No host directory named: the provider hands out an in-sandbox tmpfs,
+		// which is the safest possible answer and needs no further checks.
+		return nil
+	}
+	cleaned, err := CleanWorkDir(dir)
+	if err != nil {
+		return err
+	}
+	if len(hp.WorkDirRoots) == 0 {
+		return nil
+	}
+	for _, root := range hp.WorkDirRoots {
+		cleanRoot, ok := cleanHostPath(strings.TrimSpace(root))
+		if !ok {
+			// An operator-supplied root that cannot pass the same checks is a
+			// misconfiguration, not a match: skipping it keeps a bad root from
+			// accidentally widening the allowlist to "/".
+			continue
+		}
+		if pathWithin(cleaned, cleanRoot) {
+			return nil
+		}
+	}
+	return Error(CodePolicyDenied)
+}
+
+// CleanWorkDir normalises a host directory and applies the structural checks
+// that hold regardless of instance configuration: absolute, no option separator,
+// no control characters, not a volume root, not a system tree. It is exported so
+// registration can reject the legacy cli.work_dir field as well — the lease-time
+// gate in ValidateHostPolicy is what additionally applies the instance allowlist.
+func CleanWorkDir(raw string) (string, error) {
+	cleaned, ok := cleanHostPath(strings.TrimSpace(raw))
+	if !ok {
+		return "", Error(CodePolicyDenied)
+	}
+	for _, denied := range hostDeniedPrefixes {
+		if pathWithin(cleaned, denied) {
+			return "", Error(CodePolicyDenied)
+		}
+	}
+	return cleaned, nil
+}
+
+// cleanHostPath normalises a host path and reports whether it is a usable
+// directory reference rather than a root, a traversal or an option injection.
+func cleanHostPath(raw string) (string, bool) {
+	if raw == "" || strings.ContainsAny(raw, ",\x00") {
+		return "", false
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return "", false
+		}
+	}
+	slashed := filepath.ToSlash(strings.TrimSpace(raw))
+	if !filepath.IsAbs(raw) && !strings.HasPrefix(slashed, "/") {
+		// Windows volumes are absolute through filepath; a bare relative name is
+		// never acceptable because its meaning depends on the daemon's cwd.
+		return "", false
+	}
+	// Clean resolves ".." before the checks, so "/srv/x/../etc" is judged as
+	// "/srv/etc" — the path the runtime will actually mount, rather than the
+	// string somebody wrote.
+	cleaned := path.Clean(slashed)
+	if cleaned == "/" || cleaned == "." || cleaned == ".." {
+		return "", false
+	}
+	// "C:" alone is a Windows volume root; path.Clean leaves it as "C:".
+	if len(cleaned) == 2 && cleaned[1] == ':' {
+		return "", false
+	}
+	return cleaned, true
+}
+
+// pathWithin reports whether candidate is prefix itself or lives under it, by
+// whole path segments: /etc is not the parent of /etcetera.
+func pathWithin(candidate, prefix string) bool {
+	if candidate == prefix {
+		return true
+	}
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	return strings.HasPrefix(candidate, prefix)
 }
 
 // NormalizeNetwork maps an unknown or empty mode onto the conservative default.

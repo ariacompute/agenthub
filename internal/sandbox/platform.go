@@ -90,10 +90,13 @@ func (h *HTTPProvider) Describe(context.Context) (Descriptor, error) {
 		Layer:     h.preset.Layer,
 		Isolation: h.preset.Isolation,
 		Network:   []string{NetworkDelegated},
-		EnvKeys:   []string{h.preset.EnvBaseURL, h.preset.EnvToken},
-		Source:    SourcePlatform,
-		License:   h.preset.License,
-		DocsURL:   h.preset.DocsURL,
+		// The hosted runtime applies its own quotas; nothing here can read them
+		// back, so the honest label is the same one the network uses.
+		Limits:  []string{LimitDelegated},
+		EnvKeys: []string{h.preset.EnvBaseURL, h.preset.EnvToken},
+		Source:  SourcePlatform,
+		License: h.preset.License,
+		DocsURL: h.preset.DocsURL,
 	}, nil
 }
 

@@ -2,7 +2,7 @@ import {
   expectAvailable, expectStatus, expectShape, expectArray, requireState, skip,
   expectSseAvailable,
 } from '../../lib/assertions.js'
-import { uniqueName } from '../fixtures.js'
+import { resourcePayload, uniqueName } from '../fixtures.js'
 import { deleteIfExists } from '../../lib/cleanup.js'
 import { optinReason } from '../../e2e.config.js'
 
@@ -22,6 +22,72 @@ export default [
     moduleOrSkip(res, 'sandbox list')
     expectAvailable(res, 'sandbox list')
     expectShape(res, ['leases', 'default', 'live'], 'sandbox list')
+  }),
+
+  // The instance defaults are what a resource inherits, and they are the answer
+  // to "may a sandbox write outside its own tmpfs, and how much CPU may it take".
+  // They used to be literals in the binary with no way to read them back.
+  c('the default profile reports the filesystem and quota gates', 'GET /api/sandboxes', async (ctx) => {
+    const res = await ctx.api('GET', '/api/sandboxes')
+    moduleOrSkip(res, 'sandbox default profile')
+    expectAvailable(res, 'sandbox default profile')
+    const profile = res.json?.default
+    if (!profile) throw new Error('the sandbox list carries no default profile')
+    expectShape(profile, ['cpu', 'memoryMB', 'pidsLimit'], 'default profile')
+    if (!(profile.cpu > 0) || !(profile.memoryMB > 0) || !(profile.pidsLimit > 0)) {
+      throw new Error(`the default ceiling is not positive: ${JSON.stringify(profile)}`)
+    }
+    // readonlyRoot is tri-state on the wire: absent means "read-only", and only an
+    // explicit false asks for a writable root — which the instance has to allow.
+    if (profile.readonlyRoot === false) {
+      throw new Error('a default profile must not opt out of the read-only root')
+    }
+  }),
+
+  // The host-path gate does not depend on instance configuration: a root, a
+  // system tree and a relative path are refused everywhere, so this case is
+  // deterministic on every deployment.
+  c('a work directory outside the allowed host tree is refused', 'POST /api/resources', async (ctx) => {
+    const { payload } = resourcePayload('cli')
+    const rejected = []
+    for (const workDir of ['/', '/etc', '/proc/self/root', 'relative/work']) {
+      const res = await ctx.api('POST', '/api/resources', {
+        body: {
+          ...payload,
+          id: `${payload.id}-${rejected.length}`,
+          name: `${payload.name} ${rejected.length}`,
+          kind_config: { cli: { command: 'echo' }, sandbox: { work_dir: workDir } },
+        },
+      })
+      if (res.status === 201) {
+        // Never leave a record behind that proves the gate is missing.
+        await ctx.api('DELETE', `/api/resources/${res.json.id}`)
+        throw new Error(`work_dir ${workDir} was accepted`)
+      }
+      expectStatus(res, [400, 403], `work_dir ${workDir}`)
+      if (!res.code) throw new Error(`work_dir ${workDir} returned no machine code`)
+      rejected.push(res.code)
+    }
+    ctx.state.workDirRejections = rejected
+  }),
+
+  // Asking for a writable root is allowed only when the operator enabled it, so
+  // both answers are correct: the refusal is asserted, and a permissive instance
+  // is skipped rather than failed.
+  c('a writable root needs the instance switch', 'POST /api/resources', async (ctx) => {
+    const { id, payload } = resourcePayload('cli')
+    const res = await ctx.api('POST', '/api/resources', {
+      body: {
+        ...payload,
+        kind_config: { cli: { command: 'echo' }, sandbox: { readonly_root: false } },
+      },
+    })
+    if (res.status === 201) {
+      await ctx.api('DELETE', `/api/resources/${id}`)
+      skip('this instance allows a writable root (AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT=true)')
+    }
+    expectStatus(res, [400, 403], 'writable root')
+    if (!res.code) throw new Error('a refused writable root returned no machine code')
   }),
 
   c('sandbox water level is reported', 'GET /api/sandboxes/stats', async (ctx) => {

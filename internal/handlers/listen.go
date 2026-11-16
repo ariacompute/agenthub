@@ -29,6 +29,7 @@ func Listeners() []Listener {
 		{"POST /api/auth/login", "email + password login, sets the session cookie"},
 		{"GET /api/auth/me", "current identity, permissions and membership"},
 		{"GET /api/*", "control plane: resources, tasks, events, push records"},
+		{"POST /api/resources/batch", "resources: batch read by id (up to 100, request order preserved)"},
 		{"GET /api/users", "admin: list, create, update and disable users"},
 		{"GET /api/roles", "admin: roles, groups and the permission matrix"},
 		{"GET /api/grants", "admin: per-resource read/write grants"},

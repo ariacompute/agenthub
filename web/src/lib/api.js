@@ -37,7 +37,15 @@ export function healthz() {
   return request('/healthz')
 }
 
-export function listResources({ kind = '', q = '', namespace = '', status = '', discoverable = false } = {}) {
+export function listResources({
+  kind = '',
+  q = '',
+  namespace = '',
+  status = '',
+  discoverable = false,
+  limit = 0,
+  offset = 0,
+} = {}) {
   const params = new URLSearchParams()
   if (kind) params.set('kind', kind)
   if (q) params.set('q', q)
@@ -46,8 +54,21 @@ export function listResources({ kind = '', q = '', namespace = '', status = '', 
   // The server applies the approval gate; the console never filters statuses
   // locally for a view that is meant to be invocable.
   if (discoverable) params.set('discoverable', 'true')
+  // Paging is opt-in: a caller that asks for no window gets the whole catalogue,
+  // which is what every view except the registry list wants. Sending limit=0
+  // would be noise, and the URL is asserted in the tests.
+  if (limit > 0) params.set('limit', String(limit))
+  if (offset > 0) params.set('offset', String(offset))
   const query = params.toString()
   return request(`/api/resources${query ? `?${query}` : ''}`)
+}
+
+// getResourcesBatch reads up to 100 records in one request, in the order it was
+// asked. The registry list is paged, so a grant row's resource id may sit on a
+// page the console has not loaded: resolving those one GET at a time is the
+// request burst this replaces.
+export function getResourcesBatch(ids) {
+  return request('/api/resources/batch', { method: 'POST', ...body({ ids }) })
 }
 
 export function createResource(entry) {

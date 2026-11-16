@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -89,12 +90,17 @@ func (d Deps) handleListResources(w http.ResponseWriter, r *http.Request) {
 		}
 		discoverable = parsed
 	}
-	entries := d.visibleEntries(r, d.Reg.ListFiltered(registry.Filter{
+	limit, offset, ok := pageWindow(w, q)
+	if !ok {
+		return
+	}
+	filter := registry.Filter{
 		Kind:      kind,
 		Query:     q.Get("q"),
 		Namespace: q.Get("namespace"),
 		Status:    q.Get("status"),
-	}))
+	}
+	entries := d.visibleEntries(r, d.Reg.ListFiltered(filter))
 	if discoverable {
 		// Discoverable is the single consumer-facing gate used by /api/workspace,
 		// the MCP/Agent Card exports and A2A selection. Applying it here (rather
@@ -102,12 +108,163 @@ func (d Deps) handleListResources(w http.ResponseWriter, r *http.Request) {
 		// empty, which EffectiveStatus reads as approved.
 		entries = registry.Discoverable(entries)
 	}
-	byKind, byHealth := countsOf(entries)
+	// The counts describe the catalogue, not the page: they drive the tabs, and a
+	// tab that showed "0" because the caller was looking at page three of another
+	// kind would be worse than no count at all. Same filters minus kind, one extra
+	// pass over the already-loaded set (no extra query when kind is empty and the
+	// discoverable view was not asked for).
+	countSet := entries
+	if kind != "" || discoverable {
+		unfiltered := filter
+		unfiltered.Kind = ""
+		countSet = d.visibleEntries(r, d.Reg.ListFiltered(unfiltered))
+		if discoverable {
+			countSet = registry.Discoverable(countSet)
+		}
+	}
+	byKind, byHealth := countsOf(countSet)
+	total := len(entries)
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"resources": entries,
+		"resources": pageOf(entries, limit, offset),
 		"counts":    byKind,
 		"health":    byHealth,
+		// total is the size of the whole filtered, visibility-filtered set, so the
+		// console can render "1–25 of 137" and know when to stop asking.
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	})
+}
+
+// maxResourcePage bounds a page. Without a bound "pagination" would be a way to
+// ask for the whole catalogue with extra steps; 200 is roughly what the console
+// renders before scrolling stops being useful.
+const maxResourcePage = 200
+
+// pageWindow parses limit/offset. limit 0 (the default) means "everything", which
+// is what every caller before paging existed asked for, so an old client keeps
+// working unchanged.
+func pageWindow(w http.ResponseWriter, q url.Values) (limit, offset int, ok bool) {
+	limit, err := intQuery(q, "limit")
+	if err != nil || limit < 0 || limit > maxResourcePage {
+		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeBadRequest)
+		return 0, 0, false
+	}
+	offset, err = intQuery(q, "offset")
+	if err != nil || offset < 0 {
+		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeBadRequest)
+		return 0, 0, false
+	}
+	return limit, offset, true
+}
+
+// intQuery reads a non-negative integer parameter; empty means zero.
+func intQuery(q url.Values, key string) (int, error) {
+	raw := strings.TrimSpace(q.Get(key))
+	if raw == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(raw)
+}
+
+// pageOf slices the already-filtered set. Both bounds are clamped: an offset past
+// the end is an empty page (not an error — the console's own total says so), and
+// the result is never nil so the wire carries [] rather than null.
+func pageOf(entries []*registry.Entry, limit, offset int) []*registry.Entry {
+	if offset >= len(entries) {
+		return []*registry.Entry{}
+	}
+	if offset > 0 {
+		entries = entries[offset:]
+	}
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	if entries == nil {
+		return []*registry.Entry{}
+	}
+	return entries
+}
+
+// maxBatchIDs caps a batch read. It is the same order as the page ceiling: a
+// batch is a way to ask for the records a page referenced, not for the catalogue.
+const maxBatchIDs = 100
+
+// handleBatchGetResources answers "give me these records" in one round trip.
+//
+// It exists because paging changed what a client can know: a grant row or a task
+// references a resource id that may be on page seven, and resolving those one
+// GET at a time is a burst of requests for something that is a single query on
+// this side. Absent and not-visible ids both land in "missing", the same way a
+// GET of somebody else's record is a 404 rather than a 403.
+func (d Deps) handleBatchGetResources(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := httputil.Decode(w, r, &req, 1<<16); err != nil {
+		httputil.WriteErr(w, err)
+		return
+	}
+	ids, ok := normalizeBatchIDs(req.IDs)
+	if !ok {
+		httputil.WriteError(w, http.StatusBadRequest, httputil.CodeBadRequest)
+		return
+	}
+	found := d.Reg.GetMany(ids)
+	visible := d.visibleEntries(r, entryList(found, ids))
+	byID := make(map[string]*registry.Entry, len(visible))
+	for _, e := range visible {
+		byID[e.ID] = e
+	}
+	resources := make([]*registry.Entry, 0, len(ids))
+	missing := make([]string, 0)
+	for _, id := range ids {
+		if e, ok := byID[id]; ok {
+			resources = append(resources, e)
+			continue
+		}
+		missing = append(missing, id)
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
+		"resources": resources,
+		"missing":   missing,
+	})
+}
+
+// normalizeBatchIDs rejects a request that cannot be answered meaningfully and
+// removes repeats, keeping the order of first appearance so the response can be
+// zipped back onto the request.
+func normalizeBatchIDs(raw []string) ([]string, bool) {
+	if len(raw) == 0 || len(raw) > maxBatchIDs {
+		return nil, false
+	}
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, id := range raw {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, false
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, true
+}
+
+// entryList projects the batch result onto the request order that is still known
+// at this point: it keeps visibleEntries' contract (a slice) without letting a map
+// iteration decide what the caller's page order looks like.
+func entryList(found map[string]*registry.Entry, ids []string) []*registry.Entry {
+	out := make([]*registry.Entry, 0, len(found))
+	for _, id := range ids {
+		if e, ok := found[id]; ok {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (d Deps) handleCreateResource(w http.ResponseWriter, r *http.Request) {

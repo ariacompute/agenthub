@@ -132,6 +132,11 @@ func Register(d Deps) http.Handler {
 	// administrator token.
 	mux.HandleFunc("GET /api/resources", d.requirePermission(authz.PermResourcesRead, d.handleListResources))
 	mux.HandleFunc("POST /api/resources", d.requirePermission(authz.PermResourcesWrite, d.handleCreateResource))
+	// Batch read: the ids a page referenced, in one round trip. A literal segment
+	// and a wildcard do not collide in Go's router, and "batch" is reserved rather
+	// than an id nobody may use — an id that happens to be "batch" is still
+	// reachable through the resources it lives in.
+	mux.HandleFunc("POST /api/resources/batch", d.requirePermission(authz.PermResourcesRead, d.handleBatchGetResources))
 	mux.HandleFunc("GET /api/resources/{id}", d.requirePermission(authz.PermResourcesRead, d.handleGetResource))
 	mux.HandleFunc("PUT /api/resources/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleUpdateResource))
 	mux.HandleFunc("DELETE /api/resources/{id}", d.requirePermission(authz.PermResourcesWrite, d.handleDeleteResource))

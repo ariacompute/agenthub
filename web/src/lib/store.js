@@ -11,6 +11,14 @@ export const STATUSES = ['draft', 'pending', 'approved', 'rejected', 'deprecated
 export const useHubStore = defineStore('hub', {
   state: () => ({
     resources: [],
+    // resourceQuery is the window the catalogue was last read with. Mutating
+    // actions re-read through it, so deleting a record on page three of one kind
+    // keeps the console on that page instead of dumping the whole directory into
+    // the registry grid.
+    resourceQuery: {},
+    // resourceTotal is the size of the whole filtered catalogue, not the page:
+    // it is what the pager renders as "1–25 of 137".
+    resourceTotal: 0,
     // The discoverable view is a separate slice: an approved-only answer must
     // never overwrite the curator's full catalogue in `resources`.
     discoverableResources: [],
@@ -45,11 +53,17 @@ export const useHubStore = defineStore('hub', {
     // blank screen is worse than a stale one — but they do return whether the
     // read landed, so an action that mutates can refuse to claim success while
     // the list on screen is still the old one.
-    async refreshResources() {
+    async refreshResources(params) {
+      // A caller that passes no window re-reads whatever the catalogue was last
+      // read with — that is what makes a mutation keep the current page. A caller
+      // that wants the whole directory says so with refreshAllResources().
+      const query = params ?? this.resourceQuery
+      if (params) this.resourceQuery = params
       this.loading = true
       try {
-        const data = await api.listResources()
+        const data = await api.listResources(query)
         this.resources = data?.resources ?? []
+        this.resourceTotal = data?.total ?? this.resources.length
         this.counts = data?.counts ?? {}
         this.healthCounts = data?.health ?? {}
         this.errorCode = ''
@@ -59,6 +73,30 @@ export const useHubStore = defineStore('hub', {
         return false
       } finally {
         this.loading = false
+      }
+    },
+    // The whole catalogue, unpaged. Topology draws every node, the playground and
+    // the grant form offer every record, so those views must not inherit the
+    // registry list's window.
+    async refreshAllResources() {
+      return this.refreshResources({})
+    },
+    // resolveResourceNames answers id → name for records that are not in the
+    // loaded window (a grant row pointing at page seven). It fails soft: an
+    // unresolvable id is simply absent and the caller falls back to showing the
+    // id it already has, which is what it would have shown anyway.
+    async resolveResourceNames(ids) {
+      const wanted = [...new Set((ids || []).filter(Boolean))]
+      if (!wanted.length) return {}
+      try {
+        const data = await api.getResourcesBatch(wanted)
+        const names = {}
+        for (const entry of data?.resources ?? []) names[entry.id] = entry.name
+        this.errorCode = ''
+        return names
+      } catch (error) {
+        this.errorCode = error.code || 'internal_error'
+        return {}
       }
     },
     // Consumer pickers read this view. The server applies the approval gate, so

@@ -44,12 +44,23 @@
 | `AGENTHUB_SANDBOX_MAX_PER_OWNER` | `4` | 每归属人租约上限（1..64） |
 | `AGENTHUB_SANDBOX_MAX_TOTAL` | `16` | 全局租约上限（≥ `MAX_PER_OWNER`，≤ 256，且 ≥ `AGENTHUB_ROUTER_MAX_TICKETS`） |
 | `AGENTHUB_SANDBOX_EGRESS_ALLOWLIST` | 空 | 出网白名单（**尚未生效**：当前没有 provider 做 host 过滤，见 §2.1） |
+| `AGENTHUB_SANDBOX_WORKDIR_ROOTS` | 空 | 资源 `work_dir` 必须落在其中的宿主前缀（逗号分隔，绝对路径）；**空 = 仅黑名单**，见 §2.3 |
+| `AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT` | `false` | 是否允许资源显式申请可写根（`readonly_root: false`），见 §2.3 |
+| `AGENTHUB_SANDBOX_CPU` | `1` | 实例默认 CPU 核数（资源不写即继承） |
+| `AGENTHUB_SANDBOX_MEMORY_MB` | `1024` | 实例默认内存上限（MiB） |
+| `AGENTHUB_SANDBOX_PIDS_LIMIT` | `128` | 实例默认进程数上限 |
+| `AGENTHUB_SANDBOX_MAX_CPU` | `4` | 硬上限：资源/声明式模板不得超过（>`256` 拒绝启动） |
+| `AGENTHUB_SANDBOX_MAX_MEMORY_MB` | `4096` | 硬上限（> `1048576` 拒绝启动） |
+| `AGENTHUB_SANDBOX_MAX_PIDS_LIMIT` | `512` | 硬上限（> `65536` 拒绝启动） |
 | `AGENTHUB_SANDBOX_NODE_POLL_TIMEOUT` | `25s` | 节点长轮询挂起时长（1s..60s） |
 | `AGENTHUB_SANDBOX_SWEEP_INTERVAL` | `30s` | 回收节拍（1s..10m） |
 
 单次执行的超时与输出上限**不单独配置**：它们来自资源 profile 继承的实例默认值——
 `AGENTHUB_CLI_TIMEOUT`（默认 `15s`）与 `AGENTHUB_MAX_OUTPUT_BYTES`（默认 `65536`），
 资源可经 policy 覆盖，未设置时回落 `64 KiB`。
+
+三个配额默认值与三个硬上限都必须为正，且 `MAX_* ≥ 默认值`；**整块为 0 的手工 `Config`（单测、嵌入方）
+由 `Validate()` 填成出厂值**，与未设置 `AGENTHUB_SANDBOX_PROVIDER` 回落 `docker` 同一处理。
 
 校验（`AGENTHUB_SANDBOX_ENABLED=false` 时整块跳过）：`PROVIDER` 属于已注册类型或 `off`；
 声明式条目加载失败（未知占位符 / 空 argv / 非绝对路径）**拒绝启动**；各上限范围如上；
@@ -81,6 +92,7 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 | 字段 | 语义 | 谁来填 |
 | --- | --- | --- |
 | `Network` | 本进程**真正能施加**的网络模式；`delegated` 表示「不施加，交给下游」 | 每个 provider |
+| `Limits` | 本进程**真正能施加**的配额项（`cpu` / `memory` / `pids` / `delegated`） | 每个 provider |
 | `Requires` | 探针要找到的**二进制** | 内置 / 声明式 |
 | `EnvKeys` | 需要哪些**环境变量名**（如 `E2B_SHIM_URL`），不是二进制 | 平台垫片 |
 | `Source` | `builtin` / `declarative` / `node` / `platform`——编译进来的 HTTP 垫片不是声明式模板 | 每个 provider |
@@ -88,6 +100,61 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 `Manager.Acquire` 解析出 provider 后先 `Describe()`，再用 `sandbox.SupportsNetwork(desc, profile)` 比对：
 不在声明内即返回 **`sandbox_capability_unavailable`**（fail-closed），**不再静默降级**成宿主网络或
 容器默认网络。`delegated` 覆盖任意具体模式（因为约束发生在下游并被该节点审计），其余后端必须逐字匹配。
+
+`Limits` **只做如实展示，不做门禁**：默认 profile 恒带 CPU 与内存，若照 network 的方式 gate，`bwrap`
+与 `local` 会完全不可用——那不是诚实，是把一个必然失败的约束写进准入。它的价值在于目录页与控制台
+不再暗示「bubblewrap 有内存上限」：`docker` 报 `cpu/memory/pids`，`bwrap`/`local` 报空（无 cgroup；
+`RLIMIT_NPROC` 按真实 uid 计数，跨沙盒泄漏且可能把包装进程自己打掉，故不认领 pids），`remote` 与
+编译进来的平台垫片报 `delegated`，声明式模板只报它 argv 里真正展开的占位符。
+
+### 2.3 文件系统隔离
+
+只读根、临时目录与工作目录过去是「代码里有、契约里没有」的三件事，且工作目录本身没有闸门
+（`work_dir: "/"` 就是 `-v /:/work`）。现在它们是一条可强制、可解释、两端语义一致的规则：
+
+| 约束 | docker / podman | bubblewrap | 由谁决定 |
+| --- | --- | --- | --- |
+| 根文件系统 | `--read-only`（`Profile.Readonly()`） | `--ro-bind / /` | profile `readonly_root`，缺省只读；`false` 需实例开关 |
+| 临时目录 | `--tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m` | `--tmpfs /tmp`（bwrap 的 tmpfs 无 per-mount 标志） | 实例固定 |
+| `HOME` / `TMPDIR` | `--env HOME=/tmp --env TMPDIR=/tmp` | `--setenv HOME /tmp --setenv TMPDIR /tmp` | 实例固定 |
+| 工作目录（命名） | `--mount type=bind,src=<work_dir>,dst=/work[,readonly]` | `--ro-bind` / `--bind <work_dir> /work` | profile `work_dir` + `HostPolicy` |
+| 工作目录（未命名） | `--tmpfs /work:rw,nosuid,nodev,mode=1777,size=512m` | `--tmpfs /work` | 实例固定 |
+| 容器内挂载点的读写 | 跟随根：只读根下 `,readonly` | 跟随根：`--ro-bind` | 同上 |
+
+`HostPolicy`（`sandbox.ValidateHostPolicy`）是这条规则唯一的实现，注册期（`Registry.WithSandboxPolicy`）
+与租约期（`Manager.Acquire`）各跑一次：
+
+- `work_dir` 为空 → 不挂宿主目录，给沙盒内 tmpfs（最安全，也是默认）。
+- 非空 → 必须绝对、不含 `,`（`--mount` 的选项分隔符）与控制字符、不是卷根（`/`、`C:`）、
+  不在系统目录黑名单（`/proc /sys /dev /boot /etc /root /run /usr /bin /sbin /lib /lib32 /lib64
+  /var/lib /var/run /var/log`）。穿越先归一化再判定：`/srv/a/../etc` 按 `/etc` 处理。
+- `AGENTHUB_SANDBOX_WORKDIR_ROOTS` 非空时还必须落在其中一条前缀内（按整段匹配，`/srv/work` 不是
+  `/srv/workshop` 的父目录）；前缀本身不合法时**跳过而不是放宽**。
+- `readonly_root: false` 且 `AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT=false` → `sandbox_policy_denied`
+  （保存时即拒绝，租约期再拒一次）。默认 false 是有意的收紧：能自己放宽文件系统视野的资源，
+  正是不该由资源自己决定的那一类。
+
+不解析符号链接：路径交给运行时，跟随链接是运行时的决定；运营者一旦钉住 `WORKDIR_ROOTS`，
+链接能指向的范围已经被前缀框住。
+
+### 2.4 资源配额
+
+CPU / 内存 / pids 三个数字曾经写死在 `main.go`（1 核 / 1024 MiB / 128），而 `Resolve` 允许任何正向
+覆盖——资源可以把 CPU 设成 64，与「资源无法拓宽自己的沙盒」这条设计相矛盾。现在分三层：
+
+| 层 | 来源 | 语义 |
+| --- | --- | --- |
+| 默认 | `AGENTHUB_SANDBOX_CPU/MEMORY_MB/PIDS_LIMIT` | 资源不写就继承 |
+| 覆盖 | 资源 `kind_config.sandbox` 或声明式模板 | 只能**收紧** |
+| 上限 | `AGENTHUB_SANDBOX_MAX_*` + `sandbox.Limits` | 注册期拒绝超限；租约期夹取 |
+
+- 注册期：`Registry.WithSandboxPolicy` → `Limits.Exceeds` → `sandbox_policy_denied`（handler、上游同步、
+  seed 三条写入路径共用同一闸门）。
+- 租约期：`Manager.Acquire` → `Limits.Clamp`（只下调）→ `slog.Warn` + `lease.created` 帧带
+  `limitsClamped` 与生效值。存量记录、上游同步来的记录、以及「上限刚刚被调低」的情况都走这条。
+- 已有租约若超出当前上限：**回收重建**（`Terminate` 后重新 `create`），而不是让它按旧预算跑到过期。
+- `Resolve` 仍是纯合并，夹取只发生在准入与注册闸门，便于回滚与定位。
+- `docker` 额外传 `--memory-swap` 与 `--memory` 同值：只给 `--memory` 时 swap 不受限，内存上限等于建议值。
 
 ## 3. API
 
@@ -213,4 +280,11 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
    （后写覆盖），回传他节点的作业返回 404。
 10. `GET /api/sandboxes/events?since=N` 先回放 `N` 之后的帧再订阅直播，回放与直播同 `seq`、
    不重不漏（服务层 `EventsSince` 的 `maxSeq` 即游标）。
-11. `go build` / `go vet` / `go test -race ./...` 全绿；`bun run build` / `bun run test` 全绿。
+11. **文件系统闸门**：`/`、`/etc`、`/var/run/...`、相对路径、含 `,` 或换行、穿越到黑名单的
+   `work_dir` 一律 `sandbox_policy_denied`（表驱动）；`WORKDIR_ROOTS` 非空时域外路径被拒、
+   域内通过、不合法的根被跳过；`readonly_root:false` 在开关关闭时保存即拒、开启后通过。
+   `bwrap` 与 `docker` 对同一 profile 的只读/可写语义一致（单测断言 argv）。
+12. **配额**：超上限的 profile 注册期 `sandbox_policy_denied`；租约期被夹到上限且 `lease.created`
+   帧带 `limitsClamped`；上限调低后旧租约被回收重建；`Limits{}` 零值不夹取也不拒绝；
+   `docker` 的 `--memory` 与 `--memory-swap` 同值；`Describe().Limits` 逐后端如实（表驱动）。
+13. `go build` / `go vet` / `go test -race ./...` 全绿；`bun run build` / `bun run test` 全绿。

@@ -309,6 +309,12 @@ func ValidateKindWithMode(e *Entry, instanceDefault string) error {
 	if err := validateSandbox(e.KindConfig.Sandbox); err != nil {
 		return err
 	}
+	// cli.work_dir predates the sandbox block but still feeds the lease profile,
+	// so it gets the same structural host-path checks. The instance allowlist is
+	// applied at lease time, where the resolved profile is what actually runs.
+	if err := validateLegacyWorkDir(e.KindConfig.CLI); err != nil {
+		return err
+	}
 	switch e.Kind {
 	case KindModel:
 		return validateModel(e.KindConfig.Model, e, instanceDefault)
