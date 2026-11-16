@@ -195,12 +195,15 @@ export default [
     expectStatus(res, 404, 'unknown lease delete')
   }),
 
+  // The shipped instance defaults to args_policy=none: Manager.Exec refuses any
+  // argv before it reaches the provider. Run the command alone — this case proves
+  // real execution in a lease, not the argument gate.
   c('a real command inside a live lease', 'POST /api/sandboxes/{id}/exec', async (ctx) => {
     const leases = await ctx.api('GET', '/api/sandboxes')
     const lease = leases.json?.leases?.[0]
     if (!lease) skip('no live lease to execute in')
     const res = await ctx.api('POST', `/api/sandboxes/${lease.id}/exec`, {
-      body: { command: 'echo', args: ['e2e'], timeoutMs: 2000 },
+      body: { command: 'echo', timeoutMs: 2000 },
     })
     expectAvailable(res, 'sandbox exec')
     expectShape(res, ['exitCode', 'durationMs'], 'sandbox exec')

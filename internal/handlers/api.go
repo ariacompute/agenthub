@@ -57,6 +57,11 @@ func writeDomainErr(w http.ResponseWriter, err error) {
 		// temporary condition, so the caller is told to come back, not to fix
 		// its request.
 		status = http.StatusServiceUnavailable
+	case httputil.CodeSandboxPolicyDenied:
+		// A resource asked for a work directory or a writable root the instance
+		// forbids. That is a rejected request, not a server fault; keep the same
+		// status httputil.WriteErr already gives this code everywhere else.
+		status = http.StatusForbidden
 	}
 	httputil.WriteError(w, status, code)
 }

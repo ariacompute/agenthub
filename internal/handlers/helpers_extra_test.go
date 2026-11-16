@@ -207,6 +207,20 @@ func TestActorOfNamesTheCaller(t *testing.T) {
 	}
 }
 
+func TestWriteDomainErrMapsSandboxPolicyDeniedToForbidden(t *testing.T) {
+	// Registry writes run through writeDomainErr, not httputil.WriteErr. A
+	// resource the instance policy refuses must keep the 403 the same code gets
+	// everywhere else — a 500 here is what made the e2e suite fail.
+	rec := httptest.NewRecorder()
+	writeDomainErr(rec, &httputil.Error{Code: httputil.CodeSandboxPolicyDenied})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+	}
+	if got := decodeErrorCode(t, rec); got != string(httputil.CodeSandboxPolicyDenied) {
+		t.Fatalf("code = %q, want %q", got, httputil.CodeSandboxPolicyDenied)
+	}
+}
+
 func TestNextBackupRunWithoutABackendIsNil(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/backups", nil)
 	if got := (Deps{}).nextBackupRun(req); got != nil {
