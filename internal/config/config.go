@@ -8,6 +8,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -196,11 +197,24 @@ type Config struct {
 	// webhook surface.
 	ChannelsEnabled bool
 	// SpeechMode selects the voice backend: "mock" (offline deterministic) or
-	// "real" (a provider configured on the resource). The first release only
-	// ships the mock.
+	// "openai_compatible" (a real audio endpoint). The mock stays the default
+	// so an instance without credentials is fully usable.
 	SpeechMode string
 	// AudioMaxBytes caps the per-request audio upload for POST /api/threads/{id}/audio.
 	AudioMaxBytes int
+	// SpeechEndpoint is the OpenAI compatible audio base URL. Empty keeps the
+	// mock even when SpeechMode asks for a real provider: a missing endpoint is
+	// a degraded deployment, not a reason to reject every voice note.
+	SpeechEndpoint string
+	// SpeechAPIKeyEnv names the environment variable holding the provider key;
+	// the secret itself is never stored in Config.
+	SpeechAPIKeyEnv string
+	SpeechSTTModel  string
+	SpeechTTSModel  string
+	SpeechTimeout   time.Duration
+	// SpeechEgressAllowlist relaxes the SSRF blocklist for the declared audio
+	// endpoint only (for example a loopback bridge on a trusted host).
+	SpeechEgressAllowlist []string
 
 	// Shared files. FilesStore is "off" by default and that is deliberate: an
 	// instance must not begin accepting uploads merely because it was upgraded.
@@ -405,11 +419,17 @@ func Load() (*Config, error) {
 		// On by default: turning synchronisation on must not silently turn
 		// outbound traffic on with it. An operator who wants a real upstream
 		// registry sets this to false explicitly.
-		RegistrySyncFixture: envBool("AGENTHUB_REGISTRY_SYNC_FIXTURE", true),
-		ModelRouterMode:     envStr("AGENTHUB_MODEL_ROUTER_MODE", registry.ProviderModeMock),
-		ChannelsEnabled:     envBool("AGENTHUB_CHANNELS_ENABLED", false),
-		SpeechMode:          envStr("AGENTHUB_SPEECH_MODE", registry.ProviderModeMock),
-		AudioMaxBytes:       envInt("AGENTHUB_AUDIO_MAX_BYTES", 16<<20),
+		RegistrySyncFixture:   envBool("AGENTHUB_REGISTRY_SYNC_FIXTURE", true),
+		ModelRouterMode:       envStr("AGENTHUB_MODEL_ROUTER_MODE", registry.ProviderModeMock),
+		ChannelsEnabled:       envBool("AGENTHUB_CHANNELS_ENABLED", false),
+		SpeechMode:            envStr("AGENTHUB_SPEECH_MODE", registry.ProviderModeMock),
+		AudioMaxBytes:         envInt("AGENTHUB_AUDIO_MAX_BYTES", 16<<20),
+		SpeechEndpoint:        envStr("AGENTHUB_SPEECH_ENDPOINT", ""),
+		SpeechAPIKeyEnv:       envStr("AGENTHUB_SPEECH_API_KEY_ENV", "AGENTHUB_SPEECH_API_KEY"),
+		SpeechSTTModel:        envStr("AGENTHUB_SPEECH_STT_MODEL", adapter.DefaultSpeechSTTModel),
+		SpeechTTSModel:        envStr("AGENTHUB_SPEECH_TTS_MODEL", adapter.DefaultSpeechTTSModel),
+		SpeechTimeout:         envDur("AGENTHUB_SPEECH_TIMEOUT", adapter.DefaultSpeechTimeout),
+		SpeechEgressAllowlist: envList("AGENTHUB_SPEECH_EGRESS_ALLOWLIST", nil),
 		// Shared files: off until an operator names a backend.
 		FilesStore:          strings.ToLower(envStr("AGENTHUB_FILES_STORE", FilesStoreOff)),
 		FilesDir:            envStr("AGENTHUB_FILES_DIR", ""),
@@ -657,6 +677,27 @@ func (c *Config) Validate() error {
 	if c.AudioMaxBytes < 1<<20 {
 		return fmt.Errorf("AGENTHUB_AUDIO_MAX_BYTES must be at least 1 MiB")
 	}
+	// Voice provider. A real mode without an endpoint degrades to the mock at
+	// startup — main logs that once — so only a malformed endpoint is refused:
+	// an operator who typed "api.openai.com" needs to hear about it.
+	if strings.TrimSpace(c.SpeechSTTModel) == "" {
+		c.SpeechSTTModel = adapter.DefaultSpeechSTTModel
+	}
+	if strings.TrimSpace(c.SpeechTTSModel) == "" {
+		c.SpeechTTSModel = adapter.DefaultSpeechTTSModel
+	}
+	if c.SpeechTimeout <= 0 {
+		c.SpeechTimeout = adapter.DefaultSpeechTimeout
+	}
+	if endpoint := strings.TrimSpace(c.SpeechEndpoint); endpoint != "" {
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("AGENTHUB_SPEECH_ENDPOINT must be an absolute http(s) URL, got %q", endpoint)
+		}
+	}
+	if env := strings.TrimSpace(c.SpeechAPIKeyEnv); env != "" && !isEnvName(env) {
+		return fmt.Errorf("AGENTHUB_SPEECH_API_KEY_ENV must be an environment variable name, got %q", env)
+	}
 	// Shared files. An unknown value is refused rather than treated as "off":
 	// an operator who typed "S3 " or "rustfs" needs to hear about it, not to
 	// discover months later that nothing was ever stored.
@@ -828,4 +869,23 @@ func envList(key string, def []string) []string {
 		return def
 	}
 	return out
+}
+
+// isEnvName accepts the shape os.Getenv can use: a leading letter or underscore
+// followed by letters, digits and underscores. It deliberately rejects values
+// that look like a secret, so an operator who pasted the key into the *_ENV
+// variable hears about it instead of shipping it in the process environment.
+func isEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }

@@ -17,8 +17,8 @@ import (
 	"agenthub/internal/threads"
 )
 
-// speechDeps seeds one thread bound to one agent, with the mock speech engine —
-// the only configuration the first release ships.
+// speechDeps seeds one thread bound to one agent, with the deterministic mock
+// speech engine (the zero value of adapter.Speech).
 func speechDeps(t *testing.T, maxBytes int) (Deps, *memThreads, *registry.Entry) {
 	t.Helper()
 	cfg := testConfig()
@@ -75,12 +75,62 @@ func TestThreadAudioRejectsAnUnavailableTranscriber(t *testing.T) {
 	}
 }
 
-func TestThreadAudioRejectsARealProviderMode(t *testing.T) {
+func TestThreadAudioUsesARealProvider(t *testing.T) {
+	d, _, _ := speechDeps(t, 1<<20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/audio/transcriptions":
+			_ = json.NewEncoder(w).Encode(map[string]string{"text": "live transcript"})
+		case "/audio/speech":
+			w.Header().Set("Content-Type", "audio/wav")
+			_, _ = w.Write([]byte("RIFF....WAVEfmt "))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	d.Cfg.SpeechMode = registry.ProviderModeOpenAICompatible
+	d.Speech = adapter.NewSpeech(adapter.SpeechOptions{
+		Mode:     registry.ProviderModeOpenAICompatible,
+		Endpoint: srv.URL,
+		Egress:   []string{"127.0.0.1"},
+	})
+
+	req, _ := audioRequest(t, "clip.wav", []byte("voice-bytes"))
+	w := httptest.NewRecorder()
+	Register(d).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a configured provider must serve the upload, got %d: %s", w.Code, w.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out["transcript"] != "live transcript" {
+		t.Fatalf("transcript = %v, want the provider's answer", out["transcript"])
+	}
+}
+
+func TestThreadAudioFallsBackWhenRealModeHasNoEndpoint(t *testing.T) {
 	d, _, _ := speechDeps(t, 1<<20)
 	d.Cfg.SpeechMode = registry.ProviderModeOpenAICompatible
-	w := do(t, Register(d), http.MethodPost, "/api/threads/thr-1/audio", "", nil)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("only the mock ships, so a live provider must answer 503, got %d", w.Code)
+	// A real mode with no endpoint is a deployment gap: NewSpeech degrades it
+	// to the mock, so the upload still succeeds instead of answering 503.
+	d.Speech = adapter.NewSpeech(adapter.SpeechOptions{Mode: registry.ProviderModeOpenAICompatible})
+
+	req, _ := audioRequest(t, "clip.wav", []byte("voice-bytes"))
+	w := httptest.NewRecorder()
+	Register(d).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a real mode without an endpoint must fall back to the mock, got %d", w.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	transcript, _ := out["transcript"].(string)
+	if !strings.Contains(transcript, "Transcribed voice note") {
+		t.Fatalf("want the deterministic mock transcript, got %q", transcript)
 	}
 }
 

@@ -1,5 +1,6 @@
 import {
   expectStatus, expectRpcOk, expectRpcError, expectTaskState, expectValue, requireState, skip,
+  isSandboxEnvironmentError,
 } from '../../lib/assertions.js'
 import {
   messageParams, resumeParams, pickSendableResource, pickParkResource, requireParked, DEMO,
@@ -134,15 +135,30 @@ export default [
   c('every seeded adapter kind answers a send', 'POST /a2a', async (ctx) => {
     const kinds = [DEMO.model, DEMO.send, DEMO.skill, DEMO.cli, DEMO.park]
     const seen = []
+    const noRuntime = []
     for (const [index, name] of kinds.entries()) {
       const entry = (ctx.state.demoResources || []).find((e) => e.id === name)
       if (!entry) continue
       const res = await ctx.rpc(40 + index, 'message/send', messageParams(entry.id, 'e2e kind coverage'))
+      // A kind that runs inside a container cannot answer on a host without
+      // one. That is an environment limit, not a product failure: skip that
+      // kind with the reason a developer can act on. Any other error still
+      // goes through expectRpcOk and fails the case.
+      if (isSandboxEnvironmentError(res)) {
+        noRuntime.push(name)
+        continue
+      }
       const task = expectRpcOk(res, `send via ${name}`)
       if (!task?.status?.state) throw new Error(`${name} returned no task state`)
       seen.push(name)
     }
-    if (!seen.length) skip('no demo-* resources registered; per-kind coverage is exercised by the API catalogue instead')
+    if (!seen.length) {
+      if (noRuntime.length) {
+        skip(`no container runtime for ${noRuntime.join(', ')}; every seeded kind needed a sandbox`)
+      }
+      skip('no demo-* resources registered; per-kind coverage is exercised by the API catalogue instead')
+    }
+    if (noRuntime.length) ctx.reporter.note(`skipped (no container runtime): ${noRuntime.join(', ')}`)
     ctx.reporter.note(`per-kind sends: ${seen.join(', ')}`)
   }),
 ]

@@ -144,20 +144,26 @@ Agent 调用。
 
 ## 四、适配层
 
-`adapter` 以同一个 `Connector` 接口收敛五类资产的调用面。其中四类**仍为确定性 mock**：
-无网络、无子进程、离线可跑通，真实对接以 `TODO(real)` 标注边界；model 连接器在条目声明时
-可以跑**真实的 OpenAI 兼容 provider**。
+`adapter` 以同一个 `Connector` 接口收敛六类资产的调用面。每个 connector 在条目声明了
+**去哪儿找**时走真实路径，没声明时逐字回落确定性 mock：无网络、无子进程、离线可跑通。
+所有真实出向复用 `netutil` 的 SSRF 加固客户端，凭据只按环境变量名读取。
 
-### 五类连接器
+### 六类连接器
 
-- **model**：provider 注册表 + 回退链，产物 `model.completion`——现在带上命中的 provider 名。
-- **agent**：步骤规划；prompt 含 `approve` / `confirm` / `approval`（**词级匹配**）→
-  挂起并置 `RequiresInput`。
+- **model**：provider 注册表 + 回退链；`Generate` 取单次 completion，`GenerateStream` 把 SSE 帧
+  发成增量 artifact；产物 `model.completion` 带上命中的 provider 名。
+- **agent**：先取 Agent Card，再走 `message/send`；卡片声明 `capabilities.streaming` 时走
+  `message/stream`，把 `artifact-update` / `status-update` 帧翻译为增量 artifact，
+  聚合后的答案只落库一次。
 - **mcp**：`tools/list` + `tools/call` 协议转换，产物 `mcp.tools` / `mcp.call`。
-- **skill**：触发 → 手册 → 步骤 → 报告，产物 `skill.manual`。
+- **skill**：从 `file://` 目录或声明端点读取 `SKILL.md`，解析有序步骤，每个解析出的步骤产出
+  `skill.step`，最后产出 `skill.manual`；没有手册时保留离线五步计划。
+- **custom**：读取 schema 里的 `x-agenthub-dispatch`，校验 method（GET/POST）与相对 path 后调用端点；
+  没有描述符时回显 schema，而不是编造一次调用。
 - **cli**：白名单 → 超时 → 截断 → JSON 回执，产物 `cli.receipt`（含 `truncated`）。
-- **speech**：第六个连接器，语音端点（`POST /api/threads/{id}/audio`）的离线确定性 STT/TTS，
-  与另五类一样是 mock，标 `TODO(real)`。
+- **speech**：第六个连接器。配置 `AGENTHUB_SPEECH_ENDPOINT` 时走 OpenAI 兼容的
+  `/audio/transcriptions` 与 `/audio/speech`；零值仍是 `POST /api/threads/{id}/audio` 使用的
+  crc32/WAV 确定性 mock。
 
 ### 安全与可靠性
 
@@ -180,8 +186,9 @@ Agent 调用。
 - **凭据**：`api_key_env` **只存环境变量名**；密钥本体不入库、不落日志。
 - **绝不伪造**：全部 provider 失败时连接器返回错误。只有显式开启 `fallback_mock` 才由
   确定性 mock 应答，且产物标注 `provider: mock`，不会被误认作真实 completion。
-- **边界**：streaming 与真实 agent / mcp / skill / cli 适配器仍是 `TODO(real)`，这四类
-  保持离线。
+- **边界**：model 与 agent 的流式输出均已实现；剩余 `TODO(real)` 标记描述的是**另外的面**
+  （MCP **stdio** 子进程、沙箱 `egress_allowlist` 的 egress sidecar、向量检索），
+  不再是适配器 Invoke 路径。
 
 ---
 
@@ -494,8 +501,9 @@ cp .env.example .env       # 然后把 AGENTHUB_EXAMPLE_ENABLED 改成 true，
   `PUT /api/resources/{id}` 不是 upsert，id 不存在直接返回 404。
 - **凭据纪律**：网关密钥只留在服务端进程环境（`AGENTHUB_EXAMPLE_API_KEY`）；CLI 命令要先写进
   `AGENTHUB_CLI_ALLOWLIST` 才能跑，且该白名单按**整串**忽略大小写匹配。
-- **是配置意图、不是可执行对接**：只有 model 连接器是真实实现，agent / mcp / skill / cli 四
-  类适配器仍是 `TODO(real)`，这些载荷描述的是配置而非真实集成。
+- **是配置意图、不是可执行对接**：示例载荷描述的是配置。一次调用是否真的发生，取决于宿主机
+  能到达什么：模型端点、Agent Card、`file://` 技能目录、带 `x-agenthub-dispatch` 的 schema，
+  或 MCP/CLI 所需的沙箱。都没有时，connector 用确定性 mock 应答。
 
 `example/README.md` 另附载荷契约（21 个可用键、`kind` / `transport` / `health` / `status`
 四类枚举、以及 per-kind 的 `kind_config` 与其校验），以及每类上游项目在两个平台上的安装与

@@ -206,9 +206,11 @@ JSON 里不写任何真实用户名、路径或密钥，统一占位：
 
 ## 6. 注意事项
 
-- **adapter 现状**：只有 model 的 `openai_compatible` 是真实实现（`internal/adapter/model_openai.go`）；
-  agent / mcp / skill / cli 的 connector 仍是 `TODO(real)`，只做形状翻译。
-  因此 MCP / CLI 示例表达的是**配置意图**，不是「今天就能执行」。
+- **adapter 现状**：每个 connector 在条目声明了去处时都有真实路径——model（`openai_compatible`，
+  含 SSE 流式）、agent（Agent Card + send/stream）、mcp（Streamable HTTP）、skill（可读的
+  `SKILL.md`）、custom（带 `x-agenthub-dispatch` 的 schema）、speech（OpenAI 兼容音频端点）、
+  cli（租约沙箱）。示例表达的是**配置意图**；调用能否落地取决于宿主机实际可达的目标，
+  否则由确定性 mock 应答。
 - **示例不自我声明健康**：41 份示例都不写 `health`（省略即 `unknown`），也不写 `metadata.mock_health`；
   CLI 六例没有 endpoint。健康值只由**实测**写入，别无来源：`POST /api/resources/{id}/probe` 去问资源自己的
   connector，一次运行则记录这次调用证实的结论。只有当确实没有东西可访问时，探测才回答 `unknown`——不发 Agent Card 的 agent、stdio 的 MCP server、
@@ -339,5 +341,5 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
   建议先起桥接再加载，记录才能探活。
 - `deploy-cli.sh` 从根目录 `.env` / `.env.example` 读 `AGENTHUB_CLI_ALLOWLIST`，并复刻服务端的整串比对。
   服务端只在启动时读一次，改完要重启服务端；`--allowlist` 覆盖预检，`--skip-allowlist` 则照样记录。
-- 这三个脚本都不改变第 6 节所述的 connector 现状：服务端 mcp / skill / cli connector 仍是
-  `TODO(real)`。它们校验的是本地命令、目录与工具列表，不是经 agenthub 的一次执行。
+- 这三个脚本校验的是本地命令、目录与工具列表，不是经 agenthub 的一次执行。这个区分仍然成立：
+  脚本证明资产已安装，而真实调用还需要部署侧的沙箱或可读目录（见第 6 节）。

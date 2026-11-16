@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"agenthub/internal/a2a"
 	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
 )
@@ -36,8 +38,9 @@ const (
 // a fallback chain": the chain is several providers with different models in
 // front of the same endpoint.
 //
-// TODO(real): streaming. The request already sets stream=false, so adding SSE
-// means a second Generate path, not a change to this one.
+// Generate asks for a single completion; GenerateStream sets stream=true and
+// translates the SSE frames into incremental artifacts. Both paths share the
+// same request shape, limits and error codes.
 type openAIProvider struct {
 	name      string
 	endpoint  string
@@ -59,8 +62,25 @@ func newOpenAIProvider(name, endpoint, model, apiKeyEnv string, timeout time.Dur
 		endpoint:  completionsURL(endpoint),
 		model:     model,
 		apiKeyEnv: strings.TrimSpace(apiKeyEnv),
-		client:    &http.Client{Timeout: timeout},
+		client:    newProviderClient(timeout),
 		maxTokens: maxTokens,
+	}
+}
+
+// newProviderClient builds the outbound client for an endpoint an operator
+// declared on a resource. The address blocklist of netutil.SafeClient does not
+// apply here: the destination is written by an operator, not by a caller (that
+// is the surface SafeClientWithAllowlist guards). Redirects still are not
+// followed — the first hop is trusted, the second is not.
+func newProviderClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = DefaultModelTimeout
+	}
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 }
 
@@ -160,6 +180,136 @@ func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, e
 		}
 	}
 	return "", &httputil.Error{Code: CodeProviderMalformed}
+}
+
+// completionFrame is one chunk of a streamed completion. Gateways disagree on
+// where the visible text lives — delta.content is the specification, reasoning
+// models use reasoning_content, and a few proxies keep message.text — so every
+// documented location is read in order.
+type completionFrame struct {
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
+		} `json:"delta"`
+		Message struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
+		} `json:"message"`
+		Text string `json:"text"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func (f completionFrame) text() string {
+	for _, c := range f.Choices {
+		for _, candidate := range []string{
+			c.Delta.Content, c.Delta.ReasoningContent, c.Delta.Reasoning,
+			c.Message.Content, c.Message.ReasoningContent, c.Message.Reasoning, c.Text,
+		} {
+			if strings.TrimSpace(candidate) != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+// GenerateStream asks for stream=true and hands every non-empty delta to sink.
+// The aggregate it returns is byte-identical to what a non-streamed call would
+// have produced for the same upstream, which is what lets the hub persist one
+// final artifact while the subscriber watches the chunks arrive.
+func (p *openAIProvider) GenerateStream(ctx context.Context, prompt string, sink StreamSink) (string, error) {
+	if p == nil || p.endpoint == "" {
+		return "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	payload := map[string]any{
+		"model":      p.model,
+		"stream":     true,
+		"messages":   []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens": p.effectiveMaxTokens(),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", &httputil.Error{Code: CodeProviderMalformed}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if p.apiKeyEnv != "" {
+		if key := os.Getenv(p.apiKeyEnv); key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "", &httputil.Error{Code: CodeProviderUnauthorized}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+
+	decoder := newSSEDecoder(resp.Body)
+	var out strings.Builder
+	index := 0
+	for {
+		_, data, ok, err := decoder.Next()
+		if err != nil {
+			if errors.Is(err, errStreamTooLarge) {
+				return "", &httputil.Error{Code: CodeProviderMalformed}
+			}
+			return "", &httputil.Error{Code: CodeResourceUnreachable}
+		}
+		if !ok {
+			break
+		}
+		if strings.TrimSpace(data) == "" {
+			continue
+		}
+		var frame completionFrame
+		if err := json.Unmarshal([]byte(data), &frame); err != nil {
+			return "", &httputil.Error{Code: CodeProviderMalformed}
+		}
+		if frame.Error != nil {
+			// The upstream answered inside the stream and named its own
+			// failure; its message is untrusted input and never reaches the
+			// caller, only the machine code does.
+			return "", &httputil.Error{Code: CodeResourceUnreachable}
+		}
+		piece := frame.text()
+		if piece == "" {
+			continue
+		}
+		out.WriteString(piece)
+		if sink != nil {
+			chunk := streamChunk("model.stream", index, a2a.NewTextPart(piece),
+				"kind", string(registry.KindModel), "provider", p.name)
+			if err := sink(chunk); err != nil {
+				return out.String(), err
+			}
+			index++
+		}
+	}
+	if out.Len() == 0 {
+		// A 200 with no completion is a malformed answer, exactly as it is on
+		// the non-streamed path.
+		return "", &httputil.Error{Code: CodeProviderMalformed}
+	}
+	return out.String(), nil
 }
 
 // defaultMode normalises the instance wide provider mode (AGENTHUB_MODEL_ROUTER_MODE)

@@ -2,12 +2,14 @@
 // invocation surface.
 //
 // A connector is real as far as its resource says where to reach it: model talks
-// to an OpenAI compatible endpoint (model_openai.go), agent fetches an Agent Card
-// and sends message/send (agent.go), and cli / mcp run inside a leased sandbox
-// environment rather than in the host process (cli.go, mcp.go). skill, custom and
-// speech are still deterministic mocks and each keeps its TODO(real) boundary.
-// Every connector falls back to its mock when no sandbox or endpoint is wired, so
-// an instance with nothing configured stays offline and assertable.
+// to an OpenAI compatible endpoint (model_openai.go) and can stream frames, agent
+// fetches an Agent Card and sends message/send or message/stream (agent.go),
+// skill reads its local SKILL.md (skill.go), custom dispatches the call its schema
+// declares (custom.go), speech talks to an OpenAI compatible audio endpoint
+// (speech_openai.go), and cli / mcp run inside a leased sandbox environment rather
+// than in the host process (cli.go, mcp.go). Every connector falls back to its
+// deterministic mock when no sandbox, endpoint or manual is wired, so an instance
+// with nothing configured stays offline and assertable.
 package adapter
 
 import (
@@ -53,6 +55,11 @@ type Options struct {
 // looks exactly like an agent nobody deployed.
 const DefaultAgentTimeout = 120 * time.Second
 
+// StreamSink receives one incremental artifact while a connector is still
+// working. A nil sink means "do not stream": the connector answers with a single
+// aggregated result, exactly as it did before streaming existed.
+type StreamSink func(a2a.Artifact) error
+
 // InvokeRequest is one call to a registered resource.
 type InvokeRequest struct {
 	ResourceID string
@@ -68,6 +75,27 @@ type InvokeRequest struct {
 	// Scope is the lease reuse key: the router's ticket id when the call came
 	// through a ticket, otherwise the conversation id.
 	Scope string
+	// Stream, when non-nil, asks the connector to deliver partial output as it
+	// is produced. The final result still carries the aggregate, so a caller
+	// that ignores the sink sees the pre-streaming behaviour unchanged.
+	Stream StreamSink
+}
+
+// streamChunk builds one appendable artifact for a streamed answer. Every chunk
+// shares an artifact id, so a consumer can concatenate them in index order, and
+// LastChunk stays false: the aggregate artifact in InvokeResult is the one that
+// closes the run and lands in the task record.
+func streamChunk(name string, index int, part a2a.Part, kv ...string) a2a.Artifact {
+	appendChunk, last := true, false
+	return a2a.Artifact{
+		ArtifactID: name + "-stream",
+		Name:       name,
+		Parts:      []a2a.Part{part},
+		Index:      index,
+		Append:     &appendChunk,
+		LastChunk:  &last,
+		Metadata:   meta(kv...),
+	}
 }
 
 // InvokeResult is the structured outcome of one call.
@@ -121,11 +149,11 @@ func For(e *registry.Entry, opts Options) (Connector, error) {
 	case registry.KindMCP:
 		return &mcpConnector{sandbox: opts.Sandbox}, nil
 	case registry.KindSkill:
-		return &skillConnector{}, nil
+		return newSkillConnector(), nil
 	case registry.KindCLI:
 		return &cliConnector{opts: opts}, nil
 	case registry.KindCustom:
-		return &customConnector{}, nil
+		return newCustomConnector(), nil
 	default:
 		return nil, &httputil.Error{Code: CodeUnknownKind}
 	}

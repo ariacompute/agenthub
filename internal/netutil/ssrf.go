@@ -20,6 +20,11 @@ const (
 	DefaultSafeMaxBytes = 8 << 20
 )
 
+// lookupIPAddr is the resolver seam. Tests replace it to describe a DNS answer
+// deterministically: "a hostname that resolves to a private address" is the
+// case a real network cannot be made to produce on demand.
+var lookupIPAddr = net.DefaultResolver.LookupIPAddr
+
 // SafeClient builds an *http.Client that blocks dangerous destinations, caps the
 // response body and refuses to follow redirects (a redirect is an easy SSRF
 // bypass). When allowPrivate is true the IP blocklist is relaxed, which is only
@@ -45,7 +50,7 @@ func SafeClient(timeout time.Duration, maxBytes int64, allowPrivate bool) *http.
 				if err != nil {
 					return nil, err
 				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				ips, err := lookupIPAddr(ctx, host)
 				if err != nil {
 					return nil, err
 				}
@@ -112,7 +117,7 @@ func SafeClientWithAllowlist(timeout time.Duration, maxBytes int64, allow []stri
 				if err != nil {
 					return nil, err
 				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				ips, err := lookupIPAddr(ctx, host)
 				if err != nil {
 					return nil, err
 				}

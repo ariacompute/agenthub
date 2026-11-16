@@ -121,6 +121,14 @@ expires, or when its opt-in switch is off. Each SKIP line carries the reason.
 This follows `requirements.md` §8: a missing capability is reported, never
 faked.
 
+A sandbox-backed kind that answers `resource_unreachable` with
+`data.code=sandbox_unsupported` / `sandbox_disabled` / `sandbox_node_offline` is
+the host saying "no container runtime", not the product failing. The per-kind
+send case skips that kind and names it in the reason; any other error still
+fails the case. When every seeded kind needed a sandbox the whole case is SKIP,
+so a developer machine without Docker stays green while a regression in the
+same kind still turns red.
+
 ## Cleanup
 
 Every created object carries a timestamped `e2e-*` id and is pushed onto a LIFO

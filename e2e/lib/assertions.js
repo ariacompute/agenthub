@@ -191,6 +191,30 @@ export function expectRpcError(res, codes, label = 'JSON-RPC') {
   return res.json.error
 }
 
+/**
+ * Codes a sandbox-backed adapter returns when the host has no container
+ * runtime. They describe the machine, not the product: the API suite skips
+ * them with a reason, the same way it skips a disabled backup or a missing S3
+ * credential.
+ */
+const SANDBOX_ENVIRONMENT_CODES = new Set([
+  'sandbox_unsupported',
+  'sandbox_disabled',
+  'sandbox_node_offline',
+])
+
+/**
+ * True when a JSON-RPC failure says "this kind needs a container runtime this
+ * host does not have". The outer machine code must be resource_unreachable and
+ * the detail must be a documented sandbox code; any other failure of the same
+ * kind stays a FAIL.
+ */
+export function isSandboxEnvironmentError(res) {
+  const error = res?.json?.error
+  if (!error || error.message !== 'resource_unreachable') return false
+  return SANDBOX_ENVIRONMENT_CODES.has(error.data?.code)
+}
+
 export function expectTaskState(result, state, label = 'task') {
   if (result?.status?.state !== state) {
     throw new AssertionError(`${label}: expected state ${state}, got ${result?.status?.state ?? 'none'}`)

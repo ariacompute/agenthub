@@ -3,6 +3,9 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -888,6 +891,101 @@ func TestHubStreamEmitsStatusArtifactAndTerminalFrames(t *testing.T) {
 	if events["final:completed"] == 0 {
 		t.Fatalf("no terminal status frame emitted: %v", events)
 	}
+}
+
+// A connector that can stream hands the hub chunks while it works; the run must
+// still finish with the aggregate artifact persisted once.
+func TestHubStreamsConnectorChunks(t *testing.T) {
+	newStreamingHub := func(t *testing.T) (*Hub, string, func() []string) {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"two\"}}]}\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+		t.Cleanup(srv.Close)
+		model := &registry.Entry{
+			Kind:     registry.KindModel,
+			Name:     "stream-model",
+			Endpoint: srv.URL,
+			KindConfig: &registry.KindConfig{Model: &registry.ModelConfig{
+				ProviderMode: registry.ProviderModeOpenAICompatible,
+				Endpoint:     srv.URL,
+				ModelID:      "m",
+			}},
+		}
+		h, _, _ := newTestHub(t, model)
+		var mu sync.Mutex
+		var chunks []string
+		emit := func(event string, payload any) error {
+			frame, ok := payload.(a2a.TaskArtifactUpdateEvent)
+			if event != a2a.EventTaskArtifact || !ok {
+				return nil
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if strings.HasPrefix(frame.Artifact.Name, "model.stream") {
+				chunks = append(chunks, frame.Artifact.Parts[0].Text)
+			}
+			return nil
+		}
+		task, err := h.Stream(context.Background(), sendParams("hello", map[string]any{"resourceId": model.ID}), emit)
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if task.Status.State != a2a.TaskStateCompleted {
+			t.Fatalf("state = %s, want completed", task.Status.State)
+		}
+		return h, task.ID, func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), chunks...)
+		}
+	}
+
+	t.Run("chunks arrive in order", func(t *testing.T) {
+		h, taskID, chunks := newStreamingHub(t)
+		got := chunks()
+		if len(got) != 2 || got[0] != "one" || got[1] != "two" {
+			t.Fatalf("chunks = %v", got)
+		}
+		// The aggregate artifact is what lands in the record, so the streamed
+		// chunks must not double it.
+		stored := h.Store().Get(context.Background(), taskID)
+		if stored == nil || len(stored.Artifacts) != 1 || stored.Artifacts[0].Name != "model.completion" {
+			t.Fatalf("artifacts = %+v, want the single aggregate", stored)
+		}
+	})
+
+	t.Run("a failing chunk subscriber does not fail the run", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+		defer srv.Close()
+		model := &registry.Entry{
+			Kind: registry.KindModel, Name: "stream-model", Endpoint: srv.URL,
+			KindConfig: &registry.KindConfig{Model: &registry.ModelConfig{
+				ProviderMode: registry.ProviderModeOpenAICompatible, Endpoint: srv.URL, ModelID: "m",
+			}},
+		}
+		h, _, _ := newTestHub(t, model)
+		emit := func(event string, payload any) error {
+			if frame, ok := payload.(a2a.TaskArtifactUpdateEvent); ok && strings.HasPrefix(frame.Artifact.Name, "model.stream") {
+				return errors.New("subscriber gone")
+			}
+			return nil
+		}
+		task, err := h.Stream(context.Background(), sendParams("hello", map[string]any{"resourceId": model.ID}), emit)
+		if err != nil {
+			t.Fatalf("a dropped subscriber must not fail the run: %v", err)
+		}
+		if task.Status.State != a2a.TaskStateCompleted {
+			t.Fatalf("state = %s, want completed", task.Status.State)
+		}
+	})
 }
 
 func TestHubBrokerReceivesRunEvents(t *testing.T) {

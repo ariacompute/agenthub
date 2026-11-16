@@ -184,7 +184,7 @@ per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批
 ### 4. Model router（`internal/adapter`）
 
 64. [x] `model_openai.go`：OpenAI 兼容 provider（chat completions，`api_key_env` 只取环境变量名，
-     限长 + 状态码分类错误码），`TODO(real)` 标注 streaming 边界
+     限长 + 状态码分类错误码），`TODO(real)` 标注 streaming 边界（M23 已实现）
 65. [x] `model.go`：按 `KindConfig.ModelConfig` 装配 `ModelRouter`（主 provider + 有序回退链 + 权重 +
      超时 + 可选 mock 兜底）；`GenerateWith` 返回命中 provider 名并写进 artifact
 66. [x] `model_router_test.go`：URL 拼装、mock 离线、回退链顺序、全失败不伪造、401/畸形响应、凭据取 env
@@ -315,7 +315,7 @@ per-kind 注册配置、Model router、上游 MCP/Skill Registry 同步、审批
 124. [x] `internal/handlers/connectors.go`：`GET /api/connectors`（`resources:read`）、`PUT /api/connectors/{id}/policy`、`POST /api/connectors/{id}/actions`、`GET /api/connectors/{id}/actions`（`resources:write`/`read`）；off→403 `CodeConnectorPolicyOff`、ask-first→`ParkConnector` 202、allowed→`Hub.Send` 200
 
 ### 5. Speech / 语音
-125. [x] `internal/adapter/speech.go`：确定性 mock STT/TTS（无网络/子进程），`Transcribe`(crc32 派生文本)/`Synthesize`(8kHz 单声道 16-bit WAV)；真实对接标 `TODO(real)`
+125. [x] `internal/adapter/speech.go`：确定性 mock STT/TTS（无网络/子进程），`Transcribe`(crc32 派生文本)/`Synthesize`(8kHz 单声道 16-bit WAV)；真实对接标 `TODO(real)`（M23 已实现 `speech_openai.go`）
 126. [x] `internal/config/config.go`：新增 `ChannelsEnabled`/`SpeechMode`/`AudioMaxBytes`（`Load` 默认 `16<<20`，`Validate` 对 0 兜底为默认）；`AGENTHUB_CHANNELS_ENABLED`/`AGENTHUB_SPEECH_MODE`/`AGENTHUB_AUDIO_MAX_BYTES`
 127. [x] `internal/handlers/speech.go`：`POST /api/threads/{id}/audio`（`tasks:write`）；自建 `http.MaxBytesReader` + `multipart.Reader`(`8<<20`)；STT→`Threads.AddMessage`(`origin='voice'`)→委派→TTS 音频作首个 `PartTypeFile` artifact（`a2a.FileContent.Bytes` 内联 base64）
 128. [x] `internal/store/threads_store.go`：`thread_messages.origin` 列读写（添加消息时透传 `m.Origin`）
@@ -507,9 +507,11 @@ Go/Python/Node/Bun/Rust(webpki-roots) 等自带信任库需升级。站点证书
 
 ## M3 — 后续项（未开始）
 
-94. [x] 真实适配器落地：model（OpenAI 兼容端点 + 回退链，M2-64/65）、agent（Agent Card + `message/send`）、
-     mcp（Streamable HTTP JSON-RPC）、skill（本地手册加载）、cli（租约沙箱内 `exec`，沿用白名单/超时/截断）。
-     仍留 `TODO(real)`：MCP **stdio 子进程**、agent 与模型的**流式**输出、speech / custom 的 mock
+94. [x] 真实适配器落地：model（OpenAI 兼容端点 + 回退链，M2-64/65）、agent（Agent Card + `message/send`
+     或 `message/stream`）、mcp（Streamable HTTP JSON-RPC）、skill（本地/远端手册解析）、
+     custom（受限 schema 分派）、speech（OpenAI 兼容音频端点）、cli（租约沙箱内 `exec`，沿用白名单/超时/截断）。
+     第七轮（M23）已补齐 agent / model 的**流式**输出、skill 手册、custom 分派与 speech 真实端点；
+     剩余 `TODO(real)` 只属 MCP **stdio 子进程**、沙箱 `egress_allowlist` 的 egress sidecar 与向量检索
 95. [x] pushNotification 真实回调（`hub.HTTPNotifier`：https-only + SSRF 白名单 + HMAC-SHA256 签名 +
      `(taskId, state)` 一小时去重 + 留痕落 `push_records`；未配置 `AGENTHUB_PUSH_SECRET` 时仍是只留痕的 mock）
 96. [ ] 多实例联邦：Agent Network（跨 agenthub 的 Agent Card 聚合与路由）
@@ -1304,3 +1306,63 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
 - `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`cd web && bun run test`（459 条）全绿。
 - 文档同步：`requirements.md`（§4.1 端点表 + 新增 §15）、`task.md`、`AGENTS.md` / 中英 README
   的路由总数 144。
+
+## M23 — 第七轮完整度补齐：六个 Invoke 边界 / e2e SKIP 门控 / netutil 100%（2026-11-16）
+
+对照《agenthub + agentbuddy 完整度评估（第七轮）》§8.1 / §8.2 / §9.1 / §9.3，收口三件事。
+原则仍是**两套行为、一个签名**：条目声明了去处就走真实路径，没声明就逐字保留原有确定性 mock。
+
+### 1. 变更
+
+- **流式共用底座**：新增 `internal/adapter/sse.go`。有界行（64 KiB）+ 有界整体（1 MiB）扫描，
+  跳过注释/心跳，`[DONE]` 终止，EOF 未闭合帧仍然交付；`errStreamTooLarge` 与协议错误分开，
+  调用方分别映射为 `model_provider_malformed` / `resource_unreachable`。
+- **`Connector` 接口零变更**：`InvokeRequest` 增加可选 `Stream StreamSink`，零值即非流式。
+  `hub.invoker` 仅在 `emit != nil`（`message/stream`）时接线，chunk 走 `publishArtifact` 实时下发
+  **但不落库**；`InvokeResult.Artifacts` 的聚合产物仍按原路径落库一次。emit 失败被吞掉，
+  掉线的订阅者不会让整个任务失败。
+- **model**：`ModelRouter.GenerateStreamWith` 优先 `StreamingModelProvider`，不支持则回落
+  `Generate`；**已发出帧的 provider 不再被回退链替换**（避免两个答案拼接）。
+  `openAIProvider.GenerateStream` 把 `stream:false` 翻成 `true`，逐帧读 `delta.content` /
+  `reasoning_content` / `message.*` / `text`，限长 + ctx 取消，错误码复用既有三种。
+- **agent**：卡片 `capabilities.streaming` 为真时走 `message/stream`；把 `artifact-update` 翻译为
+  chunk、`status-update` 的消息文本作为聚合兜底（避免与 artifact 重复），
+  `final` 或终态（`completed/failed/canceled/cancelled/input-required`）结束。
+  未声明能力的卡片仍走 `message/send`；非 SSE 响应按单次 JSON-RPC 结果读取。
+- **skill**：`file://` 经改进后的 `localSkillDir`（支持 Windows `file://C:\…` 与 `file:///C:/…`）
+  读取 `SKILL.md`，http(s) 端点直接 GET；限长 256 KiB。步骤优先取 `KindConfig.Skill.Steps`，
+  否则解析有序列表；每步产出 `skill.step`，最后产出 `skill.manual`。
+  端点不可达时回落离线五步计划（与 MCP 的离线语义一致），手册过大则 `model_provider_malformed`。
+- **custom**：从 schema 的 `x-agenthub-dispatch` 读取受限描述符，method 仅 GET/POST，
+  path 必须是相对路径（拒绝绝对路径、`..`、`\`、`//`、控制字符）；经 `ValidateURL` 与
+  `SafeClientWithAllowlist` 发送，回包限长 1 MiB、摘要覆盖全文、正文最多 4 KiB 入制品。
+  没有描述符/端点时保持 echo mock，绝不执行任意调用。
+- **speech**：`Speech` 保持结构体，新增可选 `provider` 与 `NewSpeech(SpeechOptions)`；
+  零值与 `DefaultSpeech` 仍是 crc32/WAV mock。`speech_openai.go` 走 multipart
+  `/audio/transcriptions` 与请求 WAV 的 `/audio/speech`，凭据只按环境变量名读取；
+  `maxBytes`/超时/egress 白名单来自配置。
+- **配置与装配**：`config` 新增 `AGENTHUB_SPEECH_ENDPOINT` / `_API_KEY_ENV` / `_STT_MODEL` /
+  `_TTS_MODEL` / `_TIMEOUT` / `_EGRESS_ALLOWLIST`；`Validate` 校验 endpoint 为绝对 http(s)
+  URL、env 名形状，空端点允许（回落 mock）。`main.go` 的 `newSpeech(cfg)` 负责映射，
+  真实模式缺端点时启动告警一次。`handlers/speech.go` 删除「非 mock 一律 503」的硬门禁。
+- **e2e**：新增 `isSandboxEnvironmentError(res)`（仅 `resource_unreachable` +
+  `sandbox_unsupported|sandbox_disabled|sandbox_node_offline`）；`04-a2a` 的 per-kind send
+  跳过该 kind 并写明 `no container runtime`，全部 kind 都因环境不可用时整例 SKIP，
+  混合情况记 note 后通过；其它错误仍交给 `expectRpcOk` 报 FAIL。
+- **netutil**：新增包级可替换 `lookupIPAddr` 解析缝（行为不变，无 ignore 注释），
+  覆盖私网/多 IP 跳过、allowlist 的 IP/CIDR/主机名、IPv6 字面量与括号形式、
+  DNS 解析到私网、非 TCP 网络、`SplitHostPort`/解析失败、redirect 拒绝等分支。
+
+### 2. 验证
+
+- 新增/扩展单测：`sse_test.go`、`model_stream_test.go`、`agent_stream_test.go`、`custom_test.go`、
+  `adapter_edge_test.go`，以及 `skill_test.go` / `speech_test.go` / `config_test.go` /
+  `hub_test.go` / `main_test.go` 的正常 + 异常双路径。
+- `go build ./...` / `go vet ./...` / `go test -count=1 ./...` 全绿（26 包）。
+  本机 Windows 无 cgo，`-race` 由 CI 的 Linux 主机执行。
+- 覆盖率：`internal/adapter` **96.3%**（新增约 150 条语句后仍高于 95.0% 基线）、
+  `internal/netutil` **100.0%**（原 90.4%）。
+- `cd e2e && node api/index.js --coverage-only`：**144/144**。
+- 文档同步：`requirements.md`（§1.1 / §1.2）、`AGENTS.md`（概述与适配器目录）、
+  中英 `releasenotes`（适配层、Model Router 边界、示例说明）、中英 `README`、
+  `example/README(.md/_cn.md)`、`e2e/README.md`（SKIP 语义）、`task.md`（本条）。

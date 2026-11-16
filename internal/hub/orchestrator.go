@@ -563,6 +563,16 @@ func (h *Hub) invoker(emit Emit, origin Origin) Invoker {
 			OwnerID:    origin.OwnerID,
 			Scope:      origin.Scope,
 		}
+		if emit != nil {
+			// message/stream asked for frames, so hand the connector a sink.
+			// Chunks are published but not persisted: the aggregate artifact
+			// Invoke returns is the one that lands in the task record, which
+			// keeps a reconnecting subscriber from replaying every token.
+			req.Stream = func(art a2a.Artifact) error {
+				h.publishArtifact(taskID, art, emit)
+				return nil
+			}
+		}
 		res, err := conn.Invoke(ctx, req)
 		if err != nil {
 			// A call that did not come back is the strongest evidence there is:

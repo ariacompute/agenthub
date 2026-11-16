@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,11 +61,7 @@ func (c *agentConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 // park the task in input-required when the request needs approval.
 //
 // It only runs when the entry names no Agent Card URL; with one, invokeA2A above
-// performs the real fetch plus message/send.
-//
-// TODO(real): stream instead of waiting for a single response — forward to
-// aria-agent-cloud /v1/agents/sessions/{id}/events/stream and translate the
-// agent.* SSE frames into A2A artifacts.
+// performs the real fetch plus message/send or message/stream.
 func mockAgentInvoke(req InvokeRequest) InvokeResult {
 	if requiresApproval(req.Prompt) {
 		return InvokeResult{
@@ -101,6 +98,12 @@ type agentCard struct {
 	URL             string `json:"url"`
 	Version         string `json:"version"`
 	ProtocolVersion string `json:"protocolVersion"`
+	// Capabilities is how A2A tells a client whether message/stream exists.
+	// Without it the honest choice is message/send: posting /stream to a
+	// server that does not implement it would turn a working agent into a 404.
+	Capabilities struct {
+		Streaming bool `json:"streaming"`
+	} `json:"capabilities"`
 }
 
 func (c *agentConnector) fetchCard(ctx context.Context) (*agentCard, error) {
@@ -153,11 +156,25 @@ func (c *agentConnector) invokeA2A(ctx context.Context, req InvokeRequest) (Invo
 	if err := c.allowedTarget(endpoint); err != nil {
 		return InvokeResult{}, err
 	}
-	text, state, err := c.sendMessage(ctx, endpoint, req.Prompt)
+	text, state, err := c.converse(ctx, card, endpoint, req)
 	if err != nil {
 		return InvokeResult{}, err
 	}
+	return agentResult(c, req, card, text, state), nil
+}
 
+// converse picks the transport the card advertises. Streaming is opt-in on both
+// sides: the caller has to pass a sink and the card has to declare the
+// capability, because a /stream posted to a send-only agent is a 404 dressed up
+// as a broken agent.
+func (c *agentConnector) converse(ctx context.Context, card *agentCard, endpoint string, req InvokeRequest) (string, string, error) {
+	if req.Stream != nil && card != nil && card.Capabilities.Streaming {
+		return c.streamMessage(ctx, endpoint, req.Prompt, req.Stream)
+	}
+	return c.sendMessage(ctx, endpoint, req.Prompt)
+}
+
+func agentResult(c *agentConnector, req InvokeRequest, card *agentCard, text, state string) InvokeResult {
 	// An agent that parked in input-required answered; the task must wait for a
 	// human, not be reported as finished work.
 	if state == "input-required" {
@@ -165,11 +182,10 @@ func (c *agentConnector) invokeA2A(ctx context.Context, req InvokeRequest) (Invo
 			Text:          text,
 			RequiresInput: true,
 			Prompt:        "approval_required:" + req.ResourceID,
-		}, nil
+		}
 	}
-
 	provider := "a2a"
-	if card.Name != "" {
+	if card != nil && card.Name != "" {
 		provider = "a2a:" + card.Name
 	}
 	out := text
@@ -187,7 +203,7 @@ func (c *agentConnector) invokeA2A(ctx context.Context, req InvokeRequest) (Invo
 		Text:      out,
 		Parts:     []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
 		Artifacts: []a2a.Artifact{artifact("agent.a2a", 0, []a2a.Part{a2a.NewDataPart(data)}, "kind", string(registry.KindAgent), "provider", provider, "state", state)},
-	}, nil
+	}
 }
 
 func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt string) (string, string, error) {
@@ -241,6 +257,179 @@ func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt strin
 		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
 	}
 	return textFromSendResult(rpc.Result)
+}
+
+// streamMessage posts message/stream and translates the frames into
+// incremental artifacts. A server that answers with a plain JSON-RPC body
+// (streaming declared but not implemented) is read as one result instead of
+// being reported as an empty stream.
+func (c *agentConnector) streamMessage(ctx context.Context, endpoint, prompt string, sink StreamSink) (string, string, error) {
+	message := outboundMessage{
+		Kind:      "message",
+		Role:      a2a.RoleUser,
+		MessageID: newMessageID(),
+		Parts:     []outboundPart{textPart(prompt)},
+	}
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": a2a.JSONRPCVersion,
+		"id":      "agenthub-stream-1",
+		"method":  a2a.MethodMessageStream,
+		"params":  map[string]any{"message": message},
+	})
+	if err != nil {
+		return "", "", &httputil.Error{Code: CodeProviderMalformed}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	c.authorize(req)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+	}
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, DefaultModelMaxBytes))
+		if err != nil {
+			return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+		}
+		var rpc struct {
+			Result json.RawMessage `json:"result"`
+			Error  *a2a.Error      `json:"error"`
+		}
+		if err := json.Unmarshal(raw, &rpc); err != nil {
+			return "", "", &httputil.Error{Code: CodeProviderMalformed}
+		}
+		if rpc.Error != nil {
+			return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+		}
+		return textFromSendResult(rpc.Result)
+	}
+
+	decoder := newSSEDecoder(resp.Body)
+	var streamed, summary strings.Builder
+	state := "completed"
+	index := 0
+	for {
+		_, data, ok, err := decoder.Next()
+		if err != nil {
+			if errors.Is(err, errStreamTooLarge) {
+				return "", "", &httputil.Error{Code: CodeProviderMalformed}
+			}
+			return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+		}
+		if !ok {
+			break
+		}
+		if strings.TrimSpace(data) == "" {
+			continue
+		}
+		var rpc struct {
+			Result json.RawMessage `json:"result"`
+			Error  *a2a.Error      `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(data), &rpc); err != nil {
+			return "", "", &httputil.Error{Code: CodeProviderMalformed}
+		}
+		if rpc.Error != nil {
+			return "", "", &httputil.Error{Code: CodeResourceUnreachable}
+		}
+		text, frameState, kind, final, err := agentFrame(rpc.Result)
+		if err != nil {
+			return "", "", err
+		}
+		if frameState != "" {
+			state = frameState
+		}
+		if text != "" {
+			if kind == a2a.KindStatusUpdate {
+				// Status messages usually repeat the answer the artifacts
+				// already carried; keep them as a fallback, not as chunks.
+				summary.WriteString(text)
+			} else {
+				streamed.WriteString(text)
+				if sink != nil {
+					chunk := streamChunk("agent.stream", index, a2a.NewTextPart(text),
+						"kind", string(registry.KindAgent), "provider", "a2a")
+					if err := sink(chunk); err != nil {
+						return streamed.String(), state, err
+					}
+					index++
+				}
+			}
+		}
+		if final {
+			break
+		}
+	}
+	out := streamed.String()
+	if out == "" {
+		out = summary.String()
+	}
+	return out, state, nil
+}
+
+// agentFrame classifies one streamed result. A2A servers emit status-update,
+// artifact-update and (for non-streaming answers) a bare task; all three are
+// understood here so a gateway that mixes them does not lose text.
+func agentFrame(raw json.RawMessage) (text, state, kind string, final bool, err error) {
+	var frame struct {
+		Kind   string `json:"kind"`
+		Final  bool   `json:"final"`
+		Status *struct {
+			State   string `json:"state"`
+			Message *struct {
+				Parts []sendPart `json:"parts"`
+			} `json:"message"`
+		} `json:"status"`
+		Artifact *struct {
+			Parts []sendPart `json:"parts"`
+		} `json:"artifact"`
+	}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		return "", "", "", false, &httputil.Error{Code: CodeProviderMalformed}
+	}
+	switch frame.Kind {
+	case a2a.KindArtifactUpdate:
+		if frame.Artifact != nil {
+			text = textOfParts(frame.Artifact.Parts)
+		}
+		return text, "", frame.Kind, false, nil
+	case a2a.KindStatusUpdate:
+		if frame.Status != nil {
+			state = frame.Status.State
+			if frame.Status.Message != nil {
+				text = textOfParts(frame.Status.Message.Parts)
+			}
+		}
+		return text, state, frame.Kind, frame.Final || isTerminalAgentState(state), nil
+	default:
+		text, state, err = textFromSendResult(raw)
+		if err != nil {
+			return "", "", "", false, err
+		}
+		return text, state, frame.Kind, isTerminalAgentState(state), nil
+	}
+}
+
+func textOfParts(parts []sendPart) string {
+	var b strings.Builder
+	appendParts(&b, parts)
+	return b.String()
+}
+
+func isTerminalAgentState(state string) bool {
+	switch state {
+	case "completed", "failed", "canceled", "cancelled", "input-required":
+		return true
+	}
+	return false
 }
 
 // sendPart is a tolerant read of one A2A part. The specification names the

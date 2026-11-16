@@ -11,7 +11,6 @@ import (
 	"agenthub/internal/a2a"
 	"agenthub/internal/auth"
 	"agenthub/internal/httputil"
-	"agenthub/internal/registry"
 	"agenthub/internal/threads"
 )
 
@@ -26,12 +25,10 @@ func (d Deps) handleThreadAudio(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusServiceUnavailable, httputil.CodeSpeechDisabled)
 		return
 	}
-	// Only the offline mock ships in the first release; a real provider is a future
-	// switch that reuses the same path.
-	if d.Cfg.SpeechMode != registry.ProviderModeMock {
-		httputil.WriteError(w, http.StatusServiceUnavailable, httputil.CodeSpeechDisabled)
-		return
-	}
+	// The offline mock is the zero value of Speech; a real provider is injected
+	// through SpeechOptions. There is no mode gate here: a deployment that asked
+	// for a real endpoint must be allowed to use it, and one that did not keeps
+	// the mock without any extra branch.
 	id := r.PathValue("id")
 	th, err := d.Threads.GetThread(r.Context(), id, callerID(r))
 	if err != nil || th == nil {

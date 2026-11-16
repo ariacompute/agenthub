@@ -2,23 +2,46 @@ package netutil
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
+
+// stubResolver replaces the package resolver for one test. Tests using it must
+// not run in parallel: the seam is process wide.
+func stubResolver(t *testing.T, fn func(ctx context.Context, host string) ([]net.IPAddr, error)) {
+	t.Helper()
+	previous := lookupIPAddr
+	lookupIPAddr = fn
+	t.Cleanup(func() { lookupIPAddr = previous })
+}
+
+func dialerOf(t *testing.T, c *http.Client) func(context.Context, string, string) (net.Conn, error) {
+	t.Helper()
+	transport, ok := c.Transport.(*http.Transport)
+	if !ok || transport.DialContext == nil {
+		t.Fatal("client must dial through the guarding transport")
+	}
+	return transport.DialContext
+}
 
 func TestIsDangerous(t *testing.T) {
 	dangerous := []string{
 		"127.0.0.1", "10.0.0.1", "172.16.5.5", "192.168.1.1",
 		"169.254.1.1", "::1", "fe80::1", "0.0.0.0",
+		// IPv4-mapped IPv6 must be normalised before the check.
+		"::ffff:127.0.0.1", "::ffff:10.1.2.3",
 	}
 	for _, s := range dangerous {
 		if !isDangerous(net.ParseIP(s)) {
 			t.Errorf("%s should be dangerous", s)
 		}
 	}
-	safe := []string{"8.8.8.8", "1.1.1.1", "203.0.113.9", "2606:4700::1"}
+	safe := []string{"8.8.8.8", "1.1.1.1", "203.0.113.9", "2606:4700::1", "::ffff:8.8.8.8"}
 	for _, s := range safe {
 		if isDangerous(net.ParseIP(s)) {
 			t.Errorf("%s should be safe", s)
@@ -40,6 +63,10 @@ func TestValidateURL(t *testing.T) {
 		if err := ValidateURL(bad, true); err == nil {
 			t.Errorf("expected rejection of %q", bad)
 		}
+	}
+	// An unparsable URL must fail inside url.Parse, before the host check.
+	if err := ValidateURL("http://[::1", true); err == nil {
+		t.Fatal("an unparsable URL must be rejected")
 	}
 }
 
@@ -105,23 +132,42 @@ func TestSafeClientDefaultsAndDialGuards(t *testing.T) {
 	if c.Timeout != DefaultSafeTimeout {
 		t.Fatalf("timeout = %v, want %v", c.Timeout, DefaultSafeTimeout)
 	}
-	transport, ok := c.Transport.(*http.Transport)
-	if !ok || transport.DialContext == nil {
-		t.Fatal("the client must dial through the guarding transport")
-	}
+	dial := dialerOf(t, c)
 
 	// A non-TCP network (unix sockets, packet sockets) is refused before any
 	// address resolution happens.
-	if _, err := transport.DialContext(context.Background(), "unix", "/tmp/sock"); err == nil {
+	if _, err := dial(context.Background(), "unix", "/tmp/sock"); err == nil {
 		t.Fatal("unsupported networks must be refused")
 	}
 	// An address without a port is a programming error, not a dial.
-	if _, err := transport.DialContext(context.Background(), "tcp", "example.com"); err == nil {
+	if _, err := dial(context.Background(), "tcp", "example.com"); err == nil {
 		t.Fatal("an address without a port must be refused")
 	}
 	// An unresolvable host fails at resolution, never at connect.
-	if _, err := transport.DialContext(context.Background(), "tcp", "no-such-host.invalid:80"); err == nil {
+	if _, err := dial(context.Background(), "tcp", "no-such-host.invalid:80"); err == nil {
 		t.Fatal("an unresolvable host must fail")
+	}
+}
+
+func TestSafeClientSkipsDangerousAddressesUntilOneIsUsable(t *testing.T) {
+	// The first answer is loopback (blocked) and only the second one is public:
+	// the guard must skip the first instead of giving up on the hostname.
+	stubResolver(t, func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("127.0.0.1")},
+			{IP: net.ParseIP("203.0.113.7")},
+		}, nil
+	})
+	c := SafeClient(0, 0, false)
+	dial := dialerOf(t, c)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	_, err := dial(ctx, "tcp", "public.example.test:80")
+	if err == nil {
+		t.Fatal("a reserved address cannot be reached from a test, but the branch must be dialled")
+	}
+	if strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("the second address was allowed, so the dial must be attempted: %v", err)
 	}
 }
 
@@ -137,6 +183,67 @@ func TestSafeClientWithAllowlistAllowsListedLoopback(t *testing.T) {
 		t.Fatalf("a loopback destination in the allowlist must be reachable: %v", err)
 	}
 	defer resp.Body.Close()
+}
+
+func TestSafeClientWithAllowlistAllowsACIDR(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := SafeClientWithAllowlist(0, 0, []string{"127.0.0.0/8"})
+	resp, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("a private address inside an allowed CIDR must be reachable: %v", err)
+	}
+	defer resp.Body.Close()
+}
+
+func TestSafeClientWithAllowlistAllowsAHostname(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Pin the answer to the family httptest listens on: a real "localhost" may
+	// resolve to ::1 first, which is not where this server is bound.
+	stubResolver(t, func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host != "localhost" {
+			return nil, errors.New("unexpected host")
+		}
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	})
+
+	// The literal hostname covers whatever it resolves to, which is what lets an
+	// operator trust "localhost" without pinning an address that may change.
+	c := SafeClientWithAllowlist(0, 0, []string{"localhost"})
+	resp, err := c.Get(strings.Replace(srv.URL, "127.0.0.1", "localhost", 1))
+	if err != nil {
+		t.Fatalf("an allowed hostname must be reachable: %v", err)
+	}
+	defer resp.Body.Close()
+}
+
+func TestSafeClientWithAllowlistDoesNotFollowRedirects(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the redirect target must never be reached")
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	c := SafeClientWithAllowlist(0, 0, []string{"127.0.0.1"})
+	resp, err := c.Get(redirector.URL)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want the 302 itself", resp.StatusCode)
+	}
 }
 
 func TestSafeClientWithAllowlistBlocksUnlistedPrivate(t *testing.T) {
@@ -165,6 +272,44 @@ func TestSafeClientWithAllowlistBlocksWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestSafeClientWithAllowlistDialGuards(t *testing.T) {
+	c := SafeClientWithAllowlist(0, 0, nil)
+	if c.Timeout != DefaultSafeTimeout {
+		t.Fatalf("timeout = %v, want %v", c.Timeout, DefaultSafeTimeout)
+	}
+	dial := dialerOf(t, c)
+
+	if _, err := dial(context.Background(), "unix", "/tmp/sock"); err == nil {
+		t.Fatal("unsupported networks must be refused")
+	}
+	if _, err := dial(context.Background(), "tcp", "example.com"); err == nil {
+		t.Fatal("an address without a port must be refused")
+	}
+	stubResolver(t, func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, errors.New("resolver unavailable")
+	})
+	if _, err := dial(context.Background(), "tcp", "private.example.test:443"); err == nil {
+		t.Fatal("a failed resolution must surface as an error")
+	}
+}
+
+func TestSafeClientWithAllowlistDialsAPublicAddress(t *testing.T) {
+	stubResolver(t, func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.7")}}, nil
+	})
+	c := SafeClientWithAllowlist(0, 0, nil)
+	dial := dialerOf(t, c)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	_, err := dial(ctx, "tcp", "public.example.test:80")
+	if err == nil {
+		t.Fatal("a reserved address cannot be reached, but the branch must be dialled")
+	}
+	if strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("a public address must not be blocked: %v", err)
+	}
+}
+
 func TestAllowMatchHelpers(t *testing.T) {
 	if !allowContainsHost([]string{"localhost"}, "LOCALHOST") {
 		t.Fatal("host match must be case-insensitive")
@@ -183,5 +328,11 @@ func TestAllowMatchHelpers(t *testing.T) {
 	}
 	if !allowContainsIP([]string{"[::1]"}, net.ParseIP("::1")) {
 		t.Fatal("bracketed IPv6 literal must match")
+	}
+	if allowContainsIP([]string{"", "   "}, net.ParseIP("127.0.0.1")) {
+		t.Fatal("empty allow entries must be ignored")
+	}
+	if allowContainsIP([]string{"not-an-ip"}, net.ParseIP("127.0.0.1")) {
+		t.Fatal("an unparsable entry must not match")
 	}
 }

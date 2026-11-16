@@ -11,8 +11,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +27,41 @@ import (
 	"agenthub/internal/sandbox"
 	"agenthub/internal/threads"
 )
+
+// The voice wiring has three shapes, and two of them deliberately look the
+// same from outside: mock and "real without an endpoint" both transcribe
+// offline. Only a configured endpoint reaches the network.
+func TestNewSpeechModes(t *testing.T) {
+	mock := newSpeech(&config.Config{SpeechMode: registry.ProviderModeMock})
+	out, err := mock.Transcribe(context.Background(), []byte("clip"))
+	if err != nil || !strings.Contains(out, "Transcribed voice note") {
+		t.Fatalf("mock out = %q, err = %v", out, err)
+	}
+
+	fallback := newSpeech(&config.Config{SpeechMode: registry.ProviderModeOpenAICompatible})
+	out, err = fallback.Transcribe(context.Background(), []byte("clip"))
+	if err != nil || !strings.Contains(out, "Transcribed voice note") {
+		t.Fatalf("fallback out = %q, err = %v", out, err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"text": "configured provider"})
+	}))
+	defer srv.Close()
+	real := newSpeech(&config.Config{
+		SpeechMode:            registry.ProviderModeOpenAICompatible,
+		SpeechEndpoint:        srv.URL,
+		SpeechEgressAllowlist: []string{"127.0.0.1"},
+		SpeechSTTModel:        "whisper-1",
+		SpeechTTSModel:        "tts-1",
+		SpeechTimeout:         time.Second,
+		AudioMaxBytes:         1 << 20,
+	})
+	out, err = real.Transcribe(context.Background(), []byte("clip"))
+	if err != nil || out != "configured provider" {
+		t.Fatalf("real out = %q, err = %v", out, err)
+	}
+}
 
 func TestRuntimeOrDefault(t *testing.T) {
 	if got := runtimeOrDefault("runsc", "kata"); got != "runsc" {

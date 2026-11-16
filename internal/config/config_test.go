@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"agenthub/internal/adapter"
 	"agenthub/internal/registry"
 	"agenthub/internal/sandbox"
 )
@@ -570,6 +571,100 @@ func enableRouter(c *Config) {
 	c.RouterMaxAttempts = 3
 	c.RouterTriggerTTL = time.Hour
 	c.RouterPruneInterval = time.Minute
+}
+
+// The voice provider is off by default: an instance with no audio endpoint
+// keeps the deterministic mock instead of asking for credentials nobody set.
+func TestSpeechDefaultsStayOffline(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://agenthub:agenthub@localhost:5434/agenthub")
+	for _, key := range []string{
+		"AGENTHUB_SPEECH_ENDPOINT", "AGENTHUB_SPEECH_API_KEY_ENV",
+		"AGENTHUB_SPEECH_STT_MODEL", "AGENTHUB_SPEECH_TTS_MODEL",
+		"AGENTHUB_SPEECH_TIMEOUT", "AGENTHUB_SPEECH_EGRESS_ALLOWLIST",
+	} {
+		os.Unsetenv(key)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SpeechEndpoint != "" {
+		t.Fatalf("endpoint = %q, want empty for the mock", cfg.SpeechEndpoint)
+	}
+	if cfg.SpeechAPIKeyEnv != "AGENTHUB_SPEECH_API_KEY" {
+		t.Fatalf("api key env = %q", cfg.SpeechAPIKeyEnv)
+	}
+	if cfg.SpeechSTTModel != adapter.DefaultSpeechSTTModel || cfg.SpeechTTSModel != adapter.DefaultSpeechTTSModel {
+		t.Fatalf("models = %q / %q", cfg.SpeechSTTModel, cfg.SpeechTTSModel)
+	}
+	if cfg.SpeechTimeout != adapter.DefaultSpeechTimeout {
+		t.Fatalf("timeout = %v", cfg.SpeechTimeout)
+	}
+	if len(cfg.SpeechEgressAllowlist) != 0 {
+		t.Fatalf("egress = %v, want none", cfg.SpeechEgressAllowlist)
+	}
+}
+
+// A real endpoint has to be an absolute http(s) URL, and the credential slot has
+// to name an environment variable rather than hold the secret itself.
+func TestSpeechValidation(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.SpeechEndpoint = "https://api.example.test/v1"
+	cfg.SpeechAPIKeyEnv = "OPENAI_KEY"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a valid speech endpoint must pass: %v", err)
+	}
+
+	cfg = validBaseConfig()
+	cfg.SpeechEndpoint = "api.example.test"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a bare host must be rejected")
+	}
+
+	cfg = validBaseConfig()
+	cfg.SpeechEndpoint = "ftp://api.example.test"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a non-http scheme must be rejected")
+	}
+
+	cfg = validBaseConfig()
+	cfg.SpeechEndpoint = "https://api.example.test"
+	cfg.SpeechAPIKeyEnv = "sk-live-123"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a pasted secret must be rejected as an env name")
+	}
+}
+
+// Empty voice knobs are filled with the documented defaults instead of running
+// with a zero timeout or an unnamed model.
+func TestSpeechValidateFillsDefaults(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.SpeechEndpoint = "https://api.example.test"
+	cfg.SpeechSTTModel = "  "
+	cfg.SpeechTTSModel = ""
+	cfg.SpeechTimeout = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if cfg.SpeechSTTModel != adapter.DefaultSpeechSTTModel || cfg.SpeechTTSModel != adapter.DefaultSpeechTTSModel {
+		t.Fatalf("models = %q / %q", cfg.SpeechSTTModel, cfg.SpeechTTSModel)
+	}
+	if cfg.SpeechTimeout != adapter.DefaultSpeechTimeout {
+		t.Fatalf("timeout = %v", cfg.SpeechTimeout)
+	}
+}
+
+func TestIsEnvName(t *testing.T) {
+	for _, ok := range []string{"KEY", "_KEY", "KEY_2", "openai_key"} {
+		if !isEnvName(ok) {
+			t.Fatalf("%q should be a valid env name", ok)
+		}
+	}
+	for _, bad := range []string{"", "1KEY", "sk-123", "KEY-NAME", "KEY NAME"} {
+		if isEnvName(bad) {
+			t.Fatalf("%q should not be a valid env name", bad)
+		}
+	}
 }
 
 // A malformed template is a startup failure named after the variable, not a

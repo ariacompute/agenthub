@@ -14,7 +14,12 @@ mcp（万能转接头）/ skill（岗位手册）/ cli（对讲机）** 五类�
   故依赖图未新增第三方包）。
 - 前端：Vue 3 + Vite（**bun 1.4.4+** 包管理/测试），十屏控制台（registry / registries / sources / trace /
   topology / **playground** / login / admin / audit / **docs**），**13 种语言**，**纯黑/白/灰单色**视觉。
-- 首版五类适配器**全部为确定性 mock**：无网络、无子进程、离线可跑通；真实对接以 `TODO(real)` 标注边界。
+- 适配器**能真实调用就真实调用，没配置就离线**：model→OpenAI 兼容端点（含 SSE 流式）、
+  agent→Agent Card + `message/send` 或 `message/stream`、mcp→Streamable HTTP JSON-RPC、
+  skill→读取 `SKILL.md` 并解析声明步骤、custom→按 schema 中的受限 method/path 分派、
+  speech→OpenAI 兼容音频端点、cli→租约沙箱内 `exec`。未接线时逐字回落确定性 mock
+  （`provider=mock`），因此无网络、无子进程亦可跑通。剩余 `TODO(real)` 只属于
+  egress sidecar、MCP stdio 子进程、向量检索等**另外的语义**，不再是适配器 Invoke 边界。
 - 设计参照 `mastra-ai/mastra` 的**协议与交互形态**（MCP Registry 条目模型、workflow 三原语、
   HITL→`input-required`、Studio 试跑、observability 分层），但**不引入其任何代码或 npm 依赖**。
 
@@ -107,11 +112,14 @@ persistence ← internal/store（GORM 实现）
   `archive.go`（tar.gz 打包解包 + manifest + sha256）、
   `service.go`（单飞打点/恢复编排/保留清理/回滚点）、`schedule.go`（三种模式 + 手写 5 段 cron）、
   `store.go`（`BackupStore`/`Quiesce`/`Reloader` 端口）
-- `internal/adapter`：`connector.go`（`Connector` 接口 + `Options` + `For` 工厂）、
-  `mock.go`（确定性基元）、`model.go`（provider 注册表 + `ModelRouter` 回退链 + 按
+- `internal/adapter`：`connector.go`（`Connector` 接口 + `Options` + `For` 工厂 + 可选 `Stream` 出口）、
+  `mock.go`（确定性基元）、`sse.go`（共用 SSE 帧解码：有界行/整体上限、心跳、`[DONE]`、ctx 取消）、
+  `model.go`（provider 注册表 + `ModelRouter` 回退链 + `GenerateStreamWith` + 按
   `Entry.KindConfig.ModelConfig` 装配）、`model_openai.go`（OpenAI 兼容 provider，chat completions，
-  `api_key_env` 只取环境变量名，失败回退 mock，`TODO(real)` 标注 streaming 边界）、
-  `agent.go`、`mcp.go`、`skill.go`、`cli.go`
+  `api_key_env` 只取环境变量名，`Generate` 非流式 / `GenerateStream` 翻译 SSE 帧，失败回退 mock）、
+  `agent.go`（Card + `message/send` / `message/stream`，`agent.*` 帧翻译为增量 artifact）、
+  `skill.go`（`SKILL.md` 读取与步骤解析）、`custom.go`（受限 schema 分派）、
+  `speech.go` + `speech_openai.go`（STT/TTS，零值仍为 mock）、`mcp.go`、`cli.go`
 - `internal/hub`：`store.go`（`TaskRepository`/`EventRepository`/`PushRepository` 端口 + `Persistence`）、
   `task.go`（TaskStore + 合法迁移校验 + 挂起状态 + 条件更新委托）、`trace.go`（span 时间线）、
   `broker.go`（事件扇出 + 有界队列异步落库）、`flow.go`（`then/branch/parallel`）、

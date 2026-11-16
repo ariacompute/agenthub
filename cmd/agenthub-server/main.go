@@ -275,7 +275,19 @@ func main() {
 	// pointer every handler has to guard.
 	filesSvc := newFilesService(cfg, db)
 
-	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Files: filesSvc, Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: adapter.DefaultSpeech, Router: routerSvc, Sandboxes: sandboxSvc}
+	// Voice: the deterministic mock stays the default. A real mode without an
+	// endpoint is a deployment gap worth one startup warning, not a per-request
+	// refusal — NewSpeech degrades it to the mock, which still transcribes.
+	speechSvc := newSpeech(cfg)
+	if cfg.SpeechMode == registry.ProviderModeOpenAICompatible {
+		if strings.TrimSpace(cfg.SpeechEndpoint) == "" {
+			slog.Warn("speech: openai_compatible mode without AGENTHUB_SPEECH_ENDPOINT; falling back to the offline mock")
+		} else {
+			slog.Info("speech: real provider configured", "stt", cfg.SpeechSTTModel, "tts", cfg.SpeechTTSModel)
+		}
+	}
+
+	deps := handlers.Deps{Cfg: cfg, Hub: h, Reg: reg, DB: db, Log: slog.Default(), Files: filesSvc, Auth: authSvc, Authz: az, Backups: backupSvc, Sources: sources, Threads: threadsStore, Channels: channelsStore, Computers: computersStore, Schedules: schedulesStore, Knowledge: knowledgeStore, Speech: speechSvc, Router: routerSvc, Sandboxes: sandboxSvc}
 
 	// The audit trail. Off only when an operator says so: a trail nobody turned
 	// on is a trail nobody has when the incident happens.
@@ -753,6 +765,22 @@ func threadHistory(ts threads.Store) router.HistoryProvider {
 // failing with a nil pointer. A backend that cannot be built is fatal — an
 // instance that would reject every upload should say so at boot, not on the
 // first attempt.
+// newSpeech maps the configuration onto the adapter's voice options. Keeping it
+// a function makes the three deployment shapes — mock, real, and a real mode
+// without an endpoint — testable without starting the process.
+func newSpeech(cfg *config.Config) adapter.Speech {
+	return adapter.NewSpeech(adapter.SpeechOptions{
+		Mode:      cfg.SpeechMode,
+		Endpoint:  cfg.SpeechEndpoint,
+		APIKeyEnv: cfg.SpeechAPIKeyEnv,
+		STTModel:  cfg.SpeechSTTModel,
+		TTSModel:  cfg.SpeechTTSModel,
+		Timeout:   cfg.SpeechTimeout,
+		MaxBytes:  int64(cfg.AudioMaxBytes),
+		Egress:    cfg.SpeechEgressAllowlist,
+	})
+}
+
 func newFilesService(cfg *config.Config, db *gorm.DB) *files.Service {
 	if db == nil {
 		return nil

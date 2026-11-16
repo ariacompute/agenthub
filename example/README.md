@@ -230,10 +230,12 @@ listed in the corresponding JSON's `metadata.env_hint` as a reminder; no values 
 
 ## 6. Caveats
 
-- **Adapter status**: only the model's `openai_compatible` connector is a real implementation
-  (`internal/adapter/model_openai.go`); the agent / mcp / skill / cli connectors are still
-  `TODO(real)` and only translate shapes. The MCP and CLI samples therefore express
-  **configuration intent**, not something executable today.
+- **Adapter status**: every connector has a real path when the record names one — model
+  (`openai_compatible`, including SSE streaming), agent (Agent Card + send/stream), MCP
+  (Streamable HTTP), skill (a readable `SKILL.md`), custom (a schema with
+  `x-agenthub-dispatch`), speech (an OpenAI-compatible audio endpoint) and CLI (a leased
+  sandbox). The samples express **configuration intent**; a call lands only where the
+  host can actually reach it, and otherwise answers from the deterministic mock.
 - **Samples never self-declare health**: none of the 41 samples sets `health` (omitted means
   `unknown`), and none sets `metadata.mock_health`. Health is written by a measurement and by
   nothing else: `POST /api/resources/{id}/probe` asks the resource's own connector, and a run
@@ -393,6 +395,6 @@ AGENTHUB_CLI_ALLOWLIST=git,ls,cat,echo,date,aria-memo,gh ./example/deploy-cli.sh
 - `deploy-cli.sh` reads `AGENTHUB_CLI_ALLOWLIST` from the root `.env` / `.env.example` and mirrors
   the server's whole-string comparison. The server reads it once at startup, so restart the server
   after changing it; `--allowlist` overrides the preflight and `--skip-allowlist` records anyway.
-- None of these three changes the connector status in §6: the server-side mcp / skill / cli
-  connectors are still `TODO(real)`. They verify the local command, directory and tool list — not
-  an execution through agenthub.
+- These three verify the local command, directory and tool list — not an execution through
+  agenthub. That distinction still holds: the scripts prove the asset is installed, while a
+  real call additionally needs the deployment's sandbox or readable directory (see §6).

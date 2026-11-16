@@ -182,24 +182,32 @@ search, CloudTrail-equivalent auditing, cross-account RAM sharing, VPC PrivateLi
 
 ## 4. Adapter Layer
 
-`adapter` converges the invocation surface of all five kinds behind a single
-`Connector` interface. Four of them are **deterministic mocks**: no network, no
-subprocess, fully runnable offline, with real integrations marked `TODO(real)`. The
-model connector can also run a **real OpenAI-compatible provider** when its
-entry asks for one.
+`adapter` converges the invocation surface of all six kinds behind a single
+`Connector` interface. Every connector runs its **real path when the record says where
+to reach it**, and falls back to the deterministic mock when it does not: no network,
+no subprocess, fully runnable offline. Real outbound calls go through the SSRF-hardened
+`netutil` client and credentials are read from environment variables by name only.
 
-### Five Connectors
+### Six Connectors
 
-- **model**: provider registry with a fallback chain; artifact `model.completion`, which
-  now carries the name of the provider that answered.
-- **agent**: step planning; a prompt containing `approve` / `confirm` / `approval`
-  (**word-level match**) parks the task and sets `RequiresInput`.
+- **model**: provider registry with a fallback chain; `Generate` for one completion and
+  `GenerateStream` for SSE frames published as incremental artifacts; artifact
+  `model.completion`, which carries the name of the provider that answered.
+- **agent**: Agent Card first, then `message/send`, or `message/stream` when the card
+  advertises `capabilities.streaming`; `artifact-update` / `status-update` frames become
+  incremental artifacts and the aggregated answer is persisted once.
 - **mcp**: `tools/list` + `tools/call` translation; artifacts `mcp.tools` / `mcp.call`.
-- **skill**: trigger → playbook → steps → report; artifact `skill.manual`.
+- **skill**: reads `SKILL.md` from a `file://` directory or the declared endpoint, parses
+  the ordered steps, and emits one `skill.step` artifact per resolved step plus
+  `skill.manual`; no manual keeps the offline five-step plan.
+- **custom**: reads `x-agenthub-dispatch` from the declared schema, validates the method
+  (GET/POST) and relative path, then calls the endpoint; without a descriptor it echoes
+  the schema instead of inventing a call.
 - **cli**: allowlist → timeout → truncation → JSON receipt; artifact `cli.receipt`
   (including `truncated`).
-- **speech**: a sixth adapter, deterministic offline STT/TTS for the voice endpoint
-  (`POST /api/threads/{id}/audio`); like the others it is a mock, marked `TODO(real)`.
+- **speech**: a sixth adapter. With `AGENTHUB_SPEECH_ENDPOINT` it uses an OpenAI-compatible
+  `/audio/transcriptions` and `/audio/speech`; the zero value stays the deterministic
+  crc32/WAV mock used by `POST /api/threads/{id}/audio`.
 
 ### Safety & Reliability
 
@@ -230,8 +238,9 @@ by a real chat-completions provider.
 - **Failure is never faked**: when every provider fails the connector returns an error.
   Only an explicit `fallback_mock` answers from the deterministic mock, and the artifact
   says `provider: mock` so nobody mistakes it for a real completion.
-- **Boundaries**: streaming and the real agent / mcp / skill / cli adapters remain
-  `TODO(real)`; those four stay offline.
+- **Boundaries**: streaming is implemented for both model and agent connectors; the
+  remaining `TODO(real)` markers describe other surfaces (MCP **stdio** subprocess, the
+  sandbox `egress_allowlist` sidecar, vector retrieval), not the adapter invocation path.
 
 ---
 
@@ -632,9 +641,10 @@ configuration.
 - **Credential discipline**: the gateway key stays in the server process environment
   (`AGENTHUB_EXAMPLE_API_KEY`); a CLI command only runs once it is listed in
   `AGENTHUB_CLI_ALLOWLIST`, which matches whole strings case-insensitively.
-- **Intent, not execution**: only the model connector is real. The agent / mcp / skill /
-  cli adapters remain `TODO(real)`, so those payloads describe a configuration rather
-  than a live integration.
+- **Intent, not execution**: the sample payloads describe a configuration. Whether a
+  record then performs a live call depends on what the host can reach: a model endpoint,
+  an Agent Card, a `file://` skill directory, a schema with `x-agenthub-dispatch`, or a
+  sandbox for MCP/CLI. Without one, the connector answers from its deterministic mock.
 
 `example/README.md` carries the payload contract (the 21 accepted keys, the `kind` /
 `transport` / `health` / `status` enums, and the per-kind `kind_config` with its

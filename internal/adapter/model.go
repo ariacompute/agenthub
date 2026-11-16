@@ -17,12 +17,18 @@ import (
 // offline, and openAIProvider, which talks to any OpenAI compatible chat
 // completions endpoint — the shape every model router (LiteLLM, OpenRouter, a
 // self hosted gateway) exposes.
-//
-// TODO(real): streaming. Both providers request a non-streamed completion today;
-// adding SSE means a second path beside Generate, not a change to this one.
 type ModelProvider interface {
 	Name() string
 	Generate(ctx context.Context, prompt string) (string, error)
+}
+
+// StreamingModelProvider is the optional half of a provider: the same call, but
+// tokens are handed to sink as they arrive and the returned string is the
+// aggregate. A provider that does not implement it is still usable — the router
+// calls Generate once and the caller gets a single chunk.
+type StreamingModelProvider interface {
+	Name() string
+	GenerateStream(ctx context.Context, prompt string, sink StreamSink) (string, error)
 }
 
 // mockModelProvider is deterministic: it renders a structured summary rather
@@ -93,6 +99,46 @@ type mockUnavailable struct{}
 
 func (mockUnavailable) Error() string { return "no_model_provider" }
 
+// GenerateStreamWith is GenerateWith for a caller that can consume frames while
+// the answer is still being written. Providers that cannot stream keep their
+// single-shot behaviour; a provider that already emitted frames is never
+// replaced by the next one in the chain, because two answers spliced together
+// are worse than one honest failure.
+func (r *ModelRouter) GenerateStreamWith(ctx context.Context, prompt string, sink StreamSink) (string, string, error) {
+	if r == nil || len(r.providers) == 0 {
+		return "", "", &mockUnavailable{}
+	}
+	var lastErr error
+	for _, p := range r.providers {
+		emitted := false
+		forward := func(a a2a.Artifact) error {
+			emitted = true
+			if sink == nil {
+				return nil
+			}
+			return sink(a)
+		}
+		var out string
+		var err error
+		if sp, ok := p.(StreamingModelProvider); ok {
+			out, err = sp.GenerateStream(ctx, prompt, forward)
+		} else {
+			out, err = p.Generate(ctx, prompt)
+		}
+		if err == nil {
+			return out, p.Name(), nil
+		}
+		lastErr = err
+		if emitted {
+			return "", "", err
+		}
+	}
+	if lastErr != nil {
+		return "", "", lastErr
+	}
+	return "", "", &mockUnavailable{}
+}
+
 type modelConnector struct {
 	router *ModelRouter
 	// defaultMode is kept so a connector built without a router can rebuild one
@@ -109,7 +155,13 @@ func (c *modelConnector) Invoke(ctx context.Context, req InvokeRequest) (InvokeR
 	if len(c.router.providers) == 0 {
 		c.router = NewModelRouter()
 	}
-	out, provider, err := c.router.GenerateWith(ctx, req.Prompt)
+	var out, provider string
+	var err error
+	if req.Stream != nil {
+		out, provider, err = c.router.GenerateStreamWith(ctx, req.Prompt, req.Stream)
+	} else {
+		out, provider, err = c.router.GenerateWith(ctx, req.Prompt)
+	}
 	if err != nil {
 		return InvokeResult{}, err
 	}

@@ -33,10 +33,13 @@
 - **适配器层**：统一 `Connector` 接口 + `For(kind)` 工厂。是否走真实路径由「资源有没有说明去哪儿找」决定，
   没有可用的端点或执行环境时回退**确定性 mock**（同输入必同输出，mock 结果一律带 `provider=mock`，
   便于 `-race` 断言且不至于把编造的答案当成真的）：
-  model→OpenAI 兼容端点（`model_openai.go`，非流式；Model Router 形态：单一 `Generate/Stream` +
-  provider 注册表 + 回退链）、agent→取 Agent Card 后 `message/send`、mcp→Streamable HTTP JSON-RPC、
-  skill→本地手册加载、cli→在租约沙箱内 `exec`（白名单前置校验 → 单次超时 → 输出截断 → 结构化 JSON）。
-  speech / custom 仍为 mock，各自保留 `TODO(real)` 边界。
+  model→OpenAI 兼容端点（`model_openai.go`：`Generate` 非流式、`GenerateStream` 翻译 SSE 帧；
+  Model Router 形态：provider 注册表 + 回退链）、agent→取 Agent Card 后按能力走 `message/send` 或
+  `message/stream`（帧翻译为增量 artifact）、mcp→Streamable HTTP JSON-RPC、
+  skill→读取 `SKILL.md` 并解析声明步骤、custom→按 schema 中 `x-agenthub-dispatch` 声明的受限
+  method/path 调用端点、speech→OpenAI 兼容 `/audio/transcriptions` 与 `/audio/speech`（未配置端点时
+  保持 WAV/crc32 mock）、cli→在租约沙箱内 `exec`（白名单前置校验 → 单次超时 → 输出截断 → 结构化 JSON）。
+  所有真实出向复用 `netutil` 的 SSRF 加固客户端，凭据只按环境变量名读取。
 - **Hub 编排与任务机**：入站消息 → 资源选择 → 适配执行 → 状态机 → artifact 累积 →
   事件广播（SSE fan-out）→ pushNotification 回调（落 `push_records`；设置 `AGENTHUB_PUSH_SECRET`
   后改走**真实投递**——https-only、SSRF 白名单、HMAC-SHA256 签名、`(taskId, state)` 一小时内去重，
@@ -69,8 +72,8 @@
 - RAG / 记忆存储（属 `memo` 与 `bankmind` 的职责）。
 - 浏览器自动化、多语言 SDK、Agent 网络跨实例联邦。
 - LLM-as-judge 评分与评测闭环（eval 仅留钩子，**不产出分数**）。
-- MCP **stdio 子进程**传输、agent 与模型**流式**输出（非流式的 MCP Streamable HTTP 与 OpenAI 兼容端点
-  已可用，CLI 已是真实 `exec`，见 §1.1；其余统一留 `TODO(real)`）。
+- MCP **stdio 子进程**传输（Streamable HTTP 已可用；agent / model 的 SSE 流式输出已实现，
+  CLI 已是真实 `exec`，见 §1.1）。沙箱 `egress_allowlist` 的宿主侧收口仍待 egress sidecar。
 
 ### 1.3 范围内（M2，已实现）
 

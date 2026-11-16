@@ -235,8 +235,9 @@ database or calls `/probe`. `deploy-agent.sh` installs, serves and verifies one 
 the catalogue's stdio command to a stateless Streamable HTTP endpoint (`127.0.0.1:8002/mcp/<server>`) and
 checks its tool list over HTTP, `deploy-skill.sh` acquires the `file://`
 directory and reads `SKILL.md`, and `deploy-cli.sh` checks PATH plus `AGENTHUB_CLI_ALLOWLIST` before
-running a read-only probe. The server-side mcp / skill / cli connectors are still `TODO(real)`, so
-those three verify the local asset only.
+running a read-only probe. The scripts verify the local asset; whether a call through agenthub then
+reaches it depends on the deployment (a sandbox for MCP/CLI, a readable `SKILL.md`, a schema
+dispatch descriptor) — without one the connector answers from its deterministic mock.
 
 <div align="right">
 
