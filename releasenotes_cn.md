@@ -703,12 +703,12 @@ SSRF 防护的出站调用、签名 A2A 回调、静态加密与最小权限数�
 
 - **能碰宿主机哪里，是运营者的策略，不是资源的策略**：资源只报一个目录，实例决定这个目录是否可达。`sandbox.HostPolicy` 配 `ValidateHostPolicy` 拒绝这些 `work_dir`——不是绝对路径、含 `..` 元素、含控制字符 / NUL、含逗号（`--mount` 把它当选项分隔符）、是卷根、落在系统目录（`/etc`、`/proc`、`/sys` 等）之下。`AGENTHUB_SANDBOX_WORKDIR_ROOTS`（绝对路径、逗号分隔）把它变成白名单：按整段匹配，`/srv/work` 不是 `/srv/workshop` 的父目录；前缀本身不合法时**跳过而不是放宽**。
 - **可写根要运营者点头**：`AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT` 默认 **false**——能自己放宽文件系统视野的资源，正是不该由资源自己决定的那一类。没有这个开关时 `readonly_root: false` 在保存那一刻就回 `sandbox_policy_denied`，租约期再拒一次。这是**有意的收紧**：依赖它的存量记录需要显式开启。
-- **两个后端说的是同一件事**：docker 改用 `--mount type=bind,src=…,dst=/work[,readonly]` 而不是 `-v`——源目录不存在现在直接失败，不再被静默建在宿主上（过去一个手误会变成一份空的、宿主所有的共享目录）；同时把 `HOME` / `TMPDIR` 指到临时目录，于是往 `$HOME` 写的 CLI 会因为它自己的原因失败，而不是报一个来自只读镜像的权限错误。`bwrap` 改为读 `Profile.Readonly()`，不再恒发 `--ro-bind /`：同一份策略在两个后端产出同一个沙盒，只读 profile 的工作目录也一并只读。
+- **两个后端说的是同一件事**：docker 改用 `--mount type=bind,src=…,dst=/work[,readonly]` 而不是 `-v`——源目录不存在现在直接失败，不再被静默建在宿主上（过去一个手误会变成一份空的、宿主所有的共享目录）；同时把 `HOME` / `TMPDIR` 指到临时目录，于是往 `$HOME` 写的 CLI 会因为它自己的原因失败，而不是报一个来自只读镜像的权限错误。`bwrap` 改为读 `Profile.Readonly()`：此前根与工作目录**两侧都写死**（根恒 `--ro-bind /` 只读、工作目录恒 `--bind` 可写），只读 profile 拿到可写的工作目录、可写 profile 拿到只读的根；现在同一份开关决定两侧，同一份策略在两个后端产出同一个沙盒。
 
 ### 资源配额
 
 - **三个数字、一条上限**：`sandbox.Limits{CPU, MemoryMB, PidsLimit}`，`Clamp` 只下调 profile，`Exceeds` 用于注册期。资源继承的是 `AGENTHUB_SANDBOX_CPU`（1）/ `_MEMORY_MB`（1024）/ `_PIDS_LIMIT`（128）；它永远越不过的是 `AGENTHUB_SANDBOX_MAX_CPU`（4）/ `_MAX_MEMORY_MB`（4096）/ `_MAX_PIDS_LIMIT`（512）。两组都只在沙盒开启时校验，从不启用沙盒的实例因此与过去一样合法。
-- **超限在写入处就被拒**：注册走 `Registry.WithSandboxPolicy`，由 manager 用的同一批 `AGENTHUB_SANDBOX_*` 装配，因此 handler、上游同步与示例种子共用一道闸门，被拒的 profile 一次都到不了租约。`registry` 仍然不 import 控制面。
+- **超限在写入处就被拒**：注册走 `Registry.WithSandboxPolicy`，由 manager 用的同一批 `AGENTHUB_SANDBOX_*` 装配，被拒的 profile 一次都到不了租约。过闸的是注册接口这一条路径（`Register` → `Upsert`）；上游同步也落在 `Upsert` 上，但上游记录不解析 `sandbox`，注入不了执行策略；示例种子直写库且不带 `sandbox` 块。`registry` 仍然不 import 控制面。
 - **存量记录超限是夹取而不是失败**：`Manager.Acquire` 夹到上限、写日志（只记租约与资源标识和前后数字，绝不记命令），并在租约事件里带 `limitsClamped`——「资源要了 64 核、拿到 4 核」因此是可见的。已在跑但高于（被下调后的）上限的租约会被回收重建，不会继续享受旧预算。
 - **swap 换不回内存额度**：docker 让 `--memory-swap` 与 `--memory` 同值——这是「给单个容器禁掉 swap」的官方做法；只给 `--memory` 时 swap 不受限，额度就成了建议。
 

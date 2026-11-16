@@ -114,7 +114,7 @@ profile 的 `network` 接受 `none / egress_allowlist / bridge / platform` 四�
 
 | 约束 | docker / podman | bubblewrap | 由谁决定 |
 | --- | --- | --- | --- |
-| 根文件系统 | `--read-only`（`Profile.Readonly()`） | `--ro-bind / /` | profile `readonly_root`，缺省只读；`false` 需实例开关 |
+| 根文件系统 | `--read-only`（`Profile.Readonly()`） | `--ro-bind / /` 或 `--bind / /`（同一开关） | profile `readonly_root`，缺省只读；`false` 需实例开关 |
 | 临时目录 | `--tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m` | `--tmpfs /tmp`（bwrap 的 tmpfs 无 per-mount 标志） | 实例固定 |
 | `HOME` / `TMPDIR` | `--env HOME=/tmp --env TMPDIR=/tmp` | `--setenv HOME /tmp --setenv TMPDIR /tmp` | 实例固定 |
 | 工作目录（命名） | `--mount type=bind,src=<work_dir>,dst=/work[,readonly]` | `--ro-bind` / `--bind <work_dir> /work` | profile `work_dir` + `HostPolicy` |
@@ -148,8 +148,11 @@ CPU / 内存 / pids 三个数字曾经写死在 `main.go`（1 核 / 1024 MiB / 1
 | 覆盖 | 资源 `kind_config.sandbox` 或声明式模板 | 只能**收紧** |
 | 上限 | `AGENTHUB_SANDBOX_MAX_*` + `sandbox.Limits` | 注册期拒绝超限；租约期夹取 |
 
-- 注册期：`Registry.WithSandboxPolicy` → `Limits.Exceeds` → `sandbox_policy_denied`（handler、上游同步、
-  seed 三条写入路径共用同一闸门）。
+- 注册期：`Registry.WithSandboxPolicy` → `Limits.Exceeds` → `sandbox_policy_denied`。真正过闸的只有
+  注册接口那一条路径（`Registry.Register` → `Upsert`）；上游同步同样落在 `Upsert` 上，但
+  `entryFromRecord` 只构造 MCP / skill 块、从不解析 `sandbox`，所以上游记录无法注入执行策略
+  （安全侧有意为之，用例在 `registry/sync_gate_test.go`）；示例种子直写 GORM 且 demo 条目不带
+  `sandbox` 块（用例在 `store/store_test.go`）。不要把这写成「三条路径共用同一闸门」。
 - 租约期：`Manager.Acquire` → `Limits.Clamp`（只下调）→ `slog.Warn` + `lease.created` 帧带
   `limitsClamped` 与生效值。存量记录、上游同步来的记录、以及「上限刚刚被调低」的情况都走这条。
 - 已有租约若超出当前上限：**回收重建**（`Terminate` 后重新 `create`），而不是让它按旧预算跑到过期。

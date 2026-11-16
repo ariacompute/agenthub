@@ -436,3 +436,58 @@ func TestAPIKeyEnvMustBeAVariableName(t *testing.T) {
 		}
 	}
 }
+
+// The egress allowlist is the one sandbox field an operator writes by hand and
+// the one that narrows an SSRF guard, so it is validated where it is saved: an
+// exact IP, a CIDR or a bare hostname, nothing that could be read as a URL,
+// a port or a wildcard.
+func TestValidateEgressAllowlist(t *testing.T) {
+	good := []string{
+		"203.0.113.7",
+		"10.0.0.0/8",
+		"2001:db8::/32",
+		"::1",
+		"[::1]",
+		"registry.example.test",
+		" api.example.test ",
+		"_service.internal",
+	}
+	for _, entry := range good {
+		if err := validateEgressAllowlist([]string{entry}); err != nil {
+			t.Fatalf("%q must be accepted: %v", entry, err)
+		}
+	}
+
+	bad := []string{
+		"",
+		"*",
+		"https://registry.example.test",
+		"registry.example.test:443",
+		"two hosts",
+		"bad!host",
+		"/etc/passwd",
+	}
+	for _, entry := range bad {
+		err := validateEgressAllowlist([]string{entry})
+		if code(t, err) != CodeInvalidKindConfig {
+			t.Fatalf("%q must be refused, got %v", entry, err)
+		}
+		if got := FieldOf(err); got != "egress_allowlist" {
+			t.Fatalf("%q: field = %q, want egress_allowlist", entry, got)
+		}
+	}
+
+	// The same rule reached through a real registration, which is where an
+	// operator actually meets it.
+	e := &Entry{Kind: KindMCP, Endpoint: "https://mcp.test", KindConfig: &KindConfig{MCP: &MCPConfig{
+		EgressAllowlist: []string{"registry.example.test", "*"},
+	}}}
+	if err := ValidateKind(e); code(t, err) != CodeInvalidKindConfig {
+		t.Fatalf("a wildcard in a real MCP block must be refused: %v", err)
+	}
+	if err := ValidateKind(&Entry{Kind: KindMCP, Endpoint: "https://mcp.test", KindConfig: &KindConfig{MCP: &MCPConfig{
+		EgressAllowlist: []string{"registry.example.test", "10.0.0.0/8"},
+	}}}); err != nil {
+		t.Fatalf("a valid allowlist must pass: %v", err)
+	}
+}

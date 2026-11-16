@@ -20,6 +20,25 @@ func stubResolver(t *testing.T, fn func(ctx context.Context, host string) ([]net
 	t.Cleanup(func() { lookupIPAddr = previous })
 }
 
+// requireReservedUnreachable guards the two dial-guard cases below. They assert
+// that the guard *attempts* a public but reserved address, and that assertion
+// only means something while that address is genuinely unreachable. A
+// transparent outbound proxy — corporate networks, some container runtimes —
+// accepts the connection, so the premise is false and a hard failure would
+// report a product bug that does not exist. Skipping says that plainly.
+//
+// The probe dials directly, never through the client under test: the point is
+// to learn what this machine's network does, not what the guard does.
+func requireReservedUnreachable(t *testing.T) {
+	t.Helper()
+	conn, err := (&net.Dialer{Timeout: 400 * time.Millisecond}).Dial("tcp", "203.0.113.7:80")
+	if err == nil {
+		_ = conn.Close()
+		t.Skip("outbound TCP reaches 203.0.113.7 (a reserved address) from this machine; " +
+			"a transparent proxy makes the dial-guard assertion unprovable here")
+	}
+}
+
 func dialerOf(t *testing.T, c *http.Client) func(context.Context, string, string) (net.Conn, error) {
 	t.Helper()
 	transport, ok := c.Transport.(*http.Transport)
@@ -150,6 +169,7 @@ func TestSafeClientDefaultsAndDialGuards(t *testing.T) {
 }
 
 func TestSafeClientSkipsDangerousAddressesUntilOneIsUsable(t *testing.T) {
+	requireReservedUnreachable(t)
 	// The first answer is loopback (blocked) and only the second one is public:
 	// the guard must skip the first instead of giving up on the hostname.
 	stubResolver(t, func(context.Context, string) ([]net.IPAddr, error) {
@@ -294,6 +314,7 @@ func TestSafeClientWithAllowlistDialGuards(t *testing.T) {
 }
 
 func TestSafeClientWithAllowlistDialsAPublicAddress(t *testing.T) {
+	requireReservedUnreachable(t)
 	stubResolver(t, func(context.Context, string) ([]net.IPAddr, error) {
 		return []net.IPAddr{{IP: net.ParseIP("203.0.113.7")}}, nil
 	})

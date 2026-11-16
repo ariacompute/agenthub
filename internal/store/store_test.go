@@ -201,3 +201,16 @@ func TestDemoResourcesCoverEveryKind(t *testing.T) {
 		}
 	}
 }
+
+// Seed writes rows straight through GORM, so it never passes the registration
+// gate (Registry.WithSandboxPolicy). That is safe for exactly one reason — the
+// demo records name no execution policy, so there is nothing for the gate to
+// judge — and this case is what keeps it true. Give a seed a sandbox block and
+// the gate is skipped for it without anyone noticing; this test notices.
+func TestDemoResourcesDeclareNoExecutionPolicy(t *testing.T) {
+	for _, e := range DemoResources() {
+		if e.KindConfig != nil && e.KindConfig.Sandbox != nil {
+			t.Fatalf("demo resource %s declares a sandbox block; Seed bypasses the registration gate", e.ID)
+		}
+	}
+}

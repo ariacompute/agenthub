@@ -452,18 +452,26 @@ var egressHostPattern = regexp.MustCompile(`^[\w.-]+$`)
 func validateEgressAllowlist(allow []string) error {
 	for _, raw := range allow {
 		a := strings.TrimSpace(raw)
-		if a == "" || a == "*" || strings.ContainsAny(a, " /\t") {
+		// A blank entry, a bare wildcard or embedded whitespace is refused
+		// outright: this field can narrow the guard, never open it back up.
+		if a == "" || a == "*" || strings.ContainsAny(a, " \t") {
 			return kindConfigErr("egress_allowlist")
 		}
 		if strings.HasPrefix(a, "[") && strings.HasSuffix(a, "]") {
 			a = a[1 : len(a)-1]
 		}
+		// A CIDR is spelled with a slash, so the separator check must not run
+		// before this one: it used to reject every "/" and made the ParseCIDR
+		// branch below unreachable, which quietly turned "an exact IP, a CIDR,
+		// or a hostname" into "no CIDRs at all".
 		if _, _, err := net.ParseCIDR(a); err == nil {
 			continue
 		}
 		if net.ParseIP(a) != nil {
 			continue
 		}
+		// Everything else has to be a bare hostname. A URL, a host:port or a
+		// path fails here, because the pattern admits no scheme, port or slash.
 		if !egressHostPattern.MatchString(a) {
 			return kindConfigErr("egress_allowlist")
 		}

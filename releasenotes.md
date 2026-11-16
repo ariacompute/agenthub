@@ -944,8 +944,9 @@ agent runs as the host process any more.
   instead of being silently created on the host, which used to turn a typo into an empty
   host-owned share — and sets `HOME` / `TMPDIR` to the tmpfs, so a CLI that writes to `$HOME`
   fails for its own reasons instead of reporting a permission error from the read-only image.
-  `bwrap` now reads `Profile.Readonly()` instead of always emitting `--ro-bind /`, so one policy
-  produces one sandbox on both backends, and a read-only profile gets a read-only work directory.
+  `bwrap` now reads `Profile.Readonly()` on **both** sides it used to hard-code: the root (always
+  `--ro-bind /`, even when the profile asked for a writable one) and the work directory (always a
+  writable `--bind`). One policy therefore produces one sandbox on both backends.
 
 ### Quotas
 
@@ -957,8 +958,10 @@ agent runs as the host process any more.
   that never enables it stays exactly as valid as it was.
 - **Oversize is refused where it is written**: registration goes through
   `Registry.WithSandboxPolicy`, wired from the same `AGENTHUB_SANDBOX_*` values the manager uses,
-  so the handler, an upstream sync and the demo seed share one gate and a rejected profile never
-  reaches a lease. The registry still does not import the control plane.
+  so a rejected profile never reaches a lease. The gate is reached from the registration endpoint
+  (`Register` → `Upsert`); an upstream sync also lands on `Upsert` but its records never carry a
+  `sandbox` block, and the demo seed writes rows directly with no sandbox block at all — both are
+  pinned by tests rather than assumed. The registry still does not import the control plane.
 - **Oversize in a stored record is clamped, not failed**: `Manager.Acquire` clamps to the ceiling,
   logs it (lease and resource ids plus both numbers, never the command) and carries
   `limitsClamped` on the lease event, so "the resource asked for 64 CPUs and got 4" is visible. A

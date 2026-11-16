@@ -1399,8 +1399,10 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
   **跳过而不是放宽**）。`AGENTHUB_SANDBOX_ALLOW_WRITABLE_ROOT`（默认 false）是**有意的收紧**：
   `readonly_root: false` 在无开关时保存即 `sandbox_policy_denied`，租约期再拒一次。
   docker 侧 `-v` 改 `--mount type=bind,src=...,dst=/work[,readonly]`（源不存在直接失败，不再静默
-  mkdir），并补 `--env HOME=/tmp --env TMPDIR=/tmp`；bwrap 首次真正读 `Profile.Readonly()`，
-  只读时整根 `--ro-bind`、工作目录也一并只读（原先恒 `--bind` 可写，与 docker 语义相反）。
+  mkdir），并补 `--env HOME=/tmp --env TMPDIR=/tmp`；bwrap 首次真正读 `Profile.Readonly()`：
+  此前**根与工作目录两侧都写死**（根恒 `--ro-bind` 只读、工作目录恒 `--bind` 可写），于是只读
+  profile 拿到可写的工作目录、可写 profile 拿到只读的根，与 docker 的 `,readonly` 语义相反；
+  现在两侧都由同一份开关决定（可写时根 `--bind`，只读时工作目录 `--ro-bind`）。
 - **配额上限**：新增值类型 `sandbox.Limits{CPU, MemoryMB, PidsLimit}` 与只下调的 `Clamp`、
   注册期用的 `Exceeds`（映射 `sandbox_policy_denied`）；零值 = 无上限，既有 `ManagerOptions{}`
   不受影响。6 个环境变量：`AGENTHUB_SANDBOX_{CPU=1,MEMORY_MB=1024,PIDS_LIMIT=128}` 与
@@ -1410,8 +1412,12 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
   存量记录被夹到上限而不是失败，夹取写 `slog.Warn`（只记 lease/resource 与前后值，不记命令）并在
   租约事件里带 `limitsClamped`；已存在的租约若高于上限则回收重建，避免旧租约长期享更大预算。
   注册期走新端口 `Registry.WithSandboxPolicy(func(*SandboxConfig) error)`，位置在
-  `checkSandboxProvider` 之后，因此 handler、上游同步、seed 三条写入路径共用同一闸门，
-  `registry` 仍不 import 控制面。docker 补 `--memory-swap` = `--memory`（禁 swap 绕过内存上限）。
+  `checkSandboxProvider` 之后。**真正过闸的是注册写入那一条路径**（`POST/PUT /api/resources` →
+  `Registry.Register` → `Upsert`）；上游同步虽然也走 `Upsert`，但 `entryFromRecord` 从不解析
+  `sandbox`，上游因此无法注入执行策略；示例种子（`store.Seed`）直写 GORM、且 demo 条目从不声明
+  sandbox 块，所以不需要也不经过闸门。这三条各有用例钉住（`handlers/sandbox_policy_test.go`、
+  `registry/sync_gate_test.go`、`store/store_test.go`），`registry` 仍不 import 控制面。
+  docker 补 `--memory-swap` = `--memory`（禁 swap 绕过内存上限）。
   `Descriptor.Limits` 新增能力声明（容器类报 `cpu/memory/pids`，bwrap/local 报空，声明式报模板
   实际用到的项，remote 与平台垫片报 `delegated`）——**只作如实展示，不作门禁**：默认 profile 恒带
   cpu/mem，按能力拒绝会让 bwrap 完全不可用，原因写在结构体注释里防后人误加。
@@ -1444,3 +1450,62 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
   （文件系统隔离与资源配额两节 + 环境变量表）、`AGENTS.md`（四个 CI job 与分页/闸门约定）、
   中英 `README`、`releasenotes_emoji.md`、`e2e/README.md`（新增「Continuous integration」节）、
   `.gitignore`（`server.log` / `.e2e-files`）、`task.md`（本条）。
+
+## M25 — 第八轮评估的定点修复：环境假设 / 如实陈述 / 三条写入路径（2026-11-16）
+
+对照《agenthub + agentbuddy 完整度评估（第八轮）》的 §7.1 / §7.2 / §7.4 与 §9 第 1、3 条。本轮只动
+测试与文档，外加一处被用例照出来的真缺陷；**产品行为除那一处外零变化**。
+
+### 1. 变更
+
+- **依赖环境的断言改成可跳过（§7.1 / §9 第 1 条）**：`TestSafeClientSkipsDangerousAddressesUntilOneIsUsable`
+  与 `TestSafeClientWithAllowlistDialsAPublicAddress` 的前提是「`203.0.113.7` 不可达」，此前用
+  `t.Fatal` 表达。新增 `requireReservedUnreachable(t)`：**不经过守卫**直拨 `203.0.113.7:80`（400ms），
+  连上即 `t.Skip` 并写明「本机有透明代理，这条断言在此不可证」；连不上则原有断言一字不变。
+  与本项目对 e2e 的处理保持一致——前提不成立时跳过，而不是硬失败。
+- **bwrap 说明补齐两侧（§7.2）**：`task.md` 原文只写「工作目录原先恒 `--bind` 可写」。实测
+  `internal/sandbox/bwrap.go` 两侧原先都写死（根恒 `--ro-bind`、工作目录恒 `--bind`），现在两侧
+  都读 `Profile.Readonly()`。`task.md`、`requirements-sandbox.md`（§2.3 表格的根一行）、
+  `releasenotes.md` / `releasenotes_cn.md` 四处一并改成两侧。
+- **「handler、上游同步、seed 三条写入路径共用同一闸门」改为如实陈述**：只有注册接口那一条真过闸
+  （`Register` → `Upsert` → `checkSandboxPolicy`）；上游同步虽也落在 `Upsert`，但
+  `sync_http.go` 的 `entryFromRecord` 只构造 MCP / skill 块、**从不解析 `sandbox`**，所以上游
+  注入不了执行策略；示例种子 `store.Seed` 直写 GORM、demo 条目也不带 `sandbox` 块。三处文档
+  （`task.md`、`requirements-sandbox.md`、`releasenotes*`）改写，并各补一条用例钉住。
+- **三条写入路径 + 出网白名单的用例（§7.4 / §9 第 3 条）**：
+  - `internal/handlers/sandbox_policy_test.go`（新）：`TestCreateResourceStoresAnAllowedSandboxProfile`
+    （201，且存下的 `kind_config.sandbox` 与请求一致）、
+    `TestCreateResourceRefusesAProfileTheInstanceForbids`（`readonly_root:false` 在未开可写根时
+    403 `sandbox_policy_denied`，且列表里没有留下半个记录）。
+  - `internal/registry/sync_gate_test.go`（新）：`TestUpstreamRecordsCannotCarryAnExecutionPolicy`
+    （记录里塞 `sandbox` 也不会出现在 `KindConfig` 上）、
+    `TestSyncNeitherConsultsNorBypassesThePolicyGate`（闸门「拒绝一切」时 fixture 仍导入 3 条、
+    `Skipped=0`、闸门一次都没被调用）。没有用 httptest 上游：同步客户端受 SSRF 守卫、拒 loopback，
+    而更关键是**上游本来就不可能产出 sandbox 块**，那样测到的只是连接，不是这条契约。
+  - `internal/store/store_test.go`：`TestDemoResourcesDeclareNoExecutionPolicy`——seed 绕闸安全
+    的前提是 demo 条目从不声明执行策略，这条用例守住前提。
+  - `internal/registry/kinds_test.go`：`TestValidateEgressAllowlist`（IP / CIDR / IPv6 / 括号式 /
+    主机名 为合法；空串、`*`、URL、`host:port`、带空格、`!`、路径 为非法），并各走一次
+    `ValidateKind` 的真实注册路径。
+- **顺带修掉一个真缺陷（被上一条用例照出来）**：`validateEgressAllowlist` 的
+  `strings.ContainsAny(a, " /\t")` 排在 `net.ParseCIDR` 之前，于是**任何 CIDR 都被拒**、`ParseCIDR`
+  分支永远不可达——与函数注释「an exact IP, a CIDR, or a hostname」自相矛盾。现在只拦空白与 `*`，
+  斜杠交给 CIDR 解析；非 CIDR 的斜杠串仍被主机名模式（`^[\w.-]+$`）拒绝，URL / `host:port` / 路径
+  照旧非法。**这是本轮唯一的产品行为变化**，方向是「让注释说的能力真的可用」。
+
+### 2. 验证（本机 go1.27.4 windows/amd64 实测）
+
+| 项 | 结果 |
+| --- | --- |
+| `go test -count=1 ./internal/{netutil,registry,handlers,store}/` | 四包全绿 |
+| `go vet ./internal/{netutil,registry,handlers,store}/` | 无输出（0 warning） |
+| `internal/registry` 覆盖率 | **89.3% → 90.4%** |
+| ↳ `validateEgressAllowlist` | **15.4% → 100.0%** |
+| ↳ `validateMCP` | 88.2% → 94.1% |
+| `internal/handlers` 覆盖率 | 84.2%（未变；注册路径本已被其它用例覆盖，新用例钉的是闸门语义） |
+| `internal/netutil` 覆盖率 | 100.0%（未变） |
+| `internal/store` 覆盖率 | 4.5%（本机无 `DATABASE_URL`，仍需真实库；新用例不依赖库） |
+| 两条 SSRF 用例 | 本机 **PASS**（前提成立，跳过分支未触发；跳过路径只对透明代理环境生效） |
+
+- 未验证：有透明出站代理的环境下两条用例的 SKIP 行为（本机没有该条件，只能由代码路径保证）；
+  `store` 的真实库覆盖率仍待 `make test-cover`（`DATABASE_URL` 在场时）。
