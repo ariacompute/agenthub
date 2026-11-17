@@ -350,14 +350,16 @@ make e2e / make e2e-coverage # 两套都跑 / 仅端点覆盖度守卫
 ## 发布（镜像）
 
 - 发布 Release 触发 `.github/workflows/release.yml`：单一 job `build-and-publish` 构建并推送容器镜像。
-- 镜像：构建并推送 **`ariacompute/agenthub-agenthub`**
-  到 DockerHub，tag 取 Release tag（`ariacompute/agenthub-agenthub:<tag>`）并额外打 `:latest`。
+- 镜像：构建并推送 **`agenthub`** 到三个仓库：DockerHub `ariacompute/agenthub`、Quay.io
+  `quay.io/ariacompute/agenthub`、GHCR `ghcr.io/ariacompute/agenthub`；tag 取 Release tag
+  （`<registry>/ariacompute/agenthub:<tag>`）并额外打 `:latest`。
 - tag 同时作为 `VERSION` build-arg、`7 位 commit` 作为 `COMMIT`、`DISTANCE=0`、`DIRTY=false`
   （CI 一定是干净 checkout），走的是 Dockerfile 已有的四个 `ARG`，与本地 `make docker-build` /
   `make compose-build` 完全一致；这样**镜像 tag === `/healthz` 的 `version@commit`**，可回溯。
 - **不设兜底**：Release 无 tag、`./Dockerfile` 缺失都以 `::error::` 退出——宁可发布失败，也不推一个
   自报 `dev` 哨兵、说不清来源的 `:latest`。
-- 必填 secrets：`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`；`:latest` **只由 CI 推**，禁止本地手工推。
+- 必填 secrets：`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`、`QUAY_USERNAME` / `QUAY_TOKEN`、
+  `ARIACOMPUTE_TOKEN`（GHCR）；`:latest` **只由 CI 推**，禁止本地手工推。
 - 平台仅 `linux/amd64`（与 docker 仓 release.yml 一致）；如需多架构再引 `setup-qemu` + `setup-buildx`。
 
 ## 演示数据（demo resources）

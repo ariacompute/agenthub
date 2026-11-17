@@ -332,15 +332,16 @@ ALPINE_MIRROR=https://mirrors.aliyun.com docker compose up --build
 # or: ALPINE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 ```
 
-**Published images.** Publishing a release builds and pushes
-`ariacompute/agenthub-agenthub` to DockerHub (`.github/workflows/release.yml`): `:<release tag>` for
+**Published images.** Publishing a release builds and pushes the `agenthub` image
+(`.github/workflows/release.yml`) to DockerHub (`ariacompute/agenthub`), Quay.io
+(`quay.io/ariacompute/agenthub`) and GHCR (`ghcr.io/ariacompute/agenthub`): `:<release tag>` for
 that release, `:latest` for the newest one. The release tag and its commit go into the image as the
 `VERSION` / `COMMIT` build args, so the image tag and the `version@commit` reported by `/healthz`
-always agree. The workflow needs two repository secrets: `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN`.
+always agree. The workflow needs five repository secrets:
+`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`, `QUAY_USERNAME` / `QUAY_TOKEN` and `ARIACOMPUTE_TOKEN`.
 
 ```bash
-docker pull ariacompute/agenthub-agenthub:<tag>  # e.g. v0.3.0
+docker pull ariacompute/agenthub:<tag>  # e.g. v0.3.0
 ```
 
 **Required for production:** A ready-made hardened template covering every variable below — plus the

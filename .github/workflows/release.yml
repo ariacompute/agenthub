@@ -3,13 +3,13 @@ name: Release
 # Publish an agenthub release: build and push the container image to DockerHub,
 # Quay.io and GitHub Container Registry (GHCR).
 #
-# The same image is published to all three registries under the same repository
-# name (with <release tag> pinned to that release and :latest tracking the most
-# recent one):
+# The same image is published to all three registries under the repository name
+# `agenthub` (with <release tag> pinned to that release and :latest tracking the
+# most recent one):
 #
-#   ariacompute/agenthub-agenthub:<release tag>          (DockerHub)
-#   quay.io/ariacompute/agenthub-agenthub:<release tag>  (Quay.io)
-#   ghcr.io/ariacompute/agenthub-agenthub:<release tag>  (GHCR)
+#   ariacompute/agenthub:<release tag>          (DockerHub)
+#   quay.io/ariacompute/agenthub:<release tag>  (Quay.io)
+#   ghcr.io/ariacompute/agenthub:<release tag>  (GHCR)
 #
 # The release tag is both the image tag and the VERSION build-arg, so the image
 # tag always equals what /healthz reports and what the console renders in the
@@ -124,13 +124,14 @@ jobs:
             DISTANCE=${{ steps.meta.outputs.distance }}
             DIRTY=false
           push: true
+          # `agenthub` is the canonical name in all three registries.
           tags: |
-            ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
-            ariacompute/agenthub-agenthub:latest
-            quay.io/ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
-            quay.io/ariacompute/agenthub-agenthub:latest
-            ghcr.io/ariacompute/agenthub-agenthub:${{ steps.meta.outputs.tag }}
-            ghcr.io/ariacompute/agenthub-agenthub:latest
+            ariacompute/agenthub:${{ steps.meta.outputs.tag }}
+            ariacompute/agenthub:latest
+            quay.io/ariacompute/agenthub:${{ steps.meta.outputs.tag }}
+            quay.io/ariacompute/agenthub:latest
+            ghcr.io/ariacompute/agenthub:${{ steps.meta.outputs.tag }}
+            ghcr.io/ariacompute/agenthub:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.meta.outputs.tag }}

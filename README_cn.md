@@ -307,14 +307,15 @@ ALPINE_MIRROR=https://mirrors.aliyun.com docker compose up --build
 # 或：ALPINE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 ```
 
-**已发布镜像。** 发布 Release 会自动构建并推送 `ariacompute/agenthub-agenthub` 到 DockerHub
-（`.github/workflows/release.yml`）：`:<release tag>` 对应该次发布，`:latest` 指向最新一次发布。
+**已发布镜像。** 发布 Release 会自动构建并推送 `agenthub` 镜像（`.github/workflows/release.yml`）
+到 DockerHub（`ariacompute/agenthub`）、Quay.io（`quay.io/ariacompute/agenthub`）和 GHCR
+（`ghcr.io/ariacompute/agenthub`）：`:<release tag>` 对应该次发布，`:latest` 指向最新一次发布。
 Release tag 与该 tag 的 commit 会作为 `VERSION` / `COMMIT` 构建参数写进镜像，因此镜像 tag 与
-`/healthz` 上报的 `version@commit` 永远一致。该工作流需要两个仓库 secrets：`DOCKERHUB_USERNAME`
-与 `DOCKERHUB_TOKEN`。
+`/healthz` 上报的 `version@commit` 永远一致。该工作流需要五个仓库 secrets：`DOCKERHUB_USERNAME`
+/ `DOCKERHUB_TOKEN`、`QUAY_USERNAME` / `QUAY_TOKEN` 与 `ARIACOMPUTE_TOKEN`。
 
 ```bash
-docker pull ariacompute/agenthub-agenthub:<tag>  # 例如 v0.3.0
+docker pull ariacompute/agenthub:<tag>  # 例如 v0.3.0
 ```
 
 **生产部署必须**：一份覆盖下面全部变量（外加 SSRF 护航的同步与签名的 A2A push 设置）的加固模板已随仓库提供，名为 `.env.sec.example`。用 `cp .env.sec.example .env` 复制，再把每个 `<...>` 占位符换成带外生成的强随机密钥（如 `openssl rand -base64 48`）。该模板在占位符替换前**故意无效**，因此加固实例不可能带着提交进仓的密钥启动。
