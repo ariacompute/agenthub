@@ -324,6 +324,10 @@ persistence ← internal/store（GORM 实现）
      `internal/store` 而不是都归到 `tests/`（后者只有 0 语句，覆盖率不体现）；
   3. 离线优先是硬约束：任何会触网的用例必须走 `httptest` 或 fixture；同步类用例一律
      `Fixture: true`，否则一次 DNS 超时就是 5 秒的测试。
+- **测试不得留下全局状态**：任何用例结束时必须复原它改过的全局东西——语言/主题、配置与环境变量、
+  数据库行、文件、审计链锚点。`t.Setenv` 会自动复原，手写 `os.Setenv` 不会；真实库上的写操作
+  用唯一 id + `t.Cleanup` 删除，失败路径也要清。M28（自家测试把审计链锚点写脏）与 agentbuddy
+  M48（截图 spec 留在中文）是同一类问题：跨用例污染排查成本极高。agentbuddy 的 AGENTS.md 同步记录。
 
 ## 常用命令
 
