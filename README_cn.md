@@ -461,13 +461,13 @@ agent 计算机，以及线程与其消息、通道投递明细、共享文件�
 单元与集成套件：
 
 ```bash
-make db-up             # 集成用例需要真实 PostgreSQL
-make db-migrate        # 只建 schema；两个 test 目标都会先跑它
-make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
-make test-integration  # 只跑 integration_test.go
-make test-cover        # -coverprofile + go tool cover -func，按包与总计；需要 DATABASE_URL
-make test-cover-offline # 同上，但明确标注为「只量了离线子集」
-make web-test          # cd web && bunx vitest run
+make db-up               # 集成用例需要真实 PostgreSQL
+make db-migrate          # 只建 schema；两个 test 目标都会先跑它
+make test                # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
+make test-integration    # 只跑 integration_test.go
+make test-cover          # -coverprofile + go tool cover -func，按包与总计；需要 DATABASE_URL
+make test-cover-offline  # 同上，但明确标注为「只量了离线子集」
+make web-test            # cd web && bunx vitest run
 ```
 
 覆盖率按包统计。读数字前要知道两件事：治理规则用**包内假 store** 驱动，因此 `registry` 的

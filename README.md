@@ -515,13 +515,13 @@ disk. Verify recoverability periodically with `scripts/backup-restore-drill.sh`.
 Unit and integration suites:
 
 ```bash
-make db-up             # integration cases need a real PostgreSQL
-make db-migrate        # create the schema; both test targets run this first
-make test              # go test -race ./... (integration cases skip without DATABASE_URL)
-make test-integration  # only integration_test.go
-make test-cover        # -coverprofile + go tool cover -func; requires DATABASE_URL
-make test-cover-offline # the same, labelled as the offline subset it measures
-make web-test          # cd web && bunx vitest run
+make db-up               # integration cases need a real PostgreSQL
+make db-migrate          # create the schema; both test targets run this first
+make test                # go test -race ./... (integration cases skip without DATABASE_URL)
+make test-integration    # only integration_test.go
+make test-cover          # -coverprofile + go tool cover -func; requires DATABASE_URL
+make test-cover-offline  # the same, labelled as the offline subset it measures
+make web-test            # cd web && bunx vitest run
 ```
 
 Coverage is measured per package. Two things are worth knowing before reading the numbers: the
