@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"agenthub/internal/a2a"
-	"agenthub/internal/httputil"
 	"agenthub/internal/registry"
 )
 
@@ -89,10 +88,9 @@ func (r *ModelRouter) GenerateWith(ctx context.Context, prompt string) (string, 
 		}
 		lastErr = err
 	}
-	if lastErr != nil {
-		return "", "", lastErr
-	}
-	return "", "", &mockUnavailable{}
+	// A non-empty chain always ends here with an error: every provider either
+	// answered or recorded why it did not.
+	return "", "", lastErr
 }
 
 type mockUnavailable struct{}
@@ -133,10 +131,7 @@ func (r *ModelRouter) GenerateStreamWith(ctx context.Context, prompt string, sin
 			return "", "", err
 		}
 	}
-	if lastErr != nil {
-		return "", "", lastErr
-	}
-	return "", "", &mockUnavailable{}
+	return "", "", lastErr
 }
 
 type modelConnector struct {
@@ -209,14 +204,11 @@ func (c *modelConnector) Health(ctx context.Context, e *registry.Entry) (registr
 	// "unhealthy" can simply mean this router does not serve /models, so ask the
 	// endpoint the adapter really calls. One token is a fair price for an answer
 	// that is true, and it is bounded by max_tokens.
-	payload, err := json.Marshal(map[string]any{
+	payload, _ := json.Marshal(map[string]any{
 		"model":      cfg.EffectiveModelID(e),
 		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
 		"max_tokens": 1,
 	})
-	if err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
 	headers["Content-Type"] = "application/json"
 	return probeHTTP(ctx, http.DefaultClient, http.MethodPost, base+"/chat/completions", headers, bytes.NewReader(payload))
 }

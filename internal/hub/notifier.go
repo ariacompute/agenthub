@@ -168,9 +168,13 @@ func sign(secret string, ts int64, nonce string, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// nonceRand is the entropy source behind the signature nonce. It is a variable
+// only so the clock fallback can be proven: a nonce is freshness, not a secret.
+var nonceRand = rand.Read
+
 func newNonce() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := nonceRand(buf); err != nil {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(buf)

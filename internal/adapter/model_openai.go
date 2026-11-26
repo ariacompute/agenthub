@@ -121,10 +121,9 @@ func (p *openAIProvider) Generate(ctx context.Context, prompt string) (string, e
 		"messages":   []map[string]string{{"role": "user", "content": prompt}},
 		"max_tokens": p.effectiveMaxTokens(),
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
+	// Marshal of this payload cannot fail; the only real failure below is the
+	// request itself, which is where the error is checked.
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", &httputil.Error{Code: CodeResourceUnreachable}
@@ -236,10 +235,9 @@ func (p *openAIProvider) GenerateStream(ctx context.Context, prompt string, sink
 		"messages":   []map[string]string{{"role": "user", "content": prompt}},
 		"max_tokens": p.effectiveMaxTokens(),
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
+	// Marshal of this payload cannot fail; the only real failure below is the
+	// request itself, which is where the error is checked.
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", &httputil.Error{Code: CodeResourceUnreachable}

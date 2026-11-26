@@ -299,6 +299,8 @@ func (c *skillConnector) Health(ctx context.Context, e *registry.Entry) (registr
 // localSkillDir turns a file:// endpoint into a filesystem path. file paths are
 // not dialable, so this is only used to read the local skill directory; a parse
 // error returns an empty path so the caller answers unknown instead of guessing.
+var hostOS = runtime.GOOS
+
 func localSkillDir(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if !strings.HasPrefix(trimmed, "file://") {
@@ -318,7 +320,9 @@ func localSkillDir(raw string) (string, error) {
 	p := u.Path
 	// On Windows file:///C:/x parses to Path "/C:/x"; drop the leading slash so
 	// it resolves as C:\x. Other platforms keep the absolute path untouched.
-	if runtime.GOOS == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+	// hostOS is a variable only so the Windows rule can be tested where the
+	// binary is not Windows.
+	if hostOS == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' {
 		p = p[1:]
 	}
 	return filepath.FromSlash(p), nil

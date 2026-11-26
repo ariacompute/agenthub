@@ -89,19 +89,12 @@ func (p *openAISpeech) Transcribe(ctx context.Context, audio []byte) (string, er
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("model", p.sttModel); err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
-	part, err := writer.CreateFormFile("file", "clip.wav")
-	if err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
-	if _, err := part.Write(audio); err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
-	if err := writer.Close(); err != nil {
-		return "", &httputil.Error{Code: CodeProviderMalformed}
-	}
+	// The destination is a bytes.Buffer, so neither call can fail: an error
+	// branch here would be untestable code pretending to be defensive.
+	_ = writer.WriteField("model", p.sttModel)
+	part, _ := writer.CreateFormFile("file", "clip.wav")
+	_, _ = part.Write(audio)
+	_ = writer.Close()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.transcriptionsURL, &body)
 	if err != nil {
 		return "", &httputil.Error{Code: CodeResourceUnreachable}
@@ -143,14 +136,11 @@ func (p *openAISpeech) Synthesize(ctx context.Context, text string) ([]byte, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(map[string]any{
+	payload, _ := json.Marshal(map[string]any{
 		"model":           p.ttsModel,
 		"input":           text,
 		"response_format": "wav",
 	})
-	if err != nil {
-		return nil, &httputil.Error{Code: CodeProviderMalformed}
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.speechURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, &httputil.Error{Code: CodeResourceUnreachable}

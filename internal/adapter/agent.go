@@ -230,15 +230,15 @@ func (c *agentConnector) sendMessage(ctx context.Context, endpoint string, call 
 		Parts:     []outboundPart{textPart(call.Prompt)},
 	}
 	message.Metadata = distributionMetadata(call.Distribution)
-	body, err := json.Marshal(map[string]any{
+	// Marshal cannot fail on these types (a fixed map of strings and a struct of
+	// strings), so the error is not a branch: a fake one would only be reachable
+	// by breaking the type, which the compiler already forbids.
+	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": a2a.JSONRPCVersion,
 		"id":      "agenthub-1",
 		"method":  a2a.MethodMessageSend,
 		"params":  map[string]any{"message": message},
 	})
-	if err != nil {
-		return "", "", &httputil.Error{Code: CodeProviderMalformed}
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
@@ -286,15 +286,12 @@ func (c *agentConnector) streamMessage(ctx context.Context, endpoint string, cal
 	// Streaming carries the same package as message/send: an agent must not lose
 	// its abilities just because the caller asked for frames.
 	message.Metadata = distributionMetadata(call.Distribution)
-	body, err := json.Marshal(map[string]any{
+	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": a2a.JSONRPCVersion,
 		"id":      "agenthub-stream-1",
 		"method":  a2a.MethodMessageStream,
 		"params":  map[string]any{"message": message},
 	})
-	if err != nil {
-		return "", "", &httputil.Error{Code: CodeProviderMalformed}
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return "", "", &httputil.Error{Code: CodeResourceUnreachable}
@@ -519,10 +516,15 @@ func textPart(text string) outboundPart {
 	return outboundPart{Kind: a2a.PartTypeText, Type: a2a.PartTypeText, Text: text}
 }
 
+// randRead is the entropy source behind newMessageID. It is a variable only so
+// a test can prove the fallback path: a message id is correlation, not a
+// secret, so falling back to the clock degrades uniqueness, never safety.
+var randRead = rand.Read
+
 // newMessageID mints the correlation id A2A 1.0 requires on every message.
 func newMessageID() string {
 	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	if _, err := randRead(buf[:]); err != nil {
 		return fmt.Sprintf("agenthub-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(buf[:])

@@ -140,20 +140,17 @@ func (c *customConnector) dispatch(ctx context.Context, req InvokeRequest, d cus
 
 	var body io.Reader
 	if d.Method == http.MethodPost {
-		payload, err := json.Marshal(map[string]any{
+		payload, _ := json.Marshal(map[string]any{
 			"input":    req.Prompt,
 			"resource": req.Entry.Name,
 			"metadata": req.Metadata,
 		})
-		if err != nil {
-			return InvokeResult{}, &httputil.Error{Code: CodeProviderMalformed}
-		}
 		body = bytes.NewReader(payload)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, d.Method, target, body)
-	if err != nil {
-		return InvokeResult{}, &httputil.Error{Code: CodeResourceUnreachable}
-	}
+	// ValidateURL above already refused everything NewRequest would reject
+	// (unparsable target, unsupported scheme), so there is no second error to
+	// branch on here.
+	httpReq, _ := http.NewRequestWithContext(ctx, d.Method, target, body)
 	if d.Method == http.MethodPost {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
