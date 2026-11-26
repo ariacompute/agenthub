@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"agenthub/internal/audit"
 	"agenthub/internal/config"
 	"agenthub/internal/httputil"
+	"agenthub/internal/hub"
 	"agenthub/internal/registry"
 )
 
@@ -69,7 +71,7 @@ func (d Deps) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 			a2a.WriteRPCError(w, req.ID, a2a.NewError(a2a.CodeResourceNotFound, a2a.MsgResourceNotFound))
 			return
 		}
-		task, err := d.Hub.Send(r.Context(), params)
+		task, err := d.Hub.Send(d.abilities(r, params), params)
 		if err != nil {
 			a2a.WriteRPCErr(w, req.ID, err)
 			return
@@ -176,6 +178,40 @@ func (d Deps) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// abilities resolves the agent this message will reach and attaches the package
+// it is entitled to read.
+//
+// Order matters: this runs after mayInvoke, so the target has already been
+// authorized, and the package itself is filtered by visibleEntries — an agent
+// never learns about a record its caller could not see. Failures are swallowed
+// on purpose: a conversation that would otherwise succeed must not fail because
+// one bound skill could not be rendered, and the agent simply keeps the
+// abilities it already had.
+func (d Deps) abilities(r *http.Request, params a2a.MessageSendParams) context.Context {
+	ctx := r.Context()
+	if d.Hub == nil || d.Reg == nil {
+		return ctx
+	}
+	entry, err := d.Hub.ResolveResource(params)
+	if err != nil || entry == nil {
+		return ctx
+	}
+	// A target that cannot carry bindings is refused by the renderer, and that
+	// refusal is the whole answer: a model, mcp or cli record simply has no
+	// package to attach. Rendering is also where the visibility filter runs, so
+	// the package never names a record this caller could not see.
+	dist, err := d.distributionOf(r, entry)
+	if err != nil {
+		if d.Log != nil {
+			d.Log.Debug("handler: ability package unavailable", "resource", entry.ID, "error", err)
+		}
+		return ctx
+	}
+	// WithDistribution ignores an empty package, so a reference-free agent sends
+	// exactly the message it sent before this feature existed.
+	return hub.WithDistribution(ctx, dist)
+}
+
 // mayInvoke decides whether the caller may run the resource this message will
 // reach.
 //
@@ -253,7 +289,7 @@ func (d Deps) streamTask(w http.ResponseWriter, r *http.Request, id any, params 
 	emit := func(event string, payload any) error {
 		return httputil.WriteSSE(w, flusher, event, a2a.NewResponse(id, payload))
 	}
-	_, err := d.Hub.Stream(r.Context(), params, emit)
+	_, err := d.Hub.Stream(d.abilities(r, params), params, emit)
 	if err != nil {
 		rpcErr, isRPC := err.(*a2a.Error)
 		if !isRPC {

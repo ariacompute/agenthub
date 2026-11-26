@@ -166,7 +166,7 @@ Console: `make web-dev` (development) or `make web-build && make run` (the bundl
 by the Go process).
 
 Documentation: the console documents itself on a **`/docs`** screen — concepts, the seven A2A
-methods and all 145 HTTP routes. The same content is rendered to
+methods and all 147 HTTP routes. The same content is rendered to
 [`docs/docs.md`](docs/docs.md) by `make docs-md`; that file is **generated** from the two modules
 the screen reads (`web/src/lib/docs-content.js` and `web/src/lib/copy/docs-copy.js`), so edit those
 and re-run rather than editing the markdown.
@@ -526,7 +526,7 @@ its cases skip rather than fabricate.
 
 End-to-end test against a running instance — two independent user-facing suites in `e2e/`
 (see [`e2e/README.md`](e2e/README.md) for the full switch list and report format). The API suite is
-a declarative case table covering **every documented route** (145): discovery, auth/session,
+a declarative case table covering **every documented route** (147): discovery, auth/session,
 resources and governance, the A2A methods with HITL park → resume / cancel, streaming and `since`
 replay, tasks, RBAC and API keys, channels/connectors, threads/speech, files, sandboxes,
 schedules/computers/knowledge, router, audit and checkpoints. The UI suite drives six real console

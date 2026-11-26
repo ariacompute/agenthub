@@ -87,6 +87,17 @@ export function setResourceHealth(id, health) {
   return request(`/api/resources/${encodeURIComponent(id)}/health`, { method: 'POST', ...body({ health }) })
 }
 
+// The ability package an agent receives: the mcp servers and skill manuals bound
+// to it. GET is what the agent itself pulls; POST delivers the same package as a
+// task, and the returned task id is the receipt.
+export function getResourceDistribution(id) {
+  return request(`/api/resources/${encodeURIComponent(id)}/distribution`)
+}
+
+export function pushResourceDistribution(id) {
+  return request(`/api/resources/${encodeURIComponent(id)}/distribution`, { method: 'POST', ...body({}) })
+}
+
 // A probe asks the resource's own connector how the resource is doing and the
 // server stores the answer, so the health dot stops showing a guess.
 export function probeResource(id) {

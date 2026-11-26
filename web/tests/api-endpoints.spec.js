@@ -65,6 +65,12 @@ describe('resource and registry endpoints', () => {
     ['probeResource', () => api.probeResource('r1'), '/api/resources/r1/probe', 'POST'],
     ['setResourceStatus', () => api.setResourceStatus('r1', 'approved', 'looks fine'),
       '/api/resources/r1/status', 'POST'],
+    // Ability distribution: the pull the agent makes and the push the operator
+    // makes share one path and differ only by method.
+    ['getResourceDistribution', () => api.getResourceDistribution('r1'),
+      '/api/resources/r1/distribution', undefined],
+    ['pushResourceDistribution', () => api.pushResourceDistribution('r1'),
+      '/api/resources/r1/distribution', 'POST'],
     ['listApprovals', () => api.listApprovals(), '/api/registries/approvals', undefined],
     ['listRegistries', () => api.listRegistries(), '/api/registries', undefined],
     ['createRegistry', () => api.createRegistry({ namespace: 'team-a' }), '/api/registries', 'POST'],

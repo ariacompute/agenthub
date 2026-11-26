@@ -32,6 +32,13 @@ export const useHubStore = defineStore('hub', {
     registries: [],
     approvals: [],
     sources: [],
+    // Ability distribution: the mcp / skill options the agent drawer offers, the
+    // package the server rendered for one agent, and the id of the last task a
+    // push created. They are separate from `resources` because a failed preview
+    // must not blank the catalogue the drawer is editing.
+    bindingOptions: { mcp: [], skill: [] },
+    distribution: null,
+    distributionTaskID: '',
     selectedTaskID: '',
     selectedResourceID: '',
     errorCode: '',
@@ -238,6 +245,54 @@ export const useHubStore = defineStore('hub', {
       // Same reasoning as curate: the second read may clear the first failure.
       this.errorCode = sourcesCode || this.errorCode
       return result
+    },
+    // Binding options are the whole catalogue of one kind, unpaged: a drawer that
+    // offered only page one of the mcp servers would silently hide half of them.
+    // The server already filtered by what this caller may see.
+    async refreshBindingOptions() {
+      try {
+        const [mcp, skill] = await Promise.all([
+          api.listResources({ kind: 'mcp' }),
+          api.listResources({ kind: 'skill' }),
+        ])
+        this.bindingOptions = { mcp: mcp?.resources ?? [], skill: skill?.resources ?? [] }
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = error.code || 'internal_error'
+        return false
+      }
+    },
+    // The preview keeps the last package that rendered when a re-read fails: a
+    // transient 500 should not make an operator think the bindings vanished.
+    async loadDistribution(id) {
+      try {
+        this.distribution = await api.getResourceDistribution(id)
+        this.distributionTaskID = ''
+        this.errorCode = ''
+        return true
+      } catch (error) {
+        this.errorCode = error.code || 'internal_error'
+        return false
+      }
+    },
+    // pushDistribution delivers the package as a task and returns it, so the
+    // caller can show the task id as the receipt. A failure leaves the previous
+    // receipt alone: the earlier push did happen.
+    async pushDistribution(id) {
+      try {
+        const task = await api.pushResourceDistribution(id)
+        this.distributionTaskID = task?.id ?? ''
+        this.errorCode = ''
+        return task
+      } catch (error) {
+        this.errorCode = error.code || 'internal_error'
+        return null
+      }
+    },
+    clearDistribution() {
+      this.distribution = null
+      this.distributionTaskID = ''
     },
     selectTask(id) {
       this.selectedTaskID = id

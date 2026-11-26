@@ -1509,3 +1509,55 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
 
 - 未验证：有透明出站代理的环境下两条用例的 SKIP 行为（本机没有该条件，只能由代码路径保证）；
   `store` 的真实库覆盖率仍待 `make test-cover`（`DATABASE_URL` 在场时）。
+## M26 — 能力下发：把 mcp / skill 交付给已注册的 agent（2026-11-26）
+
+### 1. 做了什么
+
+- **绑定（零迁移）**：`AgentConfig` 复用 `skills`（语义升级为 skill 资源 id，历史自由文本不报错）
+  并新增 `mcp`（mcp 资源 id）。`validateAgent` 只做结构校验（`mcp` ≤ 50、拒绝空串），
+  **不在 `Upsert` 持锁路径上调 `Get`**（会死锁），引用解析延迟到渲染时刻。
+- **渲染**：新增 `registry.DistributionOf(reg, agent, filter)`。解析走 `GetMany` 并按
+  100 分批（历史记录可能带任意长的自由文本列表，截断会把显示问题变成能力缺失）；
+  输出 `mcp` / `skills` / `missing` / `unresolved` / `truncated`，`missing` 与 `unresolved`
+  分开是为了不确认调用者无权查看的记录的存在性。包内 env 只出 key 名，`docs` 单条 8 KiB、
+  整包 32 KiB 并在 rune 边界截断。
+- **三条通道**：
+  - `GET /api/resources/{id}/distribution`（`resources:read` + `canAccess(read)`）；
+  - A2A `message/send` 与 `message/stream` 的消息 `metadata["agenthub.distribution"]`；
+  - `POST /api/resources/{id}/distribution`（`resources:write`）：以任务投放，消息带
+    `resourceId` 选择器、`distribution: true` 标记与 `agenthub.distribution` data part。
+- **包只从服务端上下文进 hub**：`handlers.abilities` 在 `mayInvoke` 之后渲染，经
+  `hub.WithDistribution(ctx, dist)` 交给 `hub`，`orchestrator` 填 `InvokeRequest.Distribution`，
+  `adapter.agent` 写进 `outboundMessage.metadata`。`params.metadata` 一概不读——
+  用例 `TestAClientSuppliedDistributionIsIgnored` 钉住「客户端伪造的包不会到达 agent」。
+- **控制台**：agent 抽屉内 `ResourceBindingSelect`（可搜索多选 + 未解析 chip 保留历史值），
+  新增加载/预览/下发区块；`store` 新增 `bindingOptions` / `distribution` / `distributionTaskID`
+  与失败保留上次成功值的语义。13 语文案（`registry-copy.js` / `docs-copy.js`）齐全。
+
+### 2. 文件
+
+- 新增：`internal/registry/distribution.go`(+`_test`)、`internal/handlers/distribution.go`(+`_test`)、
+  `internal/hub/distribution.go`(+`_test`)、`internal/adapter/agent_distribution_test.go`、
+  `web/src/components/ResourceBindingSelect.vue`、`web/tests/distribution.spec.js`。
+- 修改：`internal/registry/kinds.go`(+`_test`)、`internal/adapter/{agent,connector}.go`、
+  `internal/hub/orchestrator.go`、`internal/handlers/{a2a,handlers}.go`、
+  `web/src/{components/ResourceKindForm.vue,views/RegistryView.vue,lib/api.js,lib/store.js,lib/docs-content.js,lib/copy/*}`、
+  `e2e/api/cases/02-resources.js`、文档计数六处（`AGENTS.md` / 中英 `README` / 三份 `releasenotes`）。
+
+### 3. 验证（本机 linux/amd64 实测）
+
+| 项 | 结果 |
+| --- | --- |
+| `gofmt -l` / `go vet ./...` | 无输出 |
+| `go test ./...` | 26 包全绿（`no test files` 3 个） |
+| `go test -race ./internal/{registry,handlers,adapter,hub}/` | 四包全绿 |
+| 覆盖率 | registry **92.1%**、handlers **84.3%**、adapter **96.2%**、hub **91.0%** |
+| ↳ 新增函数 | `DistributionOf` 96.7%、`abilities` 100%、`WithDistribution`/`distributionFrom` 100%、`distributionMetadata` 100% |
+| `cd web && bun run test` | **26 文件 / 494 用例**全绿（路由计数断言同步到 147） |
+| `cd web && bun run build` | 通过（1655 modules） |
+| `e2e/api --coverage-only` | **147/147 documented routes have a case** |
+| `make docs-md` | 已重生成，无漂移 |
+
+- 未覆盖：`handlers` 里三条防御分支（`loadAgent` 之后的 `distributionOf` 报错、`Hub.Send` 失败），
+  只会在 `DistributionOf` 将来新增失败模式时触发；`store` 仍按既有约定依赖 `DATABASE_URL`，
+  本机无库时跳过（本次改动不涉及持久层）。

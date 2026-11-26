@@ -22,11 +22,17 @@ import {
   showsSandbox,
 } from '../lib/sandbox-form.js'
 import EnvEditor from './EnvEditor.vue'
+import ResourceBindingSelect from './ResourceBindingSelect.vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps({
   kind: { type: String, required: true },
   modelValue: { type: Object, default: () => ({}) },
+  // The catalogues the agent branch offers when binding abilities. The parent
+  // loads them once per drawer (the server already filtered by visibility);
+  // empty arrays are the honest answer for an instance with nothing registered.
+  mcpOptions: { type: Array, default: () => [] },
+  skillOptions: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:modelValue'])
 const { t } = useCopy('registry')
@@ -256,14 +262,29 @@ function removeTarget(index) {
           </label>
         </div>
       </div>
+      <!-- Ability bindings. They are resource ids, not free text: the package
+           the agent receives is resolved from them, so the picker is the only
+           way to keep the reference honest. -->
+      <div class="field">
+        <label for="k-mcp">{{ t('fieldMCP') }}</label>
+        <ResourceBindingSelect
+          id="k-mcp"
+          input-id="k-mcp"
+          :model-value="agent.mcp ?? []"
+          :options="mcpOptions"
+          @update:model-value="set('agent', 'mcp', $event.length ? $event : '')"
+        />
+      </div>
       <div class="field">
         <label for="k-skills">{{ t('fieldSkills') }}</label>
-        <input
+        <ResourceBindingSelect
           id="k-skills"
-          type="text"
-          :value="csvText('agent', 'skills')"
-          @input="setList('agent', 'skills', $event.target.value)"
+          input-id="k-skills"
+          :model-value="agent.skills ?? []"
+          :options="skillOptions"
+          @update:model-value="set('agent', 'skills', $event.length ? $event : '')"
         />
+        <p class="muted note">{{ t('fieldSkillsHint') }}</p>
       </div>
       <div class="field">
         <label for="k-auth">{{ t('fieldAuth') }}</label>

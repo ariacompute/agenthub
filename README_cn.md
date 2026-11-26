@@ -156,7 +156,7 @@ curl localhost:3500/.well-known/agent.json
 
 控制台：`make web-dev`（开发）或 `make web-build && make run`（构建产物由 Go 进程托管于 `/`）。
 
-文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 145 条 HTTP 路由。同一份内容
+文档：控制台自带 **`/docs`** 屏，说明核心概念、7 个 A2A 方法与全部 147 条 HTTP 路由。同一份内容
 由 `make docs-md` 渲染到 [`docs/docs_cn.md`](docs/docs_cn.md)；该文件是**生成的**——来源是文档屏
 所读的两个模块（`web/src/lib/docs-content.js` 与 `web/src/lib/copy/docs-copy.js`），要改就改这两处
 再重跑，不要直接编辑 markdown。
@@ -471,7 +471,7 @@ store 分支不需要数据库就能覆盖；而 `internal/store` 只有在设�
 它的用例是 skip，而不是伪造结果。
 
 对着运行中实例的端到端测试——`e2e/` 下两套彼此独立的「用户视角」套件（完整开关清单与报告格式见
-[`e2e/README.md`](e2e/README.md)）。接口套件是声明式用例表，覆盖**全部 145 条文档端点**：发现、
+[`e2e/README.md`](e2e/README.md)）。接口套件是声明式用例表，覆盖**全部 147 条文档端点**：发现、
 认证与会话、资源与治理、A2A 各方法（含 HITL park → resume / cancel）、流式与 `since` 回放、任务、
 权限与 API 密钥、渠道/连接器、线程/语音、文件、沙箱、调度/计算机/知识、路由、审计与检查点；界面套件
 用 Playwright 跑六段真实控制台旅程（登录、登记资源、试跑、任务追踪、治理审批、后台管理）。两者都只

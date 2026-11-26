@@ -79,6 +79,11 @@ type InvokeRequest struct {
 	// is produced. The final result still carries the aggregate, so a caller
 	// that ignores the sink sees the pre-streaming behaviour unchanged.
 	Stream StreamSink
+	// Distribution is what the target agent may use: the mcp servers and skill
+	// manuals bound to it. Only the agent connector reads it, and only to put it
+	// in the message metadata; every other kind ignores the field, so a nil value
+	// keeps the behaviour of a call made before bindings existed.
+	Distribution *registry.Distribution
 }
 
 // streamChunk builds one appendable artifact for a streamed answer. Every chunk

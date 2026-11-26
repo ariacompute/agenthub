@@ -562,6 +562,9 @@ func (h *Hub) invoker(emit Emit, origin Origin) Invoker {
 			Metadata:   entry.Metadata,
 			OwnerID:    origin.OwnerID,
 			Scope:      origin.Scope,
+			// The handler resolved this after authorizing the call, so the
+			// connector can attach it without deciding anything itself.
+			Distribution: distributionFrom(ctx),
 		}
 		if emit != nil {
 			// message/stream asked for frames, so hand the connector a sink.

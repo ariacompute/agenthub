@@ -204,7 +204,7 @@ persistence ← internal/store（GORM 实现）
   `components/EnvEditor.vue`）；`tests/` vitest）
 - `web/src/lib/docs-content.js` + `web/src/lib/copy/docs-copy.js` + `web/src/views/DocsView.vue`：
   **控制台自带文档屏**（侧边栏「管理」之后，无权限门控）。内容与文案分家——`docs-content.js` 是
-  语言中立的机器数据（`/a2a` 七方法 + 别名、145 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
+  语言中立的机器数据（`/a2a` 七方法 + 别名、147 条 HTTP 路由、错误码按状态码分组、字段与 JSON 示例），
   原样渲染不翻译；`docs-copy.js` 只放散文，13 语齐备。二者的分界由 `tests/copy-fallback.spec.js`
   强制：该测试断言每个键在各语言下都**不等于英文**，所以路径/权限码/报文一旦进 copy 表就会失败。
   CRUD 行用「动词模板 + 名词」描述（`verbList` + `nounResources`），不为 60 行各写一套译文。
@@ -224,6 +224,11 @@ persistence ← internal/store（GORM 实现）
 - **后端保持语言无关**：HTTP 与 JSON-RPC 响应只含字段、枚举与 code；多语言 100% 由前端 copy 层承担。
 - **传输无关**：MCP 的 `transport`（stdio / streamable-http / sse-legacy）是**记录字段**，
   适配器不得按它分支。
+- **能力下发只有一个来源**：agent 的 `kind_config.agent.mcp` / `.skills` 是绑定（资源 id，
+  零迁移）；包由 `registry.DistributionOf(reg, agent, filter)` 渲染，`handlers` 传
+  `visibleEntries` 谓词、`hub` 从**服务端上下文**取（`hub.WithDistribution`）。绝不从
+  `params.metadata` 读——那是调用方可控字段，读它等于允许向别人的 agent 注入任意 mcp 配置。
+  包内只出 env 的 **key 名**与 `credential_env` 变量名，绝不出值。
 - **CLI 适配器安全底线**：白名单前置校验 → 单次超时（默认 15s）→ 输出截断 → 结构化 JSON 回执，
   四步缺一不可；真实实现沿用同一顺序。
 - **日志与密钥**：用 `slog`（dev 为 debug、其余 info），禁止 `fmt.Println`；不打正文、token 与向量；
@@ -332,7 +337,7 @@ make test-integration # db-migrate + 只跑 Integration 用例
 make test-cover       # db-migrate + 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
-make e2e-api                 # e2e/ 接口套件：145 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）
+make e2e-api                 # e2e/ 接口套件：147 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）
 make e2e-ui                  # e2e/ 界面套件：Playwright 六段控制台旅程
 make e2e / make e2e-coverage # 两套都跑 / 仅端点覆盖度守卫
                              # ./scripts/test-api.sh 为兼容转发器；BASE_URL 指向已运行实例

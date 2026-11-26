@@ -155,6 +155,77 @@ function statusOf(resource) {
   return resource.status || 'approved'
 }
 
+// ---------------------------------------------------------------------------
+// Ability distribution
+//
+// The bindings live on the agent (kind_config.agent.mcp / .skills) and are
+// edited by ResourceKindForm. This half is the delivery: preview the package the
+// server would hand over, and push it as a task.
+// ---------------------------------------------------------------------------
+
+const bindingsLoaded = ref(false)
+const previewOpen = ref(false)
+const pushing = ref(false)
+
+const mcpOptions = computed(() => store.bindingOptions.mcp)
+const skillOptions = computed(() => store.bindingOptions.skill)
+// A package can only be delivered for a record that exists; a half-filled new
+// agent has an empty id and nothing bound yet.
+const canDistribute = computed(() => form.kind === 'agent' && !!editing.value && !!editing.value.id)
+const distribution = computed(() => store.distribution)
+const previewText = computed(() => (distribution.value ? JSON.stringify(distribution.value, null, 2) : ''))
+
+// The option lists are read once per screen: they are the whole catalogue of one
+// kind and the server already filtered them by what this caller may see.
+async function ensureBindings() {
+  if (bindingsLoaded.value) return
+  bindingsLoaded.value = await store.refreshBindingOptions()
+}
+
+function resetDistribution() {
+  store.clearDistribution()
+  previewOpen.value = false
+}
+
+watch(
+  () => form.kind,
+  (kind) => {
+    if (kind === 'agent') ensureBindings()
+  },
+)
+
+async function togglePreview() {
+  if (!canDistribute.value) return
+  if (previewOpen.value) {
+    previewOpen.value = false
+    return
+  }
+  // A failed preview shows the error banner and leaves the panel closed: an
+  // empty JSON view would read like "this agent has nothing bound".
+  if (await store.loadDistribution(editing.value.id)) previewOpen.value = true
+}
+
+async function refreshPreview() {
+  if (!canDistribute.value) return
+  await store.loadDistribution(editing.value.id)
+}
+
+async function pushDistribution() {
+  if (!canDistribute.value || pushing.value) return
+  pushing.value = true
+  try {
+    await store.pushDistribution(editing.value.id)
+  } finally {
+    pushing.value = false
+  }
+}
+
+function openDistributionTrace() {
+  if (!store.distributionTaskID) return
+  store.selectTask(store.distributionTaskID)
+  router.push('/trace')
+}
+
 function resetForm() {
   Object.assign(form, {
     id: '',
@@ -177,12 +248,14 @@ function resetForm() {
 function openCreate() {
   editing.value = null
   resetForm()
+  resetDistribution()
   baseline.value = snapshot(form)
   drawerOpen.value = true
 }
 
 function openEdit(resource) {
   editing.value = resource
+  resetDistribution()
   Object.assign(form, {
     id: resource.id,
     kind: resource.kind,
@@ -199,6 +272,9 @@ function openEdit(resource) {
     visibility: resource.visibility ?? 'restricted',
     kindConfig: resource.kind_config ?? {},
   })
+  // The picker needs the catalogues that exist right now, including ones
+  // registered since the drawer was last opened.
+  if (resource.kind === 'agent') ensureBindings()
   baseline.value = snapshot(form)
   drawerOpen.value = true
 }
@@ -550,7 +626,56 @@ async function probe(resource) {
         </div>
 
         <h3 class="section-title">{{ t('sectionKindConfig') }}</h3>
-        <ResourceKindForm v-model="form.kindConfig" :kind="form.kind" />
+        <ResourceKindForm
+          v-model="form.kindConfig"
+          :kind="form.kind"
+          :mcp-options="mcpOptions"
+          :skill-options="skillOptions"
+        />
+
+        <template v-if="canDistribute">
+          <h3 class="section-title">{{ t('distributionTitle') }}</h3>
+          <div class="distribution">
+            <p class="muted note">{{ t('distributionHint') }}</p>
+
+            <div class="distribution-actions">
+              <button class="btn btn-ghost" type="button" @click="togglePreview">
+                {{ t('distributionPreview') }}
+              </button>
+              <button class="btn btn-ghost" type="button" :disabled="!previewOpen" @click="refreshPreview">
+                {{ t('distributionRefresh') }}
+              </button>
+              <button class="btn btn-primary" type="button" :disabled="pushing" @click="pushDistribution">
+                {{ pushing ? t('distributionPushing') : t('distributionPush') }}
+              </button>
+            </div>
+
+            <p v-if="!distribution && !previewOpen" class="muted note">{{ t('distributionEmpty') }}</p>
+
+            <div v-if="previewOpen && distribution" class="distribution-preview">
+              <div class="distribution-counts">
+                <span class="mono">{{ enumLabel('kind', 'mcp') }} {{ distribution.mcp?.length ?? 0 }}</span>
+                <span class="mono">{{ enumLabel('kind', 'skill') }} {{ distribution.skills?.length ?? 0 }}</span>
+                <span v-if="distribution.missing?.length" class="mono">
+                  {{ t('distributionMissing') }} {{ distribution.missing.length }}
+                </span>
+                <span v-if="distribution.unresolved?.length" class="mono">
+                  {{ t('distributionUnresolved') }} {{ distribution.unresolved.length }}
+                </span>
+              </div>
+              <p v-if="distribution.truncated" class="muted note">{{ t('distributionTruncated') }}</p>
+              <pre class="mono distribution-json">{{ previewText }}</pre>
+            </div>
+
+            <p v-if="store.distributionTaskID" class="distribution-receipt">
+              {{ t('distributionPushed') }}
+              <span class="mono">{{ store.distributionTaskID }}</span>
+              <button class="btn btn-ghost" type="button" @click="openDistributionTrace">
+                {{ t('distributionViewTrace') }}
+              </button>
+            </p>
+          </div>
+        </template>
 
         <div class="drawer-actions">
           <button class="btn btn-primary" type="submit">{{ shell.t('actionSave') }}</button>
@@ -617,6 +742,63 @@ async function probe(resource) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.distribution {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.distribution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The drawer card can be 300px wide: the buttons wrap instead of pushing the
+   card's edge out, and no child keeps an intrinsic width larger than it. */
+.distribution-actions .btn {
+  min-width: 0;
+}
+
+.distribution-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.distribution-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.distribution-json {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.distribution-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
 }
 
 .segment {

@@ -143,6 +143,8 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `POST` | `/api/resources/{id}/health` | `resources:write` — 变更资源 | 手工写入一个健康值。 | `{ health }` | `{ health }` |
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — 变更资源 | 立即实测该资源并保存测到的结果。 | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — 批准、拒绝与弃用记录 | 让一条记录沿审批状态机前进一步。 | `{ status, reason? }` | `Entry` |
+| `GET` | `/api/resources/{id}/distribution` | `resources:read` — 查看资源 | 读取某个智能体资源可获得的能力包：绑定的 MCP 服务与技能手册，由服务端解析。 | — | `{ agent_id, agent_name, mcp: [MCPBinding], skills: [SkillBinding], missing: [id], unresolved: [ref], truncated? }` |
+| `POST` | `/api/resources/{id}/distribution` | `resources:write` — 变更资源 | 把该能力包作为任务下发给智能体；返回的任务即下发记录。 | — | `Task — the delivery, carrying the package as a data part` |
 
 ### 命名空间
 

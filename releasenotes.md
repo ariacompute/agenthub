@@ -430,7 +430,7 @@ screen and a visual inspector for the A2A contract.
 - **Documentation** (`/docs`): the console explains itself, offline and shipped with the
   build. Five sections — concepts, A2A methods, HTTP API, authentication, errors — with a
   sticky index that follows the reader. The endpoint table covers the full route table
-  (145 routes, batch reads included) with method, path, required permission and
+  (147 routes, batch reads and ability distribution included) with method, path, required permission and
   request/response samples taken from the handlers themselves — now including the
   agent-capability, channel, connector, speech and API-key endpoints. It sits after
   Administration in the sidebar and is

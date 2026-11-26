@@ -145,6 +145,11 @@ func Register(d Deps) http.Handler {
 	// Curation: submitting, approving, rejecting or deprecating one record is a
 	// decision about what everybody may find, so it is not resources:write.
 	mux.HandleFunc("POST /api/resources/{id}/status", d.requirePermission(authz.PermRegistryCurate, d.handleSetResourceStatus))
+	// Ability distribution for kind=agent records: GET is what an agent pulls,
+	// POST is the operator pushing the same package as a task. Reading is enough
+	// to pull, but delivering work to somebody's agent is a write.
+	mux.HandleFunc("GET /api/resources/{id}/distribution", d.requirePermission(authz.PermResourcesRead, d.handleGetResourceDistribution))
+	mux.HandleFunc("POST /api/resources/{id}/distribution", d.requirePermission(authz.PermResourcesWrite, d.handlePushResourceDistribution))
 
 	// Registry namespaces and the curator's queue.
 	mux.HandleFunc("GET /api/registries", d.requirePermission(authz.PermRegistriesManage, d.handleListNamespaces))

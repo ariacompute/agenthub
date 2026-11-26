@@ -430,7 +430,7 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | --- | --- | --- | --- |
 | 身份 | 9 | `/api/auth/config`、`register`、`login`、`logout`、`me`、`sessions`、`sessions/{id}`、`oauth/{provider}`、`oauth/{provider}/callback` | 前三条匿名；其余 `requireAuth` |
 | 审计 | 3 | `/api/audit`、`/api/audit/verify`、`/api/audit/{id}` | `audit:read` |
-| 资源 | 9 | `/api/resources`（GET/POST）、`batch`（POST）、`{id}`（GET/PUT/DELETE）、`{id}/health`、`{id}/probe`、`{id}/status` | `resources:read` / `resources:write`；status 为 `registry:curate` |
+| 资源 | 11 | `/api/resources`（GET/POST）、`batch`（POST）、`{id}`（GET/PUT/DELETE）、`{id}/health`、`{id}/probe`、`{id}/status`、`{id}/distribution`（GET/POST） | `resources:read` / `resources:write`；status 为 `registry:curate` |
 | 命名空间 | 5 | `/api/registries`（GET/POST）、`{id}`（PUT/DELETE）、`/api/registries/approvals` | `registries:manage`；approvals 为 `registry:curate` |
 | 上游源 | 5 | `/api/registry-sources`（GET/POST）、`{id}`（PUT/DELETE）、`{id}/sync` | `sources:manage` |
 | 任务 | 6 | `/api/tasks`、`{id}`、`{id}/spans`、`{id}/events`、`{id}/cancel`、`{id}/resume` | `tasks:read` / `tasks:write` |
@@ -450,9 +450,10 @@ GET    /api/router/events?since=<seq>         → SSE（tasks:read；事件名 r
 | API Key | 5 | `/api/api-keys`（GET/POST）、`{id}`（GET/PUT/DELETE） | `requireAuth`（各自持有者的 key） |
 | 共享文件 | 5 | `/api/files`（GET/POST）、`{id}`（GET/DELETE）、`{id}/content` | `tasks:read` / `tasks:write`；下载支持 `Range` |
 
-上表分组条数合计 **139** 条 `/api` 路由，与 `internal/handlers/handlers.go` 一致；
+`internal/handlers/handlers.go` 现注册 **142** 条 `/api` 路由（方法 + 路径成对计数），
 另有 5 条协议面路由（`POST /a2a`、`GET /a2a/stream`、`GET /a2a/agent-card`、
-`GET /.well-known/agent.json`、`GET /healthz`），合计 **145** 条 `mux.HandleFunc`。
+`GET /.well-known/agent.json`、`GET /healthz`），合计 **147** 条 `mux.HandleFunc`；
+上表按分组罗列，个别同路径方法未逐条展开，计数以此处为准。
 `/docs` 屏与 `docs/*.md` 的分组口径略有不同（把 `/api/schedules/{id}/run` 归入调度器组，
 故该组为 14 条），但端点集合一致。
 
@@ -952,3 +953,35 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
 - 用例覆盖：内存模式的删除与保留、重复调用、归属隔离（他人 / 无主记录不动）、仓库模式委托与
   故障 5xx、处理器层 200 + `{deleted,kept}` + 清理后详情 404；`DATABASE_URL` 门控用例验证
   级联删除子表与归属隔离。
+## 16. 能力下发：把 mcp / skill 交付给已注册的 agent（2026-11-26）
+
+### 16.1 功能边界
+
+- **绑定写在 agent 上**：`kind_config.agent.skills` 语义升级为 skill 资源 id（历史自由文本不报错、
+  原样保留），新增对称字段 `mcp`（mcp 资源 id，≤ 50、拒绝空串）。**零迁移**，不新建表，
+  一次 `PUT /api/resources/{id}` 仍然描述整条记录。
+- **三条交付通道，同一份渲染**：
+  1. 拉取 `GET /api/resources/{id}/distribution`（`resources:read` + `canAccess(read)`）；
+  2. 调用时附带：A2A `message/send` 与 `message/stream` 的消息
+     `metadata["agenthub.distribution"]`；
+  3. 推送 `POST /api/resources/{id}/distribution`（`resources:write` + `canAccess(write)`），
+     以一次任务投放（文本说明 + data part），任务即留痕、可重试。
+- **仅 agent 可下发**：其他 kind 返回 400 `invalid_kind`，记录不可见返回 404（与 `GET` 一致）。
+- **授权与最小披露**：包内只含调用者可见的记录；引用存在但无权查看 → `missing`，
+  记录不存在或类型不符 → `unresolved`，两者都不阻断，也都不确认对方存在性。
+- **脱敏与上限**：`MCPConfig.Env` 只出 key 名、`credential_env` 只出变量名；skill `docs`
+  单条 8 KiB、整包 32 KiB，截断即置 `truncated` 并附省略标记（按 rune 边界切，保持 UTF-8）。
+- **不可伪造**：包只经 `hub.WithDistribution(ctx, dist)` 进入 `hub`，`params.metadata` 一概不读。
+- **失败降级**：包渲染失败只让这次调用少一个 metadata，绝不让原本能成功的对话失败。
+
+### 16.2 验收标准
+
+- `go build ./...` / `go vet ./...` / `go test ./...` 全绿；`make docs-md` 后两份 md 无漂移；
+  `e2e/api` 覆盖 **147/147** 文档化路由。
+- `web/src/lib/docs-content.js` 登记两条端点（资源组 11 条，全表 **147** 条），
+  `docs-copy.js` 13 语 `epDistributionGet` / `epDistributionPush` 齐全；
+  `registry-copy.js` 13 语新增下发相关键齐全。
+- 用例覆盖：解析（命中 / 不可见 / 类型不符 / 历史自由文本 / 截断 / 跨批分块 / 谓词返回 nil）；
+  HTTP（GET / POST / 非 agent 400 / 不可见 404 / 空包可下发 / 伪造包被忽略）；
+  hub（空包与 nil 均为 no-op）；adapter（两条传输都带 metadata，无绑定时不带该键）。
+- `cd web && bun run test` 全绿、`bun run build` 通过；`style.spec.js` 单色与窄卡守卫不触发。

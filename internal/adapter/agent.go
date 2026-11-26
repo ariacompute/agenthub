@@ -83,6 +83,17 @@ func mockAgentInvoke(req InvokeRequest) InvokeResult {
 		"goal":     req.Prompt,
 		"digest":   digest(req.Prompt)[:16],
 	}
+	// A mock cannot consume a package, but it can say what it was handed: an
+	// operator reading the trace of a mock run should still see that the binds
+	// resolved, and how many of them did not.
+	if dist := req.Distribution; dist != nil && !dist.Empty() {
+		data["distribution"] = map[string]any{
+			"mcp":        len(dist.MCP),
+			"skills":     len(dist.Skills),
+			"unresolved": len(dist.Unresolved),
+			"missing":    len(dist.Missing),
+		}
+	}
 	return InvokeResult{
 		Text:      out,
 		Parts:     []a2a.Part{a2a.NewTextPart(out), a2a.NewDataPart(data)},
@@ -169,9 +180,9 @@ func (c *agentConnector) invokeA2A(ctx context.Context, req InvokeRequest) (Invo
 // as a broken agent.
 func (c *agentConnector) converse(ctx context.Context, card *agentCard, endpoint string, req InvokeRequest) (string, string, error) {
 	if req.Stream != nil && card != nil && card.Capabilities.Streaming {
-		return c.streamMessage(ctx, endpoint, req.Prompt, req.Stream)
+		return c.streamMessage(ctx, endpoint, req)
 	}
-	return c.sendMessage(ctx, endpoint, req.Prompt)
+	return c.sendMessage(ctx, endpoint, req)
 }
 
 func agentResult(c *agentConnector, req InvokeRequest, card *agentCard, text, state string) InvokeResult {
@@ -206,7 +217,7 @@ func agentResult(c *agentConnector, req InvokeRequest, card *agentCard, text, st
 	}
 }
 
-func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt string) (string, string, error) {
+func (c *agentConnector) sendMessage(ctx context.Context, endpoint string, call InvokeRequest) (string, string, error) {
 	// The message is written in the 1.0 shape on purpose. agenthub's own wire
 	// format names the discriminator "type", and a 1.0 server validates "kind"
 	// as a required field — send only what this repo speaks and every remote
@@ -216,8 +227,9 @@ func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt strin
 		Kind:      "message",
 		Role:      a2a.RoleUser,
 		MessageID: newMessageID(),
-		Parts:     []outboundPart{textPart(prompt)},
+		Parts:     []outboundPart{textPart(call.Prompt)},
 	}
+	message.Metadata = distributionMetadata(call.Distribution)
 	body, err := json.Marshal(map[string]any{
 		"jsonrpc": a2a.JSONRPCVersion,
 		"id":      "agenthub-1",
@@ -263,13 +275,17 @@ func (c *agentConnector) sendMessage(ctx context.Context, endpoint, prompt strin
 // incremental artifacts. A server that answers with a plain JSON-RPC body
 // (streaming declared but not implemented) is read as one result instead of
 // being reported as an empty stream.
-func (c *agentConnector) streamMessage(ctx context.Context, endpoint, prompt string, sink StreamSink) (string, string, error) {
+func (c *agentConnector) streamMessage(ctx context.Context, endpoint string, call InvokeRequest) (string, string, error) {
+	sink := call.Stream
 	message := outboundMessage{
 		Kind:      "message",
 		Role:      a2a.RoleUser,
 		MessageID: newMessageID(),
-		Parts:     []outboundPart{textPart(prompt)},
+		Parts:     []outboundPart{textPart(call.Prompt)},
 	}
+	// Streaming carries the same package as message/send: an agent must not lose
+	// its abilities just because the caller asked for frames.
+	message.Metadata = distributionMetadata(call.Distribution)
 	body, err := json.Marshal(map[string]any{
 		"jsonrpc": a2a.JSONRPCVersion,
 		"id":      "agenthub-stream-1",
@@ -479,6 +495,24 @@ type outboundMessage struct {
 	Role      string         `json:"role"`
 	MessageID string         `json:"messageId"`
 	Parts     []outboundPart `json:"parts"`
+	// Metadata is A2A's extension channel. Today it carries exactly one key —
+	// DistributionKey — and stays absent entirely when the agent has nothing
+	// bound, so a call against an unbound agent is byte identical to one made
+	// before distribution existed.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// DistributionKey is the message metadata key the ability package travels under.
+// It is namespaced so it cannot collide with a peer's own extension keys.
+const DistributionKey = "agenthub.distribution"
+
+// distributionMetadata renders the package as message metadata, or nil when
+// there is nothing to deliver.
+func distributionMetadata(dist *registry.Distribution) map[string]any {
+	if dist == nil || dist.Empty() {
+		return nil
+	}
+	return map[string]any{DistributionKey: dist}
 }
 
 func textPart(text string) outboundPart {

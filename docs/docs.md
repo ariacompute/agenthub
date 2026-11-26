@@ -143,6 +143,8 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `POST` | `/api/resources/{id}/health` | `resources:write` — Change resources | Write a health value by hand. | `{ health }` | `{ health }` |
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — Change resources | Measure the resource now and store whatever was found. | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — Approve, reject and deprecate records | Move a record along the curation state machine. | `{ status, reason? }` | `Entry` |
+| `GET` | `/api/resources/{id}/distribution` | `resources:read` — Read resources | Read the ability package an agent resource receives: its bound mcp servers and skill manuals, resolved server side. | — | `{ agent_id, agent_name, mcp: [MCPBinding], skills: [SkillBinding], missing: [id], unresolved: [ref], truncated? }` |
+| `POST` | `/api/resources/{id}/distribution` | `resources:write` — Change resources | Deliver that package to the agent as a task; the returned task records the delivery. | — | `Task — the delivery, carrying the package as a data part` |
 
 ### Namespaces
 

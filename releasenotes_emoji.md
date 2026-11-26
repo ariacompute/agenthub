@@ -135,7 +135,7 @@
 - ✅ **后端**：构建、静态检查与全量单测通过。纯逻辑用例不依赖外部服务，数据库用例没配连接串就跳过，不伪造结果。
 - 📈 **覆盖率**（不接数据库测得，跳过的用例不会撑高数字）：a2a、audit、authz、channels、computers、config、files、httputil、identity、middleware、model、netutil、sandbox、schedules、secure 均为 **100%**；adapter 96.3%、router 91.8%、hub 90.6%、registry 89.3%、auth 84.5%、handlers 84.2%、backup 57.9%。store（4.5%）、testdb（9.4%）需要 PostgreSQL，cmd/agenthub-server（26.3%）是只有整个进程才走得到的装配层，三者不在范围内。
 - 🎯 **只有故障才走得到的分支**：新增 11 个 `*_edges_test.go`（75 条用例），覆盖健康机器永远走不到的臂——`Put` 中途失败的文件系统步骤、授权查询背后的存储故障、限流器清扫过期窗口、操作系统拒绝的 `.env` 键名、管道已被占用的会话、始终不领取任务的远端节点。构造上不可能的分支（固定密钥下的 AES 构造、满射归一函数身后的 `default`）直接删除；本机不可能而别处真实的分支抽成纯函数（信号退出归一、空 stderr 兜底、卷根判定）；真实但需注入故障的只开一处窄接缝（`files.fsOps`、`commandContext`、`sessionFrameTimeout`、`remoteJobGrace`、`getwd`、`deliverClient`、`io.ReadFull(rand.Reader, …)`），每处都注明生产代码从不重新赋值。没有 `t.Skip`、没有覆盖率排除、没有拿 `Sleep` 当断言。
-- 🟡 **环境门控**：端到端用例遇到「这台机器没有容器运行时」（`resource_unreachable` 搭配 `sandbox_unsupported` 一类明细）记为跳过并写明原因，其它错误仍判失败；静态守卫保证全部 145 条已文档化路由都有用例。
+- 🟡 **环境门控**：端到端用例遇到「这台机器没有容器运行时」（`resource_unreachable` 搭配 `sandbox_unsupported` 一类明细）记为跳过并写明原因，其它错误仍判失败；静态守卫保证全部 147 条已文档化路由都有用例。
 - 🔁 **端到端纳入持续集成**：与后端、前端单测并列新增一个 job，在真实 Postgres、真实二进制与构建好的控制台上依次跑路由覆盖守卫、API 套件与六条 Playwright 旅程；Chromium 与沙盒默认镜像预先装好，失败时归档 `e2e/reports`、`playwright-report` 与服务端日志。
 - 🧷 **隔离与审计护栏**：用 46 张表的清单钉住迁移脚本（含审计链锚点表）；覆盖审计续链、写入失败只计数、队列满丢帧和断点定位；断言「读审计不会被提权为系统身份」；前端的权限集合直接与后端源码比对。
 - 🛡️ **异常路径护栏**：错误码全量穷举与语法树守卫、panic 转成 JSON 响应与安全头、API 密钥窗口与范围、调度门面与事件总线、SSRF 白名单（含私网与 IPv6 字面量、域名解析到内网、白名单放行与重定向拒绝）。

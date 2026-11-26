@@ -484,6 +484,24 @@ export const httpEndpoints = [
     request: '{ status, reason? }',
     response: 'Entry',
   },
+  {
+    group: 'resources',
+    method: 'GET',
+    path: '/api/resources/{id}/distribution',
+    permission: 'resources:read',
+    descKey: 'epDistributionGet',
+    request: '',
+    response: '{ agent_id, agent_name, mcp: [MCPBinding], skills: [SkillBinding], missing: [id], unresolved: [ref], truncated? }',
+  },
+  {
+    group: 'resources',
+    method: 'POST',
+    path: '/api/resources/{id}/distribution',
+    permission: 'resources:write',
+    descKey: 'epDistributionPush',
+    request: '',
+    response: 'Task — the delivery, carrying the package as a data part',
+  },
 
   // ---- registries ----
   {

@@ -194,6 +194,31 @@ export default [
     }
   }),
 
+  // ---- ability distribution ------------------------------------------------
+  c('an agent publishes an ability package', 'GET /api/resources/{id}/distribution', async (ctx) => {
+    const agent = await createResource(ctx, 'agent')
+    ctx.state.agentId = agent.id
+    const res = await ctx.api('GET', `/api/resources/${agent.id}/distribution`)
+    expectStatus(res, 200, 'ability package')
+    // The three keys the console renders: what is delivered, what is absent and
+    // what no longer resolves.
+    expectShape(res, ['agent_id', 'mcp', 'skills'], 'ability package')
+    expectValue(res.json.agent_id, agent.id, 'the package names its agent')
+    // Only an agent carries bindings; any other kind is a bad request, not a 404.
+    const model = await ctx.api('GET', `/api/resources/${requireState(ctx, 'resourceId')}/distribution`)
+    expectStatusAndCode(model, 400, 'invalid_kind', 'package of a non-agent')
+  }),
+
+  c('the package can be delivered as a task', 'POST /api/resources/{id}/distribution', async (ctx) => {
+    const id = requireState(ctx, 'agentId')
+    const res = await ctx.api('POST', `/api/resources/${id}/distribution`, { body: {} })
+    expectStatus(res, 200, 'deliver package')
+    expectShape(res, ['id', 'status'], 'deliver package')
+    // The receipt is an ordinary task against the bound agent, which is what
+    // makes the delivery inspectable and retryable through the task endpoints.
+    expectValue(res.json.resourceId, id, 'the delivery runs the bound agent')
+  }),
+
   c('MCP export contains only approved records', 'GET /api/export/mcp', async (ctx) => {
     const res = await ctx.api('GET', '/api/export/mcp')
     expectAvailable(res, 'MCP export')

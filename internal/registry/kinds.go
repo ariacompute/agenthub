@@ -126,8 +126,17 @@ type AgentConfig struct {
 	CardURL         string   `json:"card_url,omitempty"`
 	ProtocolVersion string   `json:"protocol_version,omitempty"`
 	Capabilities    []string `json:"capabilities,omitempty"`
-	Skills          []string `json:"skills,omitempty"`
-	AuthScheme      string   `json:"auth_scheme,omitempty"`
+	// Skills binds kind=skill resources to this agent. The field predates
+	// binding: it used to be free text, so a value that names no skill resource
+	// is kept and reported as unresolved instead of rejected (see
+	// DistributionOf). New writes carry resource ids.
+	Skills []string `json:"skills,omitempty"`
+	// MCP binds kind=mcp resources to this agent, by resource id. It is the
+	// mirror image of Skills: what an agent may use, kept next to the agent
+	// rather than in a second table, so one PUT still describes the whole
+	// record.
+	MCP        []string `json:"mcp,omitempty"`
+	AuthScheme string   `json:"auth_scheme,omitempty"`
 	// CredentialEnv names the environment variable holding the credential for
 	// this agent. The value is injected by the server when it calls out, and it
 	// never enters the model's context, the task metadata or the artifacts: the
@@ -407,6 +416,21 @@ func validateAgent(c *AgentConfig) error {
 			return kindConfigErr("capabilities")
 		}
 	}
+	// mcp is a binding written by this version, so it can be strict: a blank
+	// reference is a form bug, not an old record. References are deliberately
+	// NOT resolved here — Upsert already holds the registry lock, and a lookup
+	// from inside it would deadlock. Resolution happens when a package is built,
+	// where an unknown id degrades to "unresolved" instead of rejecting a save.
+	if len(c.MCP) > MaxAgentBindings {
+		return kindConfigErr("mcp")
+	}
+	for _, ref := range c.MCP {
+		if strings.TrimSpace(ref) == "" {
+			return kindConfigErr("mcp")
+		}
+	}
+	// skills keeps its historical leniency: the field was free text before it
+	// meant resource ids, so an entry saved years ago must still validate.
 	return nil
 }
 
@@ -555,7 +579,8 @@ func KindConfigSummary(c *KindConfig) string {
 		return fmt.Sprintf("model(%s, targets=%d, key=%t)",
 			c.Model.EffectiveProviderMode(), len(c.Model.Targets), strings.TrimSpace(c.Model.APIKeyEnv) != "")
 	case c.Agent != nil:
-		return fmt.Sprintf("agent(caps=%d, skills=%d)", len(c.Agent.Capabilities), len(c.Agent.Skills))
+		return fmt.Sprintf("agent(caps=%d, mcp=%d, skills=%d)",
+			len(c.Agent.Capabilities), len(c.Agent.MCP), len(c.Agent.Skills))
 	case c.MCP != nil:
 		return fmt.Sprintf("mcp(tools=%d)", len(c.MCP.ToolAllowlist))
 	case c.Skill != nil:
