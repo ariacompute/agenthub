@@ -143,8 +143,10 @@ localhost:5434                 POSTGRES_PORT (compose development database only)
 | `POST` | `/api/resources/{id}/health` | `resources:write` — 变更资源 | 手工写入一个健康值。 | `{ health }` | `{ health }` |
 | `POST` | `/api/resources/{id}/probe` | `resources:write` — 变更资源 | 立即实测该资源并保存测到的结果。 | — | `{ id, health, probed, reason? }` |
 | `POST` | `/api/resources/{id}/status` | `registry:curate` — 批准、拒绝与弃用记录 | 让一条记录沿审批状态机前进一步。 | `{ status, reason? }` | `Entry` |
-| `GET` | `/api/resources/{id}/distribution` | `resources:read` — 查看资源 | 读取某个智能体资源可获得的能力包：绑定的 MCP 服务与技能手册，由服务端解析。 | — | `{ agent_id, agent_name, mcp: [MCPBinding], skills: [SkillBinding], missing: [id], unresolved: [ref], truncated? }` |
-| `POST` | `/api/resources/{id}/distribution` | `resources:write` — 变更资源 | 把该能力包作为任务下发给智能体；返回的任务即下发记录。 | — | `Task — the delivery, carrying the package as a data part` |
+| `GET` | `/api/resources/{id}/distribution` | `resources:read` — 查看资源 | 读取某个智能体资源可获得的能力包：绑定的 MCP 服务与技能手册，由服务端解析。 | — | `{ agent_id, agent_name, mcp: [{ id, name, namespace, transport, url?, command?, args?, tool_allowlist, auth_schemes, env_keys, health }], skills: [{ id, name, version, triggers, steps, tools, docs }], missing: [id], unresolved: [ref], truncated? }` |
+| `POST` | `/api/resources/{id}/distribution` | `resources:write` — 变更资源 | 把该能力包作为任务下发给智能体；返回的任务即下发记录。 | `{}` | `Task { resourceId, history[0].metadata = { resourceId, distribution: true }, history[0].parts = [{ type: "text" }, { type: "data", data: { type: "agenthub.distribution", distribution: Distribution } }] }` |
+
+绑定写在智能体自身：kind_config.agent.mcp 与 .skills 存的是资源 id，因此一次 PUT 仍然描述整条记录。同一份能力包有三条交付路径——本 GET 供运行时在启动时拉取，message/send 与 message/stream 的 agenthub.distribution 键随调用附带，同路径的 POST 则把它作为任务下发。包内只含调用者有权看到的记录：引用存在但无权查看的进 missing，没有对应记录的进 unresolved。环境变量的值永不离开服务端——mcp 绑定只携带键名——过长的技能文档会被裁剪并标记 truncated。
 
 ### 命名空间
 

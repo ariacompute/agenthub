@@ -1533,6 +1533,10 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
 - **控制台**：agent 抽屉内 `ResourceBindingSelect`（可搜索多选 + 未解析 chip 保留历史值），
   新增加载/预览/下发区块；`store` 新增 `bindingOptions` / `distribution` / `distributionTaskID`
   与失败保留上次成功值的语义。13 语文案（`registry-copy.js` / `docs-copy.js`）齐全。
+- **文档同源**：`/docs` 屏与 `docs/docs.md` / `docs_cn.md` 仍由 `web/src/lib/docs-content.js`
+  一份数据生成。资源组新增 `groupResourcesNote`（13 语）说明绑定写在 `kind_config.agent`
+  上、三条交付通道、只含可见记录、env 只出键名；两条端点的 request/response 写成**单行**
+  形状（多行 JSON 会把 md 表格撑破，形状展开与限制写在分组说明里），最后 `make docs-md` 重生成。
 
 ### 2. 文件
 

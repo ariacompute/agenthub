@@ -210,7 +210,7 @@ export const a2aShapes = [
 export const endpointGroups = [
   { id: 'protocol', groupKey: 'groupProtocol' },
   { id: 'auth', groupKey: 'groupAuth' },
-  { id: 'resources', groupKey: 'groupResources' },
+  { id: 'resources', groupKey: 'groupResources', noteKey: 'groupResourcesNote' },
   { id: 'registries', groupKey: 'groupRegistries' },
   { id: 'sources', groupKey: 'groupSources' },
   { id: 'tasks', groupKey: 'groupTasks' },
@@ -491,7 +491,10 @@ export const httpEndpoints = [
     permission: 'resources:read',
     descKey: 'epDistributionGet',
     request: '',
-    response: '{ agent_id, agent_name, mcp: [MCPBinding], skills: [SkillBinding], missing: [id], unresolved: [ref], truncated? }',
+    // One line, like every other row: the generated markdown puts this in a
+    // table cell, and a pretty-printed sample would break the table it sits in.
+    response:
+      '{ agent_id, agent_name, mcp: [{ id, name, namespace, transport, url?, command?, args?, tool_allowlist, auth_schemes, env_keys, health }], skills: [{ id, name, version, triggers, steps, tools, docs }], missing: [id], unresolved: [ref], truncated? }',
   },
   {
     group: 'resources',
@@ -499,8 +502,11 @@ export const httpEndpoints = [
     path: '/api/resources/{id}/distribution',
     permission: 'resources:write',
     descKey: 'epDistributionPush',
-    request: '',
-    response: 'Task — the delivery, carrying the package as a data part',
+    // An empty body on purpose: the bindings on the record are the input, so a
+    // caller cannot push a package that disagrees with the resource it names.
+    request: '{}',
+    response:
+      'Task { resourceId, history[0].metadata = { resourceId, distribution: true }, history[0].parts = [{ type: "text" }, { type: "data", data: { type: "agenthub.distribution", distribution: Distribution } }] }',
   },
 
   // ---- registries ----
