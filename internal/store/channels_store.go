@@ -236,18 +236,15 @@ func (s *channelsStore) RecordDelivery(ctx context.Context, m *channels.ChannelM
 			CreatedAt:   time.Now().UTC(),
 		}
 		// The unique index on (channel_id, external_ref) dedupes redeliveries: an
-		// identical key is swallowed rather than erroring.
-		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&r).Error; err != nil {
-			return false, err
+		// identical key is swallowed rather than erroring. RowsAffected is the
+		// only honest answer to "did this insert write a row" — a follow-up SELECT
+		// always finds the conflicting row, which is exactly the one this call did
+		// not write.
+		res := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&r)
+		if res.Error != nil {
+			return false, res.Error
 		}
-		// If no row was written (conflict swallowed), treat as a duplicate.
-		affected := db.
-			Where("channel_id = ? AND external_ref = ?", m.ChannelID, m.ExternalRef).
-			First(&model.ChannelMessage{}).Error
-		if affected != nil {
-			return false, nil
-		}
-		return true, nil
+		return res.RowsAffected > 0, nil
 	})
 }
 
