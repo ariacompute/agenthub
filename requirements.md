@@ -968,7 +968,9 @@ Router 层只做过滤、分派与全局记忆，不执行具体任务；Worker 
      以一次任务投放（文本说明 + data part），任务即留痕、可重试。
 - **仅 agent 可下发**：其他 kind 返回 400 `invalid_kind`，记录不可见返回 404（与 `GET` 一致）。
 - **授权与最小披露**：包内只含调用者可见的记录；引用存在但无权查看 → `missing`，
-  记录不存在或类型不符 → `unresolved`，两者都不阻断，也都不确认对方存在性。
+  记录不存在或类型不符 → `unresolved`，两者都不阻断。分桶是为了让运维分得清「绑定写错」
+  与「权限不足」；代价是 `missing` **会确认该 id 对应的记录存在**（记录内容仍然一条不出，
+  且该 id 必须已由 agent 作者写进自身绑定）。这是刻意取舍，不是疏漏。
 - **脱敏与上限**：`MCPConfig.Env` 只出 key 名、`credential_env` 只出变量名；skill `docs`
   单条 8 KiB、整包 32 KiB，截断即置 `truncated` 并附省略标记（按 rune 边界切，保持 UTF-8）。
 - **不可伪造**：包只经 `hub.WithDistribution(ctx, dist)` 进入 `hub`，`params.metadata` 一概不读。

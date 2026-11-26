@@ -84,8 +84,13 @@ type SkillBinding struct {
 //     kind, so the reference cannot be delivered as written. This is what an
 //     agent saved before bindings existed looks like (free-text skill labels).
 //   - Missing: the record exists and is of the right kind, but the caller may
-//     not see it. It is kept apart from the delivered list so a package never
-//     confirms the existence of a record the caller was not granted.
+//     not see it, so it is not delivered. Being listed here does confirm that
+//     the id names a record — a record the caller could not otherwise read
+//     answers 404, and this bucket says "exists, not for you". That is a
+//     deliberate trade: an operator can tell a typo in a binding (unresolved)
+//     from a permission gap (missing), and the price is bounded because the id
+//     had to be written into the agent's own binding first, is visible there
+//     whenever the agent is public, and no content of the record is carried.
 type Distribution struct {
 	AgentID          string         `json:"agent_id"`
 	AgentName        string         `json:"agent_name"`

@@ -125,8 +125,11 @@ func TestDistributionOfSeparatesUnresolvedFromMissing(t *testing.T) {
 		t.Fatalf("skills = %+v", dist.Skills)
 	}
 	// Unknown id, wrong kind and a legacy free-text label are all "cannot be
-	// delivered as written"; a record the caller may not see is kept apart so the
-	// package never confirms that somebody else's skill exists.
+	// delivered as written". A record the caller may not see is kept apart from
+	// those so an operator can tell a typo (unresolved) from a permission gap
+	// (missing). Listing it in missing does confirm the id names a record; the
+	// content is still withheld and the id had to be bound by the agent's own
+	// author, which is why the trade is deliberate rather than an oversight.
 	if strings.Join(dist.Unresolved, ",") != "mcp-does-not-exist,"+wrongKind.ID+",hand written skill label" {
 		t.Fatalf("unresolved = %v", dist.Unresolved)
 	}

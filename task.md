@@ -1518,9 +1518,13 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
   **不在 `Upsert` 持锁路径上调 `Get`**（会死锁），引用解析延迟到渲染时刻。
 - **渲染**：新增 `registry.DistributionOf(reg, agent, filter)`。解析走 `GetMany` 并按
   100 分批（历史记录可能带任意长的自由文本列表，截断会把显示问题变成能力缺失）；
-  输出 `mcp` / `skills` / `missing` / `unresolved` / `truncated`，`missing` 与 `unresolved`
-  分开是为了不确认调用者无权查看的记录的存在性。包内 env 只出 key 名，`docs` 单条 8 KiB、
-  整包 32 KiB 并在 rune 边界截断。
+  输出 `mcp` / `skills` / `missing` / `unresolved` / `truncated`。`unresolved` 是「引用无法
+  解析」（不存在或类型不符），`missing` 是「引用存在、但调用者无权查看、因此本次未交付」——
+  三分桶是为了让运维分得清「绑定写错了 id」与「绑定对了但你没权限」。需要说明的是：
+  **把 id 放进 `missing` 本身确认了这条记录存在**（同一个 id 直接读记录端点时是刻意 404），
+  这是刻意的取舍而非疏漏——该 id 必须已写进 agent 自己的绑定列表、agent 为 public 时本来就在
+  `kind_config.agent.skills` 里可见，且记录内容（docs/steps/tools）一条都不进包。包内 env 只出
+  key 名，`docs` 单条 8 KiB、整包 32 KiB 并在 rune 边界截断。
 - **三条通道**：
   - `GET /api/resources/{id}/distribution`（`resources:read` + `canAccess(read)`）；
   - A2A `message/send` 与 `message/stream` 的消息 `metadata["agenthub.distribution"]`；
@@ -1615,3 +1619,110 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
   备份关闭 9 条（`AGENTHUB_BACKUP_MODE=off` 8 条 + 还原用例 1 条）、`AGENTHUB_E2E_*` 开关 8 条
   （pushCallback 一个开关对应两条用例）、无 OAuth provider 1 条。
   「unavailable」类跳过现在只剩路由禁用派生的两条。
+
+## M28 — 第十轮完整度补齐：如实陈述 / owner 隔离 / auth 失败路径 / SKIP 原因下传 / backup 还原覆盖（2026-11-26）
+
+### 1. 做了什么
+
+- **修正一处不准确的声称（行为零变更）**：`/api/resources/{id}/distribution` 的三分桶说明改写为
+  如实描述——`unresolved` 是引用无法解析，`missing` 是引用存在但本次未交付，因此**会**确认该 id
+  对应一条记录；保留三分桶是为了运维能分辨「绑定写错」与「权限不足」。判定逻辑、JSON 字段名、
+  13 语用户文档与 `docs-copy.js` 一律未动。
+- **store 的 owner 隔离用例**（`internal/store/owner_isolation_test.go`，`DATABASE_URL` 门控）：
+  同一套四步矩阵（列表只见自己 → 空 owner 语义 → 按 id 读他人行得到「不可见」→ 按 id 写/删他人的行
+  改不动）覆盖 `schedules` / `channels` / `computers` / `files` / `threads` 五个 store；子表另列
+  `channel_messages`（`ListDeliveries`/`GetDelivery`/`UpdateDelivery` + 去重 + 父渠道不存在）与
+  `thread_messages`（`ListMessages`/`ClearMessages`）。注释写明这组用例覆盖的是 **Go 侧谓词**
+  （`ownedWhere`/`ownedChildWhere`），RLS 由 `tests/rls_test.go` 以 `RLSEnforce: true` 单独断言，
+  两类防线不互相替代；`files.List`/`threads.ListThreads` 空 owner 不放宽、`threads` 的
+  `ListMessages` 只由策略兜底，都按实际行为断言而不是按期望。
+- **auth 失败路径**（`internal/auth/auth_failure_test.go`，零生产改动）：以「嵌入既有 fake 再覆写」
+  注入故障，覆盖 `Register`/`Login`（未配置、仅 OAuth 账号、锁定窗口、计数写失败、重置失败、
+  会话写失败、UA 截断）、`recordLoginFailure` 的错误臂、`BootstrapAdmin`（读失败、晋升、
+  Update 失败、弱口令、默认名）、`Principal`/`Authenticate`（无 store、空 token、令牌查不到、
+  用户读失败、账号停用、`authz.Load` 失败、密钥 Touch 失败仍放行）、`Logout`/`Sessions`/
+  `RevokeSession`（单条/全部/列表失败）与 `CompleteOAuth` 的 store 臂；`password.go` 覆盖畸形
+  编码（盐/密钥非 base64、迭代数为 0/负数/缺失、非本 KDF）返回 false 而非 panic。
+- **e2e SKIP 原因向下游传播**：`runner.js` 在三处跳过（`enabled === false`、`enabled` 返回字符串、
+  `SkipError`）把原因记进 `ctx.state.skipReasons[<provides>]`，成功或失败时清除；`requireState()`
+  把原因拼进派生 SKIP。`provides` 只标在**会因配置而跳过**的生产者上（渠道、连接器、线程、文件、
+  执行节点、计划任务、电脑卡、检查点、A2A 可发送资源），因此 `channelId unavailable` 不再掩盖
+  「渠道功能未启用」。
+- **backup 补覆盖**：
+  - `restore_schema_test.go`（外部测试包）：建 `it_backup_<hex>` 临时 schema，用带
+    `options=-c search_path=…` 的 DSN 跑 `store.Migrate`，灌一行 resource + 一行 task +
+    一行 task_artifact，`Dump` → 改写数据 → `Restore`，断言行数复原、检查点后写入的行消失、
+    父子关系完好、`schema_migrations` 与 manifest 一致、序列已推进到还原后的最大值，收尾
+    `DROP SCHEMA … CASCADE`。全程不触碰 `public`，因此不需要 `AGENTHUB_TEST_BACKUP_RESTORE`
+    （那个开关守的是 `engine_db_test.go` 的破坏性路径）。外部测试包是为了让 `internal/store`
+    与 `internal/backup` 同时可用：`store` 反向依赖 `backup`，包内测试会成环。
+  - `service_edges_test.go`（包内）：`Reloaders`/`ReloaderFunc`（顺序、nil 成员、首个失败即停）、
+    `Quiesce`/`now`/`Dir`/`EngineName`、`Checkpoint`（空 kind 默认、忙碌、目录写失败零残留、
+    Finish 失败、静态加密落 `.enc` 且删明文并写 `.sha256`、prune 失败不影响已落盘的检查点）、
+    无 catalogue 的读路径、`Path`/`Delete` 的四道闸门（未完成行、丢文件、目录外路径、
+    归档/摘要删不掉）、`Restore` 的信任链（未完成行、丢文件、非归档字节、无法解密、
+    构建比归档旧、Applied 读失败、无 Applied 直通）、失败臂（回滚检查点、Drain、Migrate、
+    Reload、目标行 Finish、归档缺 payload）、`Prune` 的保留规则、`runDue` 五态、
+    `Run` 的 MarkInterrupted 两态、`writeArchiveHash`、归档助手（`shortHex`/`shortID`/
+    `stageDump` 的 Size/Reader/关闭后报错）、`EncryptFile`/`DecryptFile` 的截断与错钥、
+    `ParseDailyTime`/`Schedule.Next`/`Validate`/`ParseCron`/`cronField.has`/`matchDay`、
+    `SelectEngine` 在无客户端时的「点名要它」与「可回落」两态。
+  - `pgdump_fakeclient_test.go`（包内，`DATABASE_URL` + 非 Windows）：`lookPath` 指向临时 shell
+    脚本，在隔离 schema 里真跑 `Dump`/`Restore`，断言 argv（`--format=custom`、正列表
+    `--table schema.<表>`、连 SERIAL 的序列一起点名、`--clean --if-exists --single-transaction`、
+    归档路径在最后）、非零退出映射为 `ErrEngineFailed` 且口令被抹成 `***`、客户端不产出文件时报错；
+    顺带覆盖只有 pg_dump 引擎才走的 `rowCounts` 与 `archiveSequences`。
+
+### 2. 新用例发现的一个真实缺陷（已修）
+
+`channelsStore.RecordDelivery` 用「插入后再 SELECT 一次，查到就算写入」判断去重，而
+`ON CONFLICT DO NOTHING` 之后那行**必然**存在（冲突时是上一次写的那行），于是返回值恒为 `true`。
+后果不只是统计：`handlers/channels.go` 的幂等短路因此从不生效，同一 webhook 重投会被**再次**
+转发进线程并重复委派任务。改为以 `RowsAffected` 判断本次是否真的写入
+（`internal/store/channels_store.go:238-247`），去重语义与端口注释一致。
+
+### 3. 文件
+
+- 新增：`internal/store/owner_isolation_test.go`、`internal/auth/auth_failure_test.go`、
+  `internal/backup/{restore_schema_test.go,service_edges_test.go,pgdump_fakeclient_test.go}`。
+- 修改：`task.md`、`internal/registry/distribution.go`（仅字段注释）、
+  `internal/registry/distribution_test.go`（仅注释）、`internal/store/channels_store.go`（上述缺陷）、
+  `e2e/lib/{runner.js,assertions.js}`、`e2e/api/index.js`、`e2e/README.md`、
+  `e2e/api/cases/{04-a2a,08-channels-connectors,09-threads-speech,10-files,11-sandboxes,12-schedules-computers-knowledge,15-backups}.js`
+  （仅新增 `provides` 声明）。
+
+### 4. 验证（本机 linux/amd64，PG 16 实例 :5434）
+
+| 项 | 结果 |
+| --- | --- |
+| `gofmt -l` / `go vet ./...` | 无输出 / 无输出 |
+| `go test ./...`（无 `DATABASE_URL`） | 全绿，DB 用例按命名原因跳过 |
+| `go test ./...`（有库，`-count=1`） | 全绿 |
+| `go test -race ./internal/{store,auth,backup}/`（有库） | 三包全绿 |
+| `internal/store` 覆盖率 | 无库 **4.5%**（门控未变）/ 有库 **36.4% → 44.7%** |
+| `internal/auth` 覆盖率 | **84.5% → 91.5%** |
+| `internal/backup` 覆盖率 | 无库 **57.9% → 65.7%** / 有库 **65.6% → 86.1%** |
+| `cd web && bun run test` | **26 文件 / 494 用例**全绿 |
+| `e2e/api --coverage-only` | **147/147 documented routes have a case** |
+| `e2e` API（`AGENTHUB_CHANNELS_ENABLED=false`） | **176 passed / 1 failed / 44 skipped**；7 条渠道派生 SKIP 带上游原因 |
+| `e2e` API（`AGENTHUB_CHANNELS_ENABLED=true`） | **185 passed / 1 failed / 35 skipped**（PASS 不降，渠道派生 SKIP 消失） |
+
+- 唯一 FAIL 是 `audit chain`：本机共享库的 `audit_log` 在早前会话留下过断点（两次运行断在同一
+  事件 id，说明是历史数据而非本轮写入），与本轮改动无关，全新库上不复现。
+- 渠道关/开两态的 PASS 差 9 条（创建渠道 + 7 条派生 + 1 条依赖渠道的读），符合预期。
+
+### 5. 已知缺口（不可达或门控，逐条登记）
+
+- `internal/auth`：`HashPassword` 的 `rand.Read` 失败（`Register`、`BootstrapAdmin` 各一处）、
+  `openSession` 的 `NewToken` 失败、`NewToken`/`NewID` 自身的随机源失败——都需要包级随机源接缝，
+  本轮按「不改生产代码」保留未覆盖。
+- `internal/backup`：`aes.NewCipher`/`cipher.NewGCM` 的构造器错误（密钥长度与算法固定，永假）、
+  已关闭 `stageDump` 的 `Write`、`tx.Commit`/`tx.Rollback` 失败、系统临时目录创建失败、
+  `pgconn` 连接/TLS 失败、`io.Copy` 写端失败——需要注入文件系统或连接，代价大于收益。
+- `internal/backup` 的 `writeArchiveHash` 在加密成功后失败那一条（`service.go:216`）只写 WARN，
+  不改变检查点结果；要复现得让同一目录「可写归档、不可写 `.sha256`」，没有接缝只能靠 chmod 时序。
+- `internal/store`：无库时整体跳过（延续既有约定，文案 `DATABASE_URL not set: skipping
+  DB-backed store test (make db-up)`）；有库时余下缺口是各 store 的 `tx.Commit`/`tx.Rollback`
+  等驱动错误分支。
+- e2e：`triggerId` / `ticketId` 两条派生 SKIP 没有上游原因可带——它们的生产用例**通过了**，只是
+  该实例没有产出 id（路由禁用）；这与「上游用例跳过」不是一回事，故不硬凑原因。
