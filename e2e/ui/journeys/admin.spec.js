@@ -66,7 +66,7 @@ test.describe('journey: administration', () => {
     }
   })
 
-  test('the audit console renders its filter bar', async ({ page }) => {
+  test('the audit console filters, verifies the chain and opens one record', async ({ page }) => {
     test.skip(!(await canPermission(page, 'audit:read')), 'the audit route needs audit:read')
     await open(page, '/audit')
     await expect(page).toHaveURL(/\/audit/)
@@ -76,5 +76,31 @@ test.describe('journey: administration', () => {
     await expect(filters).toBeVisible()
     await expect(filters.locator('select').first()).toBeVisible()
     await expect(filters.locator('#audit-search')).toBeVisible()
+    await expect(page.locator('.audit-stats .audit-stat')).toHaveCount(3)
+
+    // Every filter change is a fresh list read, not a client-side sieve: the
+    // table only ever shows what the server answered for the window asked for.
+    const narrowed = await afterWrite(page, 'GET', '/api/audit', () =>
+      filters.locator('.segmented-item').first().click())
+    expect(narrowed.ok()).toBeTruthy()
+    await expect(filters.locator('.segmented-item').first()).toHaveClass(/active/)
+
+    // The hash chain is the one claim the console lets the reader re-check.
+    const verified = await afterWrite(page, 'GET', '/api/audit/verify', () =>
+      filters.locator('button.btn').click())
+    expect(verified.ok()).toBeTruthy()
+    await expect(page.locator('.audit-chain')).toHaveAttribute('data-state', 'ok')
+
+    // A row opens the drawer that shows the stored record, hashes included: the
+    // list projects a subset, which is why the detail is fetched again.
+    const row = page.locator('.audit-row:not(.audit-row-head)').first()
+    if (!(await row.count())) test.skip(true, 'the audit trail is empty on this instance')
+    await row.click()
+    const drawer = page.locator('aside.audit-drawer')
+    await expect(drawer).toBeVisible()
+    await expect(drawer.locator('.audit-facts dt').first()).toBeVisible()
+    await expect(drawer.locator('.audit-facts dd.audit-hash')).toHaveCount(2)
+    await page.keyboard.press('Escape')
+    await expect(drawer).toHaveCount(0)
   })
 })

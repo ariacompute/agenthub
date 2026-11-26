@@ -338,7 +338,7 @@ make test-cover       # db-migrate + 逐包覆盖率；连接数据库时才会�
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 make e2e-api                 # e2e/ 接口套件：147 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）
-make e2e-ui                  # e2e/ 界面套件：Playwright 六段控制台旅程
+make e2e-ui                  # e2e/ 界面套件：Playwright 八段控制台旅程
 make e2e / make e2e-coverage # 两套都跑 / 仅端点覆盖度守卫
                              # ./scripts/test-api.sh 为兼容转发器；BASE_URL 指向已运行实例
                              # 默认 SKIP 的外部依赖由 AGENTHUB_E2E_* 开关开启，详见 e2e/README.md

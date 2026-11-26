@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import {
-  preparePage, open, afterWrite, unique, apiCleanup, canWrite,
+  preparePage, open, afterWrite, unique, apiCleanup, canWrite, canPermission,
 } from '../helpers.js'
 
 test.describe('journey: governance approvals', () => {
@@ -54,17 +54,48 @@ test.describe('journey: governance approvals', () => {
     }
   })
 
-  test('the upstream sources route is reachable or gated by the route guard', async ({ page }) => {
+  test('register an upstream registry from the console and remove it', async ({ page }) => {
     await page.goto('/sources')
     await expect(page.locator('.shell')).toBeVisible()
-    if (await canWrite(page)) {
-      await expect(page).toHaveURL(/\/sources/)
-      await expect(page.locator('article.card, .empty').first()).toBeVisible()
-    } else {
+    if (!(await canPermission(page, 'sources:manage'))) {
       // A viewer lacks sources:manage, so the router sends it back to the
-      // registry. Assert the guard instead of failing on a missing panel.
-      await expect(page).toHaveURL(/\/registry/)
+      // registry. Assert the guard rather than failing on a missing panel: the
+      // write half below is skipped, not faked.
+      test.skip(true, 'the sources route needs sources:manage')
     }
-    await expect(page.locator('.toolbar').first()).toBeVisible()
+    await expect(page).toHaveURL(/\/sources/)
+
+    const name = unique('e2e-ui-source')
+    let sourceId = null
+    try {
+      await page.locator('.toolbar button.btn-primary').click()
+      await expect(page.locator('#s-name')).toBeVisible()
+      await page.locator('#s-name').fill(name)
+      // Fixture mode is the default and is never synced here: a sync imports
+      // records into the catalogue, which the console cannot remove again.
+      await page.locator('#s-url').fill('https://registry.example.com/v1')
+
+      const created = await afterWrite(page, 'POST', '/api/registry-sources', () =>
+        page.locator('.drawer-backdrop .drawer-actions button[type=submit]').click())
+      expect(created.status()).toBe(201)
+      sourceId = (await created.json())?.id ?? null
+
+      // The drawer closes on success and the saved source is a card of its own.
+      await expect(page.locator('.drawer-backdrop')).toHaveCount(0)
+      const card = page.locator('.grid article.card').filter({ hasText: name })
+      await expect(card).toBeVisible()
+      await expect(card.locator('.resource-endpoint.mono')).toHaveText('https://registry.example.com/v1')
+      await expect(card.locator('.card-actions button.btn')).toHaveCount(2)
+
+      // Deleting goes through the console's own confirm (accepted by
+      // preparePage) and has to take the card with it.
+      const removed = await afterWrite(page, 'DELETE', '/api/registry-sources/', () =>
+        card.locator('.card-actions button.btn-ghost').click())
+      expect(removed.status()).toBe(204)
+      await expect(card).toHaveCount(0)
+      sourceId = null
+    } finally {
+      if (sourceId) await apiCleanup(page, `/api/registry-sources/${sourceId}`)
+    }
   })
 })

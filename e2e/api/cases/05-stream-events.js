@@ -70,6 +70,14 @@ export default [
     // Keep the lowercase fallback for instances publishing a tagged view.
     const id = created.json?.ID || created.json?.id
     ctx.cleanup(`thread ${id}`, () => deleteIfExists(ctx.api, `/api/threads/${id}`))
+    // The stream replays the thread's messages before it subscribes, so an empty
+    // thread answers no frames and the case could only ever skip. Two plain
+    // messages (no mentions, so nothing is delegated) give the replay something
+    // to prove without leaving a task behind.
+    for (const body of ['e2e replay one', 'e2e replay two']) {
+      expectStatus(await ctx.api('POST', `/api/threads/${id}/messages`, { body: { body } }),
+        201, 'seed thread message')
+    }
     const stream = await ctx.stream('GET', `/api/threads/${id}/events`, {
       timeoutMs: 3000, maxFrames: 6,
       stopWhen: (frame, collected) => collected.frames.length >= 2,

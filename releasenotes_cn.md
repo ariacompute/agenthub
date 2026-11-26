@@ -470,7 +470,7 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   `TempSchema` 建一个 `it_<随机>` schema 并把 `search_path` 指过去，`RequireDDL` 把「这个角色
   建不了表」变成带原因的跳过（`production role: no DDL, use a migrator DSN`），而不是失败——
   否则生产形态第一次进流水线时会报一个根本不是缺陷的「权限不足」。
-- **成品也进 CI**：新增第四个 job，先 `make build`（控制台 + 二进制），再依次跑路由覆盖守卫、接口套件与六段 Playwright 旅程，对着真实 Postgres 与真实进程——单测证明的是零件，这条证明的是产品。守卫放最前，因为它不需要服务：`docs/` 里加了路由却没有用例，失败在流水线而不是在评审。Chromium 与沙盒默认镜像预先装好（首个租约会耗在拉镜像上，然后以超时报错，看起来像缺陷）；失败时报告、Playwright HTML 报告与服务端日志一并归档。
+- **成品也进 CI**：新增第四个 job，先 `make build`（控制台 + 二进制），再依次跑路由覆盖守卫、接口套件与八段 Playwright 旅程，对着真实 Postgres 与真实进程——单测证明的是零件，这条证明的是产品。守卫放最前，因为它不需要服务：`docs/` 里加了路由却没有用例，失败在流水线而不是在评审。Chromium 与沙盒默认镜像预先装好（首个租约会耗在拉镜像上，然后以超时报错，看起来像缺陷）；失败时报告、Playwright HTML 报告与服务端日志一并归档。
 - **目录分页与批量读**：`internal/handlers/api_paging_test.go` 钉住窗口（`limit` / `offset` 回显、`total` 准确、offset 越界为空页、`abc` / `-1` / `201` / 负 offset 的 400）、去 kind 的计数、批量读（请求顺序、去重、不存在与不可见都进 `missing`、恰好 100 条可用、空数组 / 空白 id / 101 条为 400），以及「被拒的记录不会从这两条路径漏出来」。`e2e/api/cases/02-resources.js` 再以真实 HTTP 把同一套契约钉一次。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、

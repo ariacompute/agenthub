@@ -1565,3 +1565,53 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
 - 未覆盖：`handlers` 里三条防御分支（`loadAgent` 之后的 `distributionOf` 报错、`Hub.Send` 失败），
   只会在 `DistributionOf` 将来新增失败模式时触发；`store` 仍按既有约定依赖 `DATABASE_URL`，
   本机无库时跳过（本次改动不涉及持久层）。
+
+## M27 — e2e 补齐：拓扑 / 自文档两屏 + 线程链断点 + 来源与审计加深（2026-11-26）
+
+### 1. 做了什么
+
+- **两段缺失的界面旅程**：控制台十屏原有六段旅程，`topology` 与 `docs` 从未被真实浏览器点过。
+  - `topology.spec.js`：六条 lane 全部渲染（来自 `KINDS` 而非目录，空 kind 也有 lane）、
+    点节点后 `.node.selected` 与详情卡同步（选择是 registry/playground 共享的全局状态）、
+    边面板与四段 legend 恒在、窗口开关切到「全部」后 lane 与选中不变。
+  - `docs.spec.js`：索引 6 章、首章默认 active、点索引跳到 `#sec-http` 且滚动 spy 跟随、
+    `version@commit` 徽标非空、端点点开出现 request/response 双样例、再点收起。
+- **API 链路断点（真 bug）**：`09-threads-speech.js` 的「create a thread」用
+  `res.json?.id || res.json?.thread?.id` 取 id，但 `POST /api/threads` 返回的是
+  `threads.Thread` 结构体本身（无 json tag），字段名是 `ID`。于是 `threadId` 永远为空，
+  **后续 7 条用例全部以「threadId unavailable」跳过**——它们看起来是「实例不支持」，
+  实际是从未执行过。改为先读 `ID`（保留小写与包装形状作为兼容），与
+  `05-stream-events.js`、桌面端 `ThreadListView.vue` 的既有读法对齐。
+- **线程事件流从恒跳到真跑**：`GET /api/threads/{id}/events` 会先回放已有消息再订阅，
+  而用例建的是空线程，只能超时跳过。先投两条不带 mention 的普通消息（不产生委派任务），
+  让回放有内容可断言。
+- **来源屏从「可达或拦截」升级为真写**：持有 `sources:manage` 时开抽屉、填名字与 URL、
+  断言 POST 201、抽屉关闭、卡片出现且 endpoint 与两个操作按钮就位，再走走控制台自己的
+  confirm 删除并断言 204 + 卡片消失；无权限的身份仍断言路由守卫（不伪造结果）。
+  全程不点同步：fixture 同步会往目录里导入记录，控制台删不掉。
+- **审计屏从「过滤栏可见」升级为完整回路**：切时间窗发出的是服务端读（非前端筛选）、
+  链校验按钮打出 `/api/audit/verify` 且 `.audit-chain[data-state=ok]`、行点开抽屉且
+  `prevHash`/`hash` 两栏都在、Escape 关闭抽屉。
+
+### 2. 文件
+
+- 新增：`e2e/ui/journeys/{topology,docs}.spec.js`。
+- 修改：`e2e/api/cases/{05-stream-events,09-threads-speech}.js`、
+  `e2e/ui/journeys/{admin,governance}.spec.js`、文档计数四处
+  （`AGENTS.md`、`README.md`、`README_cn.md`、`e2e/README.md` 两处）。
+
+### 3. 验证（本机 linux/amd64，对 127.0.0.1:3500 真实例实测）
+
+| 项 | 结果 |
+| --- | --- |
+| `e2e/api --coverage-only`（严格） | **147/147 documented routes have a case** |
+| `make e2e-api` | **186 passed / 0 failed / 35 skipped**（此前 178 / 0 / 43） |
+| ↳ 由跳过转为实跑 | 线程创建、历史、发消息、@mention、清空、语音、删除、事件回放，共 8 条 |
+| `make e2e-ui` | **14 passed**（6 文件 12 条 → 8 文件 14 条） |
+| `gofmt -l` / `go vet ./...` / `go test ./...` | 无输出 / 无输出 / 全绿（本次未改 Go 代码，作为回归基线） |
+
+- 剩余 35 条 SKIP 全部是实例能力或外部依赖：路由相关 17 条（`AGENTHUB_ROUTER_ENABLED=false` 13 条、
+  `/api/router/events` 模块未启用 503 两条、由路由禁用派生的 triggerId / ticketId 两条）、
+  备份关闭 9 条（`AGENTHUB_BACKUP_MODE=off` 8 条 + 还原用例 1 条）、`AGENTHUB_E2E_*` 开关 8 条
+  （pushCallback 一个开关对应两条用例）、无 OAuth provider 1 条。
+  「unavailable」类跳过现在只剩路由禁用派生的两条。

@@ -9,9 +9,9 @@ removed again, and every case prints `PASS`, `FAIL` or `SKIP` with a reason.
   governance, A2A (including HITL park → resume / cancel), streaming and
   `since` replay, tasks, RBAC, channels/connectors, threads/speech, files,
   sandboxes, schedules/computers/knowledge, router, audit and checkpoints.
-- **UI** (`ui/`): six Playwright journeys through the real console — login,
-  register a resource, playground trial run, task trace, governance approvals
-  and administration.
+- **UI** (`ui/`): eight Playwright journeys through the real console — login,
+  register a resource, playground trial run, task trace, governance approvals,
+  upstream sources, topology, self-documentation and administration.
 
 Both share `lib/` (config, HTTP client, identity, assertions, runner, cleanup,
 report, coverage guard) and the same login state. They are isolated from the Go
@@ -234,7 +234,7 @@ e2e/
   api/cases/*.js         declarative case table (00 .. 99, ordered by dependency)
   ui/helpers.js          real DOM selectors, language freeze, confirm handling
   ui/global-setup.js     one shared login -> .auth/state.json
-  ui/journeys/*.spec.js  six Playwright journeys
+  ui/journeys/*.spec.js  eight Playwright journeys
 ```
 
 ## Troubleshooting

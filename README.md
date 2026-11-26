@@ -529,10 +529,11 @@ End-to-end test against a running instance — two independent user-facing suite
 a declarative case table covering **every documented route** (147): discovery, auth/session,
 resources and governance, the A2A methods with HITL park → resume / cancel, streaming and `since`
 replay, tasks, RBAC and API keys, channels/connectors, threads/speech, files, sandboxes,
-schedules/computers/knowledge, router, audit and checkpoints. The UI suite drives six real console
-journeys (login, register a resource, playground trial run, task trace, governance approvals,
-administration) with Playwright. Both point at `BASE_URL`, never start or stop the service, clean
-up everything they create, and write a JSON + Markdown report.
+schedules/computers/knowledge, router, audit and checkpoints. The UI suite drives eight real console
+journeys (login, register a resource, playground trial run, task trace, governance approvals
+including upstream sources, topology, self-documentation and administration) with Playwright. Both
+point at `BASE_URL`, never start or stop the service, clean up everything they create, and write a
+JSON + Markdown report.
 
 ```bash
 # 1. Server side: every AGENTHUB_* switch is read once at startup. Set them before

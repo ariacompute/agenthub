@@ -19,7 +19,11 @@ export default [
     const res = await ctx.api('POST', '/api/threads', { body: { title: 'e2e thread' } })
     expectAvailable(res, 'create thread')
     expectStatus(res, 201, 'create thread')
-    ctx.state.threadId = res.json?.id || res.json?.thread?.id
+    // POST /api/threads answers the Go struct itself, so the id arrives as `ID`
+    // (the same shape 05-stream-events.js reads). The lowercase and wrapped
+    // fallbacks stay for an instance that publishes a tagged view; without the
+    // `ID` arm every case below skipped on a threadId nobody ever set.
+    ctx.state.threadId = res.json?.ID || res.json?.id || res.json?.thread?.ID || res.json?.thread?.id
     requireState(ctx, 'threadId')
     ctx.cleanup(`thread ${ctx.state.threadId}`, () => deleteIfExists(ctx.api, `/api/threads/${ctx.state.threadId}`))
   }),

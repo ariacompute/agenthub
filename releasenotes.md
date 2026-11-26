@@ -626,7 +626,7 @@ screen and a visual inspector for the A2A contract.
   (`production role: no DDL, use a migrator DSN`) instead of a failure. Without that, the
   first production-shaped run would have reported a permission error as a defect.
 - **The assembled product runs in CI too**: a fourth job builds the console and the binary
-  (`make build`), then runs the route-coverage guard, the API suite and the six Playwright
+  (`make build`), then runs the route-coverage guard, the API suite and the eight Playwright
   journeys against a real Postgres and the real process — the parts are unit-tested, this is
   the product. The guard goes first because it needs no server: a route added to `docs/`
   without a case fails the job, not a review. Chromium and the sandbox default image are
