@@ -422,8 +422,11 @@ agent 计算机，以及线程与其消息、通道投递明细、共享文件�
 `error_code`/`latency_ms`/`user_agent`。路径脱敏（query 值置 `REDACTED`），绝不存请求体与响应体。
 该表被两道关锁成只追加：触发器对 `UPDATE`/`DELETE`/`TRUNCATE` 一律拒绝（**包括表属主**），运行角色只被
 授予 `INSERT`/`SELECT`。行之间哈希链接（`hash = sha256(prev_hash ‖ canonical(event))`），篡改或删除任一行
-都会断开其后所有链接，`GET /api/audit/verify` 会指出第一个断点。单写者串行维护链：有界队列 + 批量插入
-（默认 8192 / 64 条 / 500 ms），队列满则丢帧并计数告警，**绝不阻塞业务请求**。
+都会断开其后所有链接，`GET /api/audit/verify` 会指出第一个断点。链接在写入处盖章：有界队列 + 批量插入
+（默认 8192 / 64 条 / 500 ms），由存储层在**同一个先取 PostgreSQL 事务级咨询锁
+（`pg_advisory_xact_lock`）的事务里**读尾、盖 `prev_hash`/`hash` 并落库。这把锁才是跨进程成立的原因：
+任意多个 agenthub 实例共享一个数据库仍只延展同一条链，保留期清理（`Prune`）取同一把锁，因此不会删掉
+写者刚读到的尾行。队列满则丢帧并计数告警，**绝不阻塞业务请求**。
 
 | 变量 | 默认 | 含义 |
 | --- | --- | --- |
@@ -462,13 +465,20 @@ make db-up             # 集成用例需要真实 PostgreSQL
 make db-migrate        # 只建 schema；两个 test 目标都会先跑它
 make test              # go test -race ./...（集成用例在 DATABASE_URL 未设置时 skip）
 make test-integration  # 只跑 integration_test.go
-make test-cover        # -coverprofile + go tool cover -func，按包与总计
+make test-cover        # -coverprofile + go tool cover -func，按包与总计；需要 DATABASE_URL
+make test-cover-offline # 同上，但明确标注为「只量了离线子集」
 make web-test          # cd web && bunx vitest run
 ```
 
 覆盖率按包统计。读数字前要知道两件事：治理规则用**包内假 store** 驱动，因此 `registry` 的
 store 分支不需要数据库就能覆盖；而 `internal/store` 只有在设置了 `DATABASE_URL` 时才测得出来——
 它的用例是 skip，而不是伪造结果。
+
+覆盖率表里「门控跳过」与「真的没覆盖」长得一模一样，所以两者被显式分开：`make test-cover` 在
+没有 `DATABASE_URL` 时直接拒绝出数（那个数字描述的是离线子集），`make test-cover-offline` 才量该子集，
+并把被门控的包逐条列出。CI 把 `DATABASE_URL` 当作必需项——`.github/workflows/ci.yml` 与
+`internal/testdb.TestDatabaseURLIsSetInCI` 两处把关，缺库时整轮直接失败，而不是让全部 store 用例
+静默跳过。
 
 对着运行中实例的端到端测试——`e2e/` 下两套彼此独立的「用户视角」套件（完整开关清单与报告格式见
 [`e2e/README.md`](e2e/README.md)）。接口套件是声明式用例表，覆盖**全部 147 条文档端点**：发现、

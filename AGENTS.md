@@ -237,6 +237,11 @@ persistence ← internal/store（GORM 实现）
   迁移 SQL 必须幂等（`CREATE TABLE/INDEX IF NOT EXISTS`），新增表或列走新文件、**不改已执行文件**。
   幂等 ≠ 并发安全：`store.Migrate` 对建表与每个文件持 `pg_advisory_xact_lock` 并在锁内复查
   `schema_migrations`（两个副本、或 `go test` 的两个包同时迁移会撞系统目录 23505），别把这段去掉。
+- **审计链的串行化必须跨进程**：`audit_log` 的「读尾 + 盖 `prev_hash`/`hash` + 插入」由
+  `store.auditStore.Append` 在**同一事务**内先取 `pg_advisory_xact_lock(auditChainLockKey)` 完成，
+  保留期 `Prune` 取同一把锁。别把盖章挪回 `Recorder`（那只是进程内串行），也别去掉这把锁：
+  两个实例共享一个库会各自按自己看到的尾续链，`/api/audit/verify` 恒报断链。
+  锁必须是事务级（随提交/回滚释放），改成会话级会被连接池带进下一个借用者。
 - **按 id 取行必须带 owner**：`schedules` / `channels` / `computers` 的端口签名是
   `Get(ctx, id, ownerID)` / `Update(ctx, x, ownerID)` / `Delete(ctx, id, ownerID)`，仓储统一走
   `store.ownedWhere`（`WHERE id = ? AND owner_id = ?`）。`ownerID == ""` 只匹配无主行，
@@ -307,6 +312,9 @@ persistence ← internal/store（GORM 实现）
   列上的 SQL `DEFAULT` 保留给手写 SQL，模型 tag 只写 `not null`。
 - **测试**：`go test -race ./...`（纯逻辑单测零外部依赖 —— memory 回退保证无 DB 也全绿）；
   集成用例以 `DATABASE_URL` 门控（**未设置则 `t.Skip`，绝不伪造结果**）；前端 `bunx vitest run`。
+  **CI 下这个变量是必需项**：`ci.yml` 在两个 go job 里先断言，`internal/testdb` 的
+  `TestDatabaseURLIsSetInCI` 再从套件内部兜底——缺库即失败，绝不让整组 store 用例静默跳过、
+  让覆盖率报出离线子集。
   新增功能须补**正常 + 异常**双路径用例。
 - **覆盖率门在看板之外，但看板不能空**：新代码至少覆盖到「正常路径 + 每个错误码一条」，
   并按这三条惯例落位：
@@ -334,7 +342,8 @@ make docker-build     # docker build --build-arg VERSION=$(make version)
 make compose-build    # 同一镜像改走 compose 构建（含 git 打标转发）
 make test             # db-migrate + go test -race ./...（含DB 门控用例）
 make test-integration # db-migrate + 只跑 Integration 用例
-make test-cover       # db-migrate + 逐包覆盖率；连接数据库时才会计入 store 与备份引擎（DB 门控用例）
+make test-cover       # db-migrate + 逐包覆盖率；缺 DATABASE_URL 直接失败（否则数字只描述离线子集）
+make test-cover-offline # 只量离线子集，并列出被 DB 门控的包（internal/store、internal/backup、tests/ 等）
 make vet / make fmt
 make web-install / make web-dev / make web-build / make web-test
 make e2e-api                 # e2e/ 接口套件：147 条文档端点全量（PASS/FAIL/SKIP 逐条 + 报告）

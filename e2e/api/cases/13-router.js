@@ -28,6 +28,8 @@ export default [
     expectArray(res, 'triggers', 'trigger list')
   }),
 
+  // provides: a later case reads this trigger, so a skip here must reach it as
+  // "<id> unavailable (router disabled …)" rather than as a bare "not produced".
   c('create a trigger', 'POST /api/router/triggers', async (ctx) => {
     const res = await ctx.api('POST', '/api/router/triggers', {
       body: { source: 'manual', sourceId: uniqueName('e2e-trigger'), body: 'e2e router trigger' },
@@ -35,7 +37,7 @@ export default [
     routerOrSkip(res, 'create trigger')
     expectStatus(res, 202, 'create trigger')
     ctx.state.triggerId = res.json?.id
-  }),
+  }, { provides: 'triggerId' }),
 
   c('a redelivered trigger is deduplicated', 'POST /api/router/triggers', async (ctx) => {
     const res = await ctx.api('POST', '/api/router/triggers', {
@@ -55,13 +57,21 @@ export default [
     expectStatus(res, 200, 'get trigger')
   }),
 
+  // provides: the detail case below reads whatever this produces, so both the
+  // "router disabled" skip and an empty board have to reach it as a reason.
   c('tickets are listed', 'GET /api/router/tickets', async (ctx) => {
     const res = await ctx.api('GET', '/api/router/tickets')
     routerOrSkip(res, 'ticket list')
     expectAvailable(res, 'ticket list')
     expectArray(res, 'tickets', 'ticket list')
-    ctx.state.ticketId = res.json.tickets?.[0]?.id
-  }),
+    const first = res.json.tickets?.[0]
+    if (!first) {
+      // An empty board on a fresh instance is a legitimate state, and it is not
+      // a defect in the detail endpoint the next case covers.
+      skip('ticket list: the board has no tickets yet')
+    }
+    ctx.state.ticketId = first.id
+  }, { provides: 'ticketId' }),
 
   c('a ticket detail carries its decisions', 'GET /api/router/tickets/{id}', async (ctx) => {
     const id = requireState(ctx, 'ticketId')

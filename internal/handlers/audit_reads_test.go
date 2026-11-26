@@ -34,8 +34,8 @@ type auditStub struct {
 	getCalls  []string
 }
 
-func (s *auditStub) Append(context.Context, []audit.Event) error     { return nil }
-func (s *auditStub) LastHash(context.Context) (string, int64, error) { return "", 0, nil }
+func (s *auditStub) Append(context.Context, []audit.Event) (string, error) { return "", nil }
+func (s *auditStub) LastHash(context.Context) (string, int64, error)       { return "", 0, nil }
 
 func (s *auditStub) List(ctx context.Context, q audit.Query) ([]audit.Event, error) {
 	s.lastQuery, s.lastCtx = q, ctx

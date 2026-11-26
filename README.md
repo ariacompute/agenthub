@@ -479,9 +479,13 @@ vocabulary: `event_id`/`ts`/`source`/`action`/`read_only`/`actor_*`/`ip`/`method
 trigger rejects `UPDATE`/`DELETE`/`TRUNCATE` for every role including the owner, and the runtime role
 is granted only `INSERT`/`SELECT` on it. Rows are hash-chained
 (`hash = sha256(prev_hash ‖ canonical(event))`), so editing or removing one breaks every later link
-and `GET /api/audit/verify` points at the first broken row. A single writer serialises the chain with
-a bounded queue and batched inserts (8192 / 64 / 500 ms by default); a full queue drops frames and
-warns — it never blocks a request.
+and `GET /api/audit/verify` points at the first broken row. The link is stamped where the row is
+written: frames are batched through a bounded queue (8192 / 64 / 500 ms by default), and the store
+reads the tail, stamps `prev_hash`/`hash` and inserts the batch **inside one transaction that first
+takes a transaction-scoped PostgreSQL advisory lock** (`pg_advisory_xact_lock`). That lock is what
+makes the guarantee hold across processes: any number of agenthub instances sharing one database
+still extend a single chain, and retention (`Prune`) takes the same lock so it cannot delete the tail
+a writer has just read. A full queue drops frames and warns — it never blocks a request.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -515,7 +519,8 @@ make db-up             # integration cases need a real PostgreSQL
 make db-migrate        # create the schema; both test targets run this first
 make test              # go test -race ./... (integration cases skip without DATABASE_URL)
 make test-integration  # only integration_test.go
-make test-cover        # -coverprofile + go tool cover -func, per package and in total
+make test-cover        # -coverprofile + go tool cover -func; requires DATABASE_URL
+make test-cover-offline # the same, labelled as the offline subset it measures
 make web-test          # cd web && bunx vitest run
 ```
 
@@ -523,6 +528,13 @@ Coverage is measured per package. Two things are worth knowing before reading th
 governance rules are driven through in-package fakes, so the store-backed branches of `registry`
 are covered without a database, while `internal/store` only measures once `DATABASE_URL` is set —
 its cases skip rather than fabricate.
+
+A skipped case and an uncovered one look the same in a coverage table, which is why the two are
+kept apart: `make test-cover` refuses to run without `DATABASE_URL` (the number would describe the
+offline subset), and `make test-cover-offline` prints that subset with the gated packages named. CI
+treats `DATABASE_URL` as required, both in `.github/workflows/ci.yml` and in
+`internal/testdb.TestDatabaseURLIsSetInCI`, so a missing database fails the run instead of
+silently skipping every store case.
 
 End-to-end test against a running instance — two independent user-facing suites in `e2e/`
 (see [`e2e/README.md`](e2e/README.md) for the full switch list and report format). The API suite is

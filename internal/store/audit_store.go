@@ -26,10 +26,100 @@ func NewAuditStore(db *gorm.DB) audit.Store {
 	return &auditStore{db: db}
 }
 
-func (s *auditStore) Append(ctx context.Context, events []audit.Event) error {
+// auditChainLockKey serialises "read the tail, stamp the batch, insert it" across
+// every process pointed at the same database. Any fixed number works; this one is
+// "aghub-audit" cut to eight ASCII bytes, and it is deliberately different from
+// migrationLockKey so a migrator and a writer never wait on each other.
+const auditChainLockKey int64 = 0x61676875622d6175
+
+// Append stamps the chain and inserts the batch under one transaction-scoped
+// advisory lock.
+//
+// The lock is the whole point: without it two instances sharing a database each
+// read the tail they happen to see, stamp their own prev_hash and commit, and
+// the trail forks into two chains that /api/audit/verify reports as broken at
+// whichever row the other instance wrote. A transaction-scoped lock is released
+// exactly when the batch is committed or rolled back, so it cannot leak into the
+// next borrower of the pooled connection.
+func (s *auditStore) Append(ctx context.Context, events []audit.Event) (string, error) {
 	if len(events) == 0 {
-		return nil
+		return "", nil
 	}
+	return scopedTx(ctx, s.db, func(tx *gorm.DB) (string, error) {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, auditChainLockKey).Error; err != nil {
+			return "", err
+		}
+		tail, err := readChainTail(tx)
+		if err != nil {
+			return "", err
+		}
+		fresh, err := withoutStored(tx, events)
+		if err != nil {
+			return "", err
+		}
+		if len(fresh) == 0 {
+			// A replayed batch changes nothing and must not move the tail: the
+			// hashes it would produce point at rows ON CONFLICT keeps out.
+			return tail, nil
+		}
+		tail = audit.Stamp(tail, fresh)
+		if err := insertAuditRows(tx, fresh); err != nil {
+			return "", err
+		}
+		return tail, nil
+	})
+}
+
+// readChainTail reads the hash of the newest row, "" when the table is empty. It
+// must only be called while the chain lock is held.
+func readChainTail(db *gorm.DB) (string, error) {
+	var row model.AuditLog
+	if err := db.Order("id DESC").Limit(1).Take(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return row.Hash, nil
+}
+
+// withoutStored drops the events whose event_id is already in the table.
+//
+// The recorder never retries a batch, but a manual replay is a supported
+// operation. Stamping a duplicate would produce a hash for a row that
+// ON CONFLICT DO NOTHING refuses to insert, and the next row would then point at
+// a hash no row carries - a break invented by the writer itself.
+func withoutStored(db *gorm.DB, events []audit.Event) ([]audit.Event, error) {
+	ids := make([]string, 0, len(events))
+	for _, ev := range events {
+		ids = append(ids, ev.EventID)
+	}
+	var found []string
+	if err := db.Model(&model.AuditLog{}).Where("event_id IN ?", ids).
+		Pluck("event_id", &found).Error; err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		return events, nil
+	}
+	stored := make(map[string]struct{}, len(found))
+	for _, id := range found {
+		stored[id] = struct{}{}
+	}
+	fresh := make([]audit.Event, 0, len(events))
+	for _, ev := range events {
+		if _, dup := stored[ev.EventID]; dup {
+			continue
+		}
+		fresh = append(fresh, ev)
+	}
+	return fresh, nil
+}
+
+// insertAuditRows writes already-stamped events. ON CONFLICT stays as the second
+// line of defence: the lock means only one writer is here at a time, but a
+// bounded queue that sheds load is not the place to discover a unique violation.
+func insertAuditRows(db *gorm.DB, events []audit.Event) error {
 	rows := make([]model.AuditLog, 0, len(events))
 	for _, ev := range events {
 		meta, err := model.NewJSONField(ev.Metadata)
@@ -62,12 +152,10 @@ func (s *auditStore) Append(ctx context.Context, events []audit.Event) error {
 			Hash:         ev.Hash,
 		})
 	}
-	return withIdentity(ctx, s.db, func(db *gorm.DB) error {
-		return db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "event_id"}},
-			DoNothing: true,
-		}).Create(&rows).Error
-	})
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "event_id"}},
+		DoNothing: true,
+	}).Create(&rows).Error
 }
 
 // chainTail is the type parameter of LastHash: scoped needs a single result
@@ -183,7 +271,7 @@ func (s *auditStore) Segment(ctx context.Context, from time.Time, afterID int64,
 }
 
 func (s *auditStore) Prune(ctx context.Context, cutoff time.Time) (int64, error) {
-	return scoped(ctx, s.db, func(db *gorm.DB) (int64, error) {
+	return scopedTx(ctx, s.db, func(db *gorm.DB) (int64, error) {
 		// Retention removes a prefix of the chain. Remember the last row that
 		// disappears: the survivor still points at it through prev_hash, and
 		// without that seed a verifier starting from "" calls a healthy chain
@@ -191,6 +279,14 @@ func (s *auditStore) Prune(ctx context.Context, cutoff time.Time) (int64, error)
 		// crash cannot leave a head with no known predecessor. The retention
 		// identity is what the policies require for both the delete and the
 		// anchor write.
+		//
+		// The chain lock is taken here too. A prune that removed the row a
+		// writer had just read as the tail would leave that writer pointing at
+		// a hash no row carries, and the anchor is the only place that fact is
+		// recoverable - so the two must not interleave.
+		if err := db.Exec(`SELECT pg_advisory_xact_lock(?)`, auditChainLockKey).Error; err != nil {
+			return 0, err
+		}
 		cutoff = cutoff.UTC()
 		// Find keeps a no-op prune quiet: an empty window is the common case.
 		var tails []model.AuditLog

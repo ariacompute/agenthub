@@ -15,8 +15,9 @@
 //     /api/audit/verify.
 //
 // This file holds the event, the mutable trace that travels on the request
-// context, and the HTTP middleware. The chain lives in chain.go and the single
-// writer in recorder.go.
+// context, and the HTTP middleware. The chain lives in chain.go, the batching
+// writer in recorder.go, and the cross-instance serialisation in the Store
+// implementation: only it can hold a lock around "read the tail, stamp, insert".
 package audit
 
 import (
@@ -114,7 +115,13 @@ type Anchor struct {
 // package stays free of GORM, and it is nil-safe in tests: with no store the
 // recorder keeps the chain in memory only.
 type Store interface {
-	Append(ctx context.Context, events []Event) error
+	// Append stamps the chain and stores the batch, and it is the only write
+	// path: the implementation owns prev_hash/hash because the read of the tail
+	// and the insert must not be separable by another writer. The PostgreSQL
+	// implementation does both inside one transaction that first takes an
+	// advisory lock, so several instances sharing a database extend one chain
+	// instead of forking it. It returns the new tail ("" for an empty batch).
+	Append(ctx context.Context, events []Event) (tail string, err error)
 	// LastHash returns the hash of the newest row ("" when the table is empty)
 	// and its id, which is what lets a restart continue the chain instead of
 	// starting a second one.

@@ -70,6 +70,27 @@ func Hash(prev string, e Event) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// Stamp assigns prev_hash and hash to events in order, starting from prev, and
+// returns the new tail. An empty batch returns prev unchanged.
+//
+// Times are truncated to microseconds first: that is the precision PostgreSQL
+// keeps, and Verify recomputes the hash from the row read back, so hashing a
+// nanosecond value would report the very first row as tampered.
+//
+// This is the only implementation of the link rule. The PostgreSQL store calls
+// it inside the transaction that holds the chain lock; an in-memory store calls
+// it directly. Both therefore produce the same chain, and the rule cannot drift
+// between them.
+func Stamp(prev string, events []Event) string {
+	for i := range events {
+		events[i].Time = events[i].Time.UTC().Truncate(time.Microsecond)
+		events[i].PrevHash = prev
+		events[i].Hash = Hash(prev, events[i])
+		prev = events[i].Hash
+	}
+	return prev
+}
+
 // Verification is the answer of a chain check.
 type Verification struct {
 	Checked int64 `json:"checked"`

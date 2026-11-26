@@ -125,3 +125,47 @@ func chainOf(t *testing.T, n int) []Event {
 	}
 	return out
 }
+
+// TestStampLinksTheBatchAndReturnsItsTail pins the one implementation of the
+// link rule. The store calls it under the advisory lock; an in-memory store calls
+// it directly, so both must produce a chain the verifier accepts.
+func TestStampLinksTheBatchAndReturnsItsTail(t *testing.T) {
+	// PostgreSQL keeps microseconds, so a nanosecond value hashed here and read
+	// back from the row would make Verify call the first row tampered.
+	nanos := time.Date(2026, 11, 13, 8, 45, 24, 123456789, time.UTC)
+	events := []Event{
+		{EventID: "e1", Time: nanos},
+		{EventID: "e2", Time: nanos.Add(time.Second)},
+	}
+
+	tail := Stamp("seed", events)
+
+	if events[0].PrevHash != "seed" {
+		t.Fatalf("first prev_hash = %q, want the inherited tail", events[0].PrevHash)
+	}
+	if events[1].PrevHash != events[0].Hash {
+		t.Fatalf("second prev_hash = %q, want the first row's hash %q", events[1].PrevHash, events[0].Hash)
+	}
+	if tail != events[1].Hash {
+		t.Fatalf("Stamp returned %q, want the last row's hash %q", tail, events[1].Hash)
+	}
+	if !events[0].Time.Equal(nanos.Truncate(time.Microsecond)) {
+		t.Fatalf("time = %v, want the microsecond-truncated value", events[0].Time)
+	}
+	if events[0].Hash != Hash("seed", events[0]) {
+		t.Fatal("the hash must cover the truncated time and the inherited tail")
+	}
+	prev, broken := VerifySegment("seed", events)
+	if broken != nil {
+		t.Fatalf("a stamped batch must verify: %+v", broken)
+	}
+	if prev != tail {
+		t.Fatalf("VerifySegment ended at %q, want the Stamp tail %q", prev, tail)
+	}
+
+	// An empty batch is a no-op that still reports the tail it was given: the
+	// caller may be flushing a timer with nothing queued.
+	if got := Stamp("unchanged", nil); got != "unchanged" {
+		t.Fatalf("Stamp(prev, nil) = %q, want the inherited tail", got)
+	}
+}

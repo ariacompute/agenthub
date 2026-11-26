@@ -16,6 +16,7 @@ import (
 // must behave the same whether the rows land in PostgreSQL or in this map.
 type fakeStore struct {
 	rows      []Event
+	raw       []Event // the batch exactly as the recorder handed it over
 	appendErr error
 	lastErr   error
 	segment   [][]Event // one page per call, in order
@@ -30,14 +31,23 @@ type fakeStore struct {
 	cutoff      time.Time
 }
 
-func (f *fakeStore) Append(ctx context.Context, events []Event) error {
+// Append mirrors the contract of a store that owns the chain: it stamps what it
+// was given and returns the new tail. The recorder must hand the batch over
+// unstamped, or the stamp could not share a lock with the tail read.
+func (f *fakeStore) Append(ctx context.Context, events []Event) (string, error) {
 	f.appendCalls++
 	f.lastCtx = ctx
+	f.raw = append([]Event(nil), events...)
 	if f.appendErr != nil {
-		return f.appendErr
+		return "", f.appendErr
 	}
+	tail := ""
+	if len(f.rows) > 0 {
+		tail = f.rows[len(f.rows)-1].Hash
+	}
+	tail = Stamp(tail, events)
 	f.rows = append(f.rows, events...)
-	return nil
+	return tail, nil
 }
 
 func (f *fakeStore) LastHash(context.Context) (string, int64, error) {
@@ -368,17 +378,26 @@ func TestSnapshotCopiesTheMetadata(t *testing.T) {
 	}
 }
 
-// TestAppendNormalisesTimeBeforeHashing: PostgreSQL timestamptz stores
-// microseconds, so hashing a Go nanosecond timestamp and reading the row back
-// made Verify flag the very first row as tampered. The writer must normalise
-// before both the hash and the INSERT.
-func TestAppendNormalisesTimeBeforeHashing(t *testing.T) {
+// TestAppendHandsTheBatchToTheStoreUnstamped: the chain is stamped by whoever
+// holds the lock around "read the tail, then insert", which is the store. The
+// recorder must pass the batch through untouched - a prev_hash computed here is
+// exactly the fork two instances produce when they share a database.
+func TestAppendHandsTheBatchToTheStoreUnstamped(t *testing.T) {
 	store := &fakeStore{}
 	rec := New(store, Options{})
 	nanos := time.Date(2026, 11, 13, 8, 45, 24, 123456789, time.UTC)
 
 	rec.append([]Event{{EventID: "e1", Time: nanos}})
 
+	if len(store.raw) != 1 {
+		t.Fatalf("the store received %d events, want 1", len(store.raw))
+	}
+	if store.raw[0].PrevHash != "" || store.raw[0].Hash != "" {
+		t.Fatalf("the recorder stamped the batch instead of leaving it to the store: %+v", store.raw[0])
+	}
+	if !store.raw[0].Time.Equal(nanos) {
+		t.Fatalf("time = %v, want it untouched until the store stamps", store.raw[0].Time)
+	}
 	if len(store.rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(store.rows))
 	}

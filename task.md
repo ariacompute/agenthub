@@ -1777,3 +1777,140 @@ event_id = audit-anchor-20261126033136.212200478-new
 | `go test ./internal/store -run TestAuditStore`（有库） | 全绿；跑完后 `audit_chain_anchor` 为一行空 hash（无锚点语义） |
 | 重建实例后 `GET /api/audit/verify` | `{"checked":6744,"ok":true}` |
 | `e2e/api`（对 127.0.0.1:3513） | **177 passed / 0 failed / 44 skipped**，`the hash chain verifies` PASS |
+
+## M30 — 第十一轮补齐：审计链跨实例串行 / CI 必需 DATABASE_URL / router SKIP 原因 / 三个长尾包覆盖（2026-11-26）
+
+### 1. 审计链的"单写者"从进程内变成跨进程
+
+**问题**（第十一轮报告 §5）：`internal/audit/recorder.go` 在进程内按内存 `r.prev` 盖
+`prev_hash`/`hash`，`internal/store/audit_store.go` 只负责插入，`LastHash` 与 INSERT 之间
+没有任何跨会话串行。两个实例共享一个 PostgreSQL 时，各自按自己看到的尾续链 → 链分叉，
+`/api/audit/verify` 从另一实例写下的第一行起报断链（报告用双实例 A/B 撞出 id=1685 的断点）。
+
+**修复**：
+
+- 新增 `audit.Stamp(prev, events) string`：按 PostgreSQL 的微秒精度截断时间、顺序盖
+  `prev_hash`/`hash`、返回新链尾。它成为链接规则的**唯一实现**（原 `Recorder.append` 里的
+  那段逻辑删除，微秒截断用例随之迁到 `chain_test.go`）。
+- `audit.Store.Append` 的签名改成 `(ctx, events) (tail string, err error)`：盖章是"读尾 +
+  插入"的一部分，而只有持有事务的实现才能把两者锁在一起，因此盖章责任下沉到 store。
+  `Recorder` 只负责有界队列 + 批量交付，`prev`/`prevID`/`mu` 一并删除；`Run` 启动时的
+  `LastHash` 保留为连通性探针（`gatedStore` 用例仍以它为闸门）。
+- `store.auditStore.Append`：`scopedTx` 开事务 → `SELECT pg_advisory_xact_lock(auditChainLockKey)`
+  → 读尾 → `event_id IN (?)` 剔除已存在行 → `audit.Stamp` → 一条批量 `INSERT ... ON CONFLICT
+  (event_id) DO NOTHING` → 返回新尾。锁键 `0x61676875622d6175`（"aghub-au"），与
+  `migrationLockKey` 不同值，迁移与写入互不阻塞。
+- `Prune` 也改走 `scopedTx` 并取同一把锁：否则剪枝可能删掉 append 刚读到的尾行，或让锚点与
+  写入交错（锚点是唯一能证明"前缀被合法移除"的地方）。
+- `store.scopedTx`：恒开事务（事务级咨询锁只在事务块内合法），ctx 带 identity 时照旧
+  `set_config` 注入 RLS 身份；`scoped` 行为不变，不给无身份调用平白加事务。
+- 重投批次先剔除已存在的 `event_id` 再盖章：否则会给 `ON CONFLICT` 拒绝插入的行算出 hash，
+  下一行就指向一个没有行携带的 hash——断链由写者自己制造。
+
+**性能**：每批（默认 ≤64 行 / 500 ms）多一次主键倒序取一行 + 一次 `event_id` 唯一索引查询，
+都是 O(1)；不锁表、不做 `FOR UPDATE` 扫描，持锁时长 = 一次批量 INSERT。没有常驻会话锁，
+连接池不会被长期占用。
+
+### 2. 文档不再把"单写者"留给读者猜
+
+`README.md` / `README_cn.md` 的审计段、`requirements.md` 的审计条目、`AGENTS.md` 的硬规则
+都写明：串行化由 `pg_advisory_xact_lock` 在"读尾 + 盖章 + 插入"的同一事务内完成，**跨实例成立**；
+保留期 `Prune` 取同一把锁。
+
+### 3. 文件
+
+- `internal/audit/{audit.go,chain.go,recorder.go}`：端口签名、`Stamp`、writer 瘦身。
+- `internal/store/{audit_store.go,scope.go}`：咨询锁 + 盖章 + 去重、`scopedTx`。
+- `internal/audit/{chain_test.go,recorder_test.go}`、`internal/store/{audit_store_test.go,scope_test.go}`、
+  `internal/handlers/audit_reads_test.go`：适配新签名；新增 `TestStampLinksTheBatchAndReturnsItsTail`、
+  `TestAppendHandsTheBatchToTheStoreUnstamped`、`TestScopedTx*`、
+  `TestAuditAppendWaitsForTheChainLock`（另一连接持锁时 Append 必须阻塞，跨进程语义的确定性证明）、
+  `TestAuditConcurrentWritersKeepOneChain`（两个独立连接池并发写，窗口内仍是一条可校验的链）。
+
+### 4. 验证（本机 linux/amd64，PG 16 实例 :5434）
+
+| 项 | 结果 |
+| --- | --- |
+| `go test ./internal/audit/` | 全绿 |
+| `DATABASE_URL=… go test ./internal/store/` | 全绿 |
+| `DATABASE_URL=… go test -run 'TestAudit|TestScoped' ./internal/store/ -v` | 14 个用例全 PASS，含锁串行与并发两条 |
+| 跑完之后 `audit_chain_anchor` | 1 行、空 hash（"从未剪枝"语义，未留测试种子） |
+
+### 5. CI 里 `DATABASE_URL` 从"最好有"变成"必须有"
+
+**问题**（§9.2）：`testdb.DSN` 在变量缺失时 `t.Skip`，这在本地是设计（离线全绿），在 CI 里是陷阱：
+每个带库用例自我跳过、整轮绿、覆盖率数字描述的是离线子集，而报告读者以为那是产品。第十一轮
+报告正是靠人工比对才发现的。
+
+**修复**（三层，互为兜底）：
+
+- `.github/workflows/ci.yml`：`go` 与 `go-restricted` 两个 job 在 checkout 之后、装 Go 之前各加一步
+  `DATABASE_URL is required`，缺失时 `::error::` + `exit 1`；`go` job 另加 `make test-cover` 与
+  `coverage.out` 产物上传（`if: always()`，日志里的数字无法再按包重算）。
+- `internal/testdb/ci_guard_test.go` 新增 `TestDatabaseURLIsSetInCI`：`CI` / `GITHUB_ACTIONS` 存在而
+  `DATABASE_URL` 缺失时 `t.Fatal` 并给出修复指引，否则 `t.Skip` 并在文案里说明"非 CI 下门控跳过是设计"。
+  这样 GitLab / Jenkins 之类不读本文件的 CI 也不会静默跳过。
+- `Makefile`：`test-cover` 依赖新的 `require-database-url`，无库直接拒出数并说明哪些包会被门控跳过；
+  新增 `test-cover-offline`，明确标注"只量离线子集"并列出被门控的包；`.PHONY` 同步。
+
+### 6. e2e 最后一个 SKIP 原因缺口
+
+`e2e/api/cases/13-router.js` 里 `create a trigger` 与 `tickets are listed` 补 `provides: 'triggerId'` /
+`'ticketId'`，因此路由被关（`routerOrSkip`）跳过时，下游 `GET .../triggers/{id}`、`.../tickets/{id}`
+的 SKIP 行会带上上游原因，而不是只留一句"state missing"。空工单列表是新实例的合法状态，改成
+`skip('ticket list: the board has no tickets yet')`，不会再给下游塞一个 `undefined`。运行器
+（`e2e/lib/runner.js`）未改，`provides` 机制本就存在。
+
+### 7. 三个长尾包的覆盖率
+
+基线为本机带库实测（router 91.8% / handlers 84.3% / backup 86.1%），全部沿用既有测试骨架，
+未新造框架：
+
+- `internal/handlers`（84.3% → **90.5%**）：新增 `a2a_paths_test.go`、`admin_paths_test.go`、
+  `apikeys_paths_test.go`、`auth_paths_test.go`、`channels_paths_test.go`、`computers_paths_test.go`、
+  `domain_errors_test.go`，走 `store_failures_test.go` 的"嵌入可用 fake 再覆写"故障注入与
+  `malformed_test.go` 的畸形输入表，覆盖未接线依赖、请求体畸形、权限边界与各错误码分支。
+  **顺手修掉一处真缺陷**：`userView` 里 `roles == nil` / `groups == nil` 的兜底是死代码——
+  `append([]string{}, nil...)` 本来就返回非 nil 空切片；用例照出来后删掉这两个分支，保留注释说明
+  "空成员必须渲染成 `[]` 而不是 `null`"。
+- `internal/router`（91.8% → **95.2%**）：新增 `engine_rule_paths_test.go`（规则命中/未命中/无触发器）、
+  `eval_merge_test.go`（决策合并与置信度取舍）、`filter_compose_test.go`、`memory_store_branches_test.go`
+  （memory 回退的所有分支），走 `passes` 生命周期与 `compose` / `cron` / `filter` / `assess`。
+- `internal/backup`（86.1% → **90.6%**）：新增 `unreached_arms_test.go`，并在 `copy_test.go` 补
+  `shortWriter` 用例。覆盖：`Pack` 的父目录不可写 / 目标是目录 / 载荷中途失败（且不留半截文件）/
+  **声明长度大于实际载荷**（tar 的 `missed writing` 让 manifest 与载荷对不上，必须失败）；
+  `WriteCheckpoint` 的暂存目录不可建、`CreatedAt` 归零补齐、归档名被目录占用；
+  `ReadManifest` 的 JSON 损坏 / 版本超前 / 只有载荷没有 manifest / gzip 里不是 tar；
+  `Extract` 的目标写入失败与"拒绝时仍带回 manifest"；`FileChecksum` 传目录；只读目录里的
+  `newStageDump`；`EncryptFile` 写满设备、`DecryptFile` 源缺失；`SelectEngine` 客户端齐全与
+  只有 `pg_dump` 没有 `pg_restore`；`codeOf` 的六个分支；`Checkpoint` 的加密失败（行标
+  `backup_encrypt_failed`、明文不落地）与 `.sha256` 写失败（只告警）；加密归档的完整
+  `Restore`（解密两次、临时文件清理）与 `TMPDIR` 不可用时拒绝；`Delete`/`SaveSchedule`/
+  `SeedSchedule` 的目录层故障；`Run` 记下定时检查点失败后继续跑。`writeFrame` 的五个短写臂
+  由 `shortWriter`（第 N 次写入起返回 `ErrClosedPipe`）逐条打穿。
+
+**仍未覆盖、且不打算伪造的臂**（都在 `task.md` 里写明理由，而不是加 seam）：`copy.go` 需要
+断连/权限错误的 SQL 臂（属 `tests/backup_integration_test.go` 的真实库语义）、`archive.go` 的
+`tar.Close`/`gzip.Close`/`Sync` 失败、`crypto.go` 的 nonce 写成功但密文写失败（需要容量恰好的
+写入端）、`newID` 的 `crypto/rand` 失败、`fileSize` 在 checksum 与 stat 之间被删除的竞态。
+
+### 8. 本轮文件
+
+- `internal/backup/unreached_arms_test.go`（新增）、`internal/backup/copy_test.go`。
+- `internal/testdb/ci_guard_test.go`（新增）。
+- `.github/workflows/ci.yml`、`Makefile`、`e2e/api/cases/13-router.js`。
+- `README.md` / `README_cn.md` / `requirements.md` / `AGENTS.md`：审计链表述与 `test-cover` 口径。
+
+### 9. 验证（本机 linux/amd64，PG 16 实例 :5434，`CI=` 空）
+
+| 项 | 结果 |
+| --- | --- |
+| `gofmt -l ./internal ./cmd ./tests` | 无输出 |
+| `go vet ./...` | 干净 |
+| `go test -count=1 ./...`（无 `DATABASE_URL`） | 全绿，门控用例 SKIP |
+| `CI=1 go test ./internal/testdb/ -run TestDatabaseURLIsSetInCI`（无库） | **按预期 FAIL**，文案点名变量与修法 |
+| 同上但带 `DATABASE_URL` | ok |
+| `DATABASE_URL=… go test -race -count=1 ./...` | 全绿（1m26s） |
+| `DATABASE_URL=… make test-cover` | 全绿；router **95.2%**、handlers **90.5%**、backup **90.6%**，总计 86.2% |
+| `cd e2e && bun run api/index.js --coverage-only` | 147/147 |
+| `audit_log` 测试种子 | 用例自身用 `preserveChainAnchor` 做 LIFO 还原；本轮未额外落种子（未再手工查表，容器 exec 被拒） |

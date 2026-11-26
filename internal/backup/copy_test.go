@@ -9,6 +9,7 @@ package backup
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -254,5 +255,34 @@ func TestOrderTablesKeepsEveryTableInACycle(t *testing.T) {
 			t.Fatalf("order = %v, want each table once", got)
 		}
 		seen[name] = true
+	}
+}
+
+// shortWriter accepts a fixed number of writes and then reports a closed pipe:
+// a restore target that goes away mid-frame must fail the dump, not produce a
+// block the reader would mis-parse.
+type shortWriter struct {
+	writes int
+	seen   int
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	w.seen++
+	if w.seen > w.writes {
+		return 0, io.ErrClosedPipe
+	}
+	return len(p), nil
+}
+
+// TestWriteFrameReportsAShortWriter walks every step of the framing: the name
+// length, the name, the column length, the columns and the payload length are
+// separate writes, and a failure at any of them has to surface.
+func TestWriteFrameReportsAShortWriter(t *testing.T) {
+	for writes := 0; writes < 6; writes++ {
+		w := &shortWriter{writes: writes}
+		err := writeFrame(w, "tasks", []string{"id", "state"}, strings.NewReader("1\tcompleted\n"), 12)
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Errorf("writeFrame with %d accepted write(s) = %v, want the closed pipe", writes, err)
+		}
 	}
 }

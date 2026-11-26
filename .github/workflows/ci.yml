@@ -4,8 +4,12 @@
 #   • go     → `go test -race ./...` under the repo root. Unit cases run
 #              offline; the store/hub integration cases skip themselves when
 #              DATABASE_URL is unset, so a Postgres service is provided to let
-#              them exercise the real GORM path. `go vet ./...` runs alongside
-#              as a fast static gate.
+#              them exercise the real GORM path, and the variable is asserted
+#              before the suite runs: a run whose DB-backed cases all skip is
+#              green while measuring nothing, and the coverage number then
+#              describes the offline subset. `go vet ./...` runs alongside as a
+#              fast static gate, and `make test-cover` reports the DB-backed
+#              coverage (it refuses to measure without the variable).
 #   • go-restricted → the same suite as the role a deployment actually uses.
 #              `go` runs everything as the Postgres superuser, which bypasses
 #              every policy and can create anything, so a case that needs DDL and
@@ -66,6 +70,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The gate itself. Every DB-backed case self-skips without this variable,
+      # so a run that lacks it is green while measuring nothing; failing here
+      # names the missing configuration instead. internal/testdb also asserts the
+      # same rule from inside the suite (TestDatabaseURLIsSetInCI), which
+      # covers CI systems that do not read this file.
+      - name: DATABASE_URL is required
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::DATABASE_URL must be set: without it internal/store, internal/backup and tests/ skip and the coverage number describes the offline subset."
+            exit 1
+          fi
+
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -88,6 +104,25 @@ jobs:
 
       - name: Test (race)
         run: go test -race ./...
+
+      # The number the completeness report is read from has to be the DB-backed
+      # one. `make test-cover` refuses to print anything without DATABASE_URL
+      # (set at job level), so this step doubles as the check that the variable
+      # above was not dropped.
+      - name: Coverage (with the database)
+        run: make test-cover
+
+      # Uploaded even on success: the report is written by reading job output
+      # and artifacts from the outside, and a profile that exists only in a log
+      # cannot be re-derived per package.
+      - name: Upload the coverage profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: warn
+          retention-days: 7
 
   # ------------------------------------------- go (production runtime shape)
   go-restricted:
@@ -117,6 +152,16 @@ jobs:
       DATABASE_URL: postgres://agenthub_app:ci_app@localhost:5432/agenthub?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+
+      # Same gate as the go job: this one runs as the runtime role, so a missing
+      # DATABASE_URL would skip every policy-bound case and prove nothing about
+      # the deployment shape the job exists for.
+      - name: DATABASE_URL is required
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::DATABASE_URL must be set: this job exists to run the suite as the runtime role."
+            exit 1
+          fi
 
       - name: Install Go
         uses: actions/setup-go@v5

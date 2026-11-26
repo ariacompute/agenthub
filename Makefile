@@ -49,7 +49,7 @@ ALPINE_MIRROR ?=
 # breaking the containerized deploy with a "connection refused".
 POSTGRES_PORT ?= 5434
 
-.PHONY: run build test test-integration test-cover vet fmt version up down ports \
+.PHONY: run build test test-integration test-cover test-cover-offline require-database-url vet fmt version up down ports \
         docker-build compose-build \
         db-up db-down db-migrate db-psql \
         web-install web-dev web-build web-test web-test-watch clean \
@@ -87,11 +87,33 @@ test: db-migrate
 test-integration: db-migrate
 	go test -race -count=1 -run Integration ./tests/...
 
-# Per package coverage. The store package needs DATABASE_URL to measure: its
-# cases skip without one, which is honest but leaves the number near zero. Same
-# schema-first dependency as the two test targets, for the same reason: the
-# coverage run also reaches internal/backup's engines.
-test-cover: db-migrate
+# Coverage refuses to measure without a database. internal/store and the DB-gated
+# cases in internal/backup / internal/hub / internal/handlers / tests skip without
+# DATABASE_URL, so the number would describe the offline subset while looking like
+# the product — and a skipped package is indistinguishable from an uncovered one in
+# the output. Failing here with the fix named keeps that number honest; use
+# test-cover-offline to measure the subset on purpose.
+require-database-url:
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "test-cover: DATABASE_URL is unset."; \
+		echo "  internal/store, internal/backup and tests/ would report their offline subset only."; \
+		echo "  Run 'make db-up' and export DATABASE_URL, or 'make test-cover-offline' to measure that subset deliberately."; \
+		exit 1; \
+	fi
+
+# Per package coverage, with the schema in place first: the coverage run also
+# reaches internal/backup's dump engines, which need the tables to exist.
+test-cover: require-database-url db-migrate
+	go test -count=1 -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+	@printf '\nper package:\n'
+	@go test -count=1 -cover ./... | grep -v 'no test files' || true
+
+# The same measurement without a database, labelled as the subset it is: the
+# packages below report what ran, not what is covered.
+test-cover-offline:
+	@printf 'NOTE: DATABASE_URL is unset. These packages measure their offline subset only:\n'
+	@printf '      internal/store, internal/backup, internal/hub, internal/handlers, tests/\n\n'
 	go test -count=1 -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 	@printf '\nper package:\n'

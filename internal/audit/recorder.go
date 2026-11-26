@@ -45,11 +45,13 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Recorder is the single writer of the audit trail.
+// Recorder is the batching writer of the audit trail.
 //
-// One goroutine owns the sequence: it drains the queue, assigns prev_hash/hash
-// and writes the batch. That is what keeps the chain linear without locking the
-// insert path, and why the hash is computed here rather than by the database.
+// One goroutine drains the queue and hands whole batches to the store, which
+// stamps prev_hash/hash and inserts them in one transaction. The stamping
+// deliberately lives there rather than here: it has to share a lock with the
+// read of the chain tail, or two instances pointed at the same database would
+// each extend their own idea of the tail and fork the chain.
 type Recorder struct {
 	store Store
 	opts  Options
@@ -63,12 +65,6 @@ type Recorder struct {
 	stop     chan struct{}
 	done     chan struct{}
 	started  atomic.Bool
-
-	// prev/prevID are owned by the writer goroutine.
-	prev   string
-	prevID int64
-
-	mu sync.Mutex // guards prev during Verify/Prune on the calling goroutine
 }
 
 // New returns a recorder. It does not start the writer; Run does, and main
@@ -104,8 +100,9 @@ func (r *Recorder) Dropped() uint64 { return r.dropped.Load() }
 // Written returns how many events reached the store.
 func (r *Recorder) Written() uint64 { return r.written.Load() }
 
-// Run is the writer loop. It resumes the chain from the newest stored row, so a
-// restart continues the sequence instead of starting a second one.
+// Run is the writer loop. It probes the stored tail once at startup: the chain
+// itself is extended by the store, but a trail that cannot be read right now is
+// something an operator wants to see in the log before the first request.
 func (r *Recorder) Run(ctx context.Context) {
 	if r == nil || r.started.Swap(true) {
 		return
@@ -114,10 +111,8 @@ func (r *Recorder) Run(ctx context.Context) {
 
 	if r.store != nil {
 		sysCtx := identity.System()
-		if hash, id, err := r.store.LastHash(sysCtx); err != nil {
-			r.opts.Logger.Warn("audit: cannot read the chain tail; starting a fresh link", "error", err)
-		} else {
-			r.prev, r.prevID = hash, id
+		if _, _, err := r.store.LastHash(sysCtx); err != nil {
+			r.opts.Logger.Warn("audit: cannot read the chain tail; the next write decides the chain", "error", err)
 		}
 	}
 
@@ -177,37 +172,21 @@ func (r *Recorder) Close() {
 	}
 }
 
-// append stamps the chain and writes the batch.
+// append hands the batch to the store, which stamps and writes it.
 func (r *Recorder) append(batch []Event) {
-	out := make([]Event, 0, len(batch))
-	for _, ev := range batch {
-		// PostgreSQL timestamptz keeps microseconds, not Go nanoseconds.
-		// Canonical hashes the timestamp, so stamping a nanosecond value and
-		// reading a microsecond one back makes Verify report the very first
-		// row as tampered. Normalise once, before both the hash and the INSERT.
-		ev.Time = ev.Time.UTC().Truncate(time.Microsecond)
-		ev.PrevHash = r.prev
-		ev.Hash = Hash(r.prev, ev)
-		r.prev = ev.Hash
-		out = append(out, ev)
-	}
 	if r.store == nil {
-		r.written.Add(uint64(len(out)))
+		r.written.Add(uint64(len(batch)))
 		return
 	}
-	r.mu.Lock()
-	r.prevID += int64(len(out))
-	r.mu.Unlock()
-	if err := r.store.Append(identity.System(), out); err != nil {
-		// The chain cannot be repaired after a failed write: the in-memory tail
-		// has moved past rows that never landed. Record the failure and keep
-		// going; /api/audit/verify reports the break, which is the honest
-		// answer.
-		r.failed.Add(uint64(len(out)))
-		r.opts.Logger.Error("audit: append batch failed", "events", len(out), "error", err)
+	if _, err := r.store.Append(identity.System(), batch); err != nil {
+		// The request that was being audited has already been answered, so the
+		// writer can only count the loss and keep going; /api/audit/verify
+		// reports the break, which is the honest answer.
+		r.failed.Add(uint64(len(batch)))
+		r.opts.Logger.Error("audit: append batch failed", "events", len(batch), "error", err)
 		return
 	}
-	r.written.Add(uint64(len(out)))
+	r.written.Add(uint64(len(batch)))
 }
 
 // Verify walks the trail in segments and checks the links. from/to bound the

@@ -168,6 +168,8 @@ RAG 检索保持确定性 mock 并标 `TODO(real)`。
 - **审计**：`audit_log` 对齐 CloudTrail（`event_id` / `action` / `actor_*` / `ip` / `path` 脱敏 /
   `status` / `error_code` / `latency_ms` / `prev_hash` + `hash`），应用只 `INSERT`、触发器拒绝
   `UPDATE/DELETE/TRUNCATE`（保留期清理例外），写入走有界队列 + 批量，绝不阻塞业务；
+  「读尾 + 盖章 + 插入」由 `pg_advisory_xact_lock` 在**同一事务**内串行，因此多实例共享一个库时
+  仍只有**一条**链（不是每个进程一条），保留期 `Prune` 取同一把锁以免删掉写者刚读到的尾行；
   `GET /api/audit/verify` 重算哈希链。新增权限码 `audit:read`。`AGENTHUB_AUDIT_RETENTION` 默认 90 天。
 - **`/a2a` 授权**：`message/send|stream` 必须解析出具体资源；`tasks/*` 必须已认证且归属调用者
   （或管理员），否则按「不存在」返回；匿名只能触达 `public` 资源。

@@ -65,6 +65,54 @@ func TestScopedWithoutAnIdentityPublishesNothing(t *testing.T) {
 	}
 }
 
+// scopedTx is the variant the audit writer uses. pg_advisory_xact_lock is only
+// legal inside a transaction block, so this one opens a transaction even when the
+// caller carries no identity — the shortcut scoped takes there would turn into a
+// runtime error on the first unattended write.
+func TestScopedTxOpensATransactionWithoutAnIdentity(t *testing.T) {
+	db := openGovernanceDB(t)
+
+	got, err := scopedTx(context.Background(), db, func(tx *gorm.DB) (string, error) {
+		// Outside a transaction block this statement errors, which is exactly
+		// the failure the helper exists to prevent.
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, int64(0x5c0f3e7)).Error; err != nil {
+			return "", err
+		}
+		var owner string
+		err := tx.Raw(`SELECT coalesce(current_setting('app.owner_id', true), '')`).Scan(&owner).Error
+		return owner, err
+	})
+	if err != nil {
+		t.Fatalf("scopedTx: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("app.owner_id = %q, want no identity published", got)
+	}
+}
+
+func TestScopedTxPublishesAnIdentityAndPropagatesFailures(t *testing.T) {
+	db := openGovernanceDB(t)
+	ctx := identity.With(context.Background(), identity.Identity{OwnerID: "owner-scoped-tx"})
+
+	owner, err := scopedTx(ctx, db, func(tx *gorm.DB) (string, error) {
+		var got string
+		err := tx.Raw(`SELECT coalesce(current_setting('app.owner_id', true), '')`).Scan(&got).Error
+		return got, err
+	})
+	if err != nil || owner != "owner-scoped-tx" {
+		t.Fatalf("owner inside the transaction = %q, %v", owner, err)
+	}
+
+	boom := errors.New("work failed")
+	if _, err := scopedTx(ctx, db, func(*gorm.DB) (int, error) { return 0, boom }); !errors.Is(err, boom) {
+		t.Fatalf("scopedTx swallowed the work's error: %v", err)
+	}
+
+	if _, err := scopedTx(context.Background(), nil, func(*gorm.DB) (int, error) { return 0, nil }); !errors.Is(err, gorm.ErrInvalidDB) {
+		t.Fatalf("scopedTx on a nil handle = %v, want gorm.ErrInvalidDB", err)
+	}
+}
+
 func TestScopedPublishesTheIdentityForOneTransactionOnly(t *testing.T) {
 	db := openGovernanceDB(t)
 	ctx := identity.With(context.Background(), identity.Identity{

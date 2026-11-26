@@ -29,14 +29,11 @@ type userPayload struct {
 }
 
 func userView(u *auth.User) userPayload {
+	// append onto a non-nil empty slice: "no memberships" must render as [] and
+	// not null, because the console iterates both fields unguarded. The copy
+	// also keeps the payload from aliasing the caller's user.
 	roles := append([]string{}, u.Roles...)
 	groups := append([]string{}, u.Groups...)
-	if roles == nil {
-		roles = []string{}
-	}
-	if groups == nil {
-		groups = []string{}
-	}
 	return userPayload{
 		ID:          u.ID,
 		Email:       u.Email,

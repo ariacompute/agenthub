@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,11 +140,16 @@ func TestAuditStoreRoundTripsOneEvent(t *testing.T) {
 
 	id := uniqueName("audit-one")
 	ev := auditTestEvent(t, id, "alice", "resources.create", auditOldTime, 201, false)
-	ev.PrevHash = "prev"
-	ev.Hash = "hash"
 
-	if err := s.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
+	// The store owns the chain: the batch arrives unstamped and it is stamped
+	// under the chain lock, so the tail it returns is the last row's hash.
+	events := []audit.Event{ev}
+	tail, err := s.Append(auditWriterCtx(), events)
+	if err != nil {
 		t.Fatalf("Append: %v", err)
+	}
+	if tail != events[0].Hash {
+		t.Fatalf("Append tail = %q, want the hash it stamped %q", tail, events[0].Hash)
 	}
 
 	got, err := s.Get(auditReaderCtx(), id)
@@ -156,8 +164,8 @@ func TestAuditStoreRoundTripsOneEvent(t *testing.T) {
 	}
 	// The chain material survives a round trip: a verifier recomputes it from the
 	// row, so losing either field would make every later link unverifiable.
-	if got.PrevHash != "prev" || got.Hash != "hash" {
-		t.Fatalf("chain fields = %q / %q", got.PrevHash, got.Hash)
+	if got.Hash != audit.Hash(got.PrevHash, *got) {
+		t.Fatalf("chain fields do not recompute: prev=%q hash=%q", got.PrevHash, got.Hash)
 	}
 	if got.Metadata["note"] != "kept" {
 		t.Fatalf("metadata = %v", got.Metadata)
@@ -177,8 +185,8 @@ func TestAuditStoreRoundTripsOneEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LastHash: %v", err)
 	}
-	if hash != "hash" || tailID != got.Seq {
-		t.Fatalf("LastHash = %q,%d want %q,%d", hash, tailID, "hash", got.Seq)
+	if hash != got.Hash || tailID != got.Seq {
+		t.Fatalf("LastHash = %q,%d want %q,%d", hash, tailID, got.Hash, got.Seq)
 	}
 }
 
@@ -192,16 +200,29 @@ func TestAuditStoreIsIdempotentOnEventID(t *testing.T) {
 
 	// An empty batch is a no-op rather than an error: the recorder flushes on a
 	// timer and a quiet period must not be a failure.
-	if err := s.Append(auditWriterCtx(), nil); err != nil {
+	if _, err := s.Append(auditWriterCtx(), nil); err != nil {
 		t.Fatalf("Append(nil) = %v", err)
 	}
-	if err := s.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
+	if _, err := s.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	// A retried batch re-sends the same events; ON CONFLICT DO NOTHING is what
-	// keeps a duplicate delivery from breaking the chain.
-	if err := s.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
+	// A retried batch re-sends the same events. The duplicate is dropped before
+	// stamping, so it neither adds a row nor invents a hash no row carries, and
+	// the tail stays where it was. The batch repeats the event inside itself too:
+	// deduplication cannot depend on the copies arriving in separate calls.
+	beforeReplay, _, err := s.LastHash(auditReaderCtx())
+	if err != nil {
+		t.Fatalf("LastHash: %v", err)
+	}
+	if _, err := s.Append(auditWriterCtx(), []audit.Event{ev, ev}); err != nil {
 		t.Fatalf("Append(duplicate) = %v", err)
+	}
+	afterReplay, _, err := s.LastHash(auditReaderCtx())
+	if err != nil {
+		t.Fatalf("LastHash: %v", err)
+	}
+	if afterReplay != beforeReplay {
+		t.Fatalf("a replayed batch moved the tail: %q -> %q", beforeReplay, afterReplay)
 	}
 
 	rows, err := s.List(auditReaderCtx(), audit.Query{ActorID: actor})
@@ -224,7 +245,7 @@ func TestAuditStoreKeepsTheEventWhenMetadataCannotBeEncoded(t *testing.T) {
 	ev := auditTestEvent(t, uniqueName("audit-meta-event"), actor, "tasks.get", auditOldTime, 200, true)
 	ev.Metadata = map[string]any{"bad": make(chan int)}
 
-	if err := s.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
+	if _, err := s.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 	got, err := s.Get(auditReaderCtx(), ev.EventID)
@@ -249,7 +270,7 @@ func TestAuditStoreListFiltersAndStatsAgree(t *testing.T) {
 		auditTestEvent(t, uniqueName("audit-f-denied"), actor, "resources.delete", auditOldTime.Add(time.Second), 403, false),
 		auditTestEvent(t, uniqueName("audit-f-failed"), actor, "resources.create", auditOldTime.Add(2*time.Second), 500, false),
 	}
-	if err := s.Append(auditWriterCtx(), events); err != nil {
+	if _, err := s.Append(auditWriterCtx(), events); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 
@@ -317,14 +338,9 @@ func TestAuditStoreSegmentPagesInOrder(t *testing.T) {
 
 	actor := uniqueName("audit-segment")
 	events := make([]audit.Event, 0, 3)
-	prev := ""
 	base := time.Date(2001, 2, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 3; i++ {
-		ev := auditTestEvent(t, uniqueName("audit-seg"), actor, "tasks.get", base.Add(time.Duration(i)*time.Second), 200, true)
-		ev.PrevHash = prev
-		ev.Hash = audit.Hash(prev, ev)
-		prev = ev.Hash
-		events = append(events, ev)
+		events = append(events, auditTestEvent(t, uniqueName("audit-seg"), actor, "tasks.get", base.Add(time.Duration(i)*time.Second), 200, true))
 	}
 	// The ledger already holds rows this file did not write, so the cursor starts
 	// at the newest id before the append: everything past it belongs to this case.
@@ -332,7 +348,7 @@ func TestAuditStoreSegmentPagesInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LastHash: %v", err)
 	}
-	if err := s.Append(auditWriterCtx(), events); err != nil {
+	if _, err := s.Append(auditWriterCtx(), events); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 
@@ -377,7 +393,7 @@ func TestAuditStorePruneStopsAtTheCutoff(t *testing.T) {
 
 	old := auditTestEvent(t, uniqueName("audit-prune-old"), uniqueName("audit-prune"), "tasks.get", auditOldTime, 200, true)
 	newer := auditTestEvent(t, uniqueName("audit-prune-new"), old.ActorID, "tasks.get", auditNewTime, 200, true)
-	if err := s.Append(auditWriterCtx(), []audit.Event{old, newer}); err != nil {
+	if _, err := s.Append(auditWriterCtx(), []audit.Event{old, newer}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 
@@ -405,13 +421,17 @@ func TestAuditStorePruneRecordsTheChainAnchor(t *testing.T) {
 	t.Cleanup(func() { auditCleanup(t, s) })
 
 	tag := uniqueName("audit-anchor")
-	old := auditTestEvent(t, tag+"-old", tag, "tasks.get", auditOldTime, 200, true)
-	old.PrevHash, old.Hash = "before-the-cutoff", tag+"-old-hash"
-	newer := auditTestEvent(t, tag+"-new", tag, "tasks.get", auditNewTime, 200, true)
-	newer.PrevHash, newer.Hash = old.Hash, tag+"-new-hash"
-	if err := s.Append(auditWriterCtx(), []audit.Event{old, newer}); err != nil {
+	// The store stamps the two rows, so the assertion below uses the hash it
+	// actually wrote for the expired one - which is exactly what the anchor has
+	// to remember.
+	events := []audit.Event{
+		auditTestEvent(t, tag+"-old", tag, "tasks.get", auditOldTime, 200, true),
+		auditTestEvent(t, tag+"-new", tag, "tasks.get", auditNewTime, 200, true),
+	}
+	if _, err := s.Append(auditWriterCtx(), events); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
+	old := events[0]
 
 	cutoff := time.Date(2002, 1, 1, 0, 0, 0, 0, time.UTC)
 	removed, err := s.Prune(auditRetentionCtx(), cutoff)
@@ -436,5 +456,140 @@ func TestAuditStorePruneRecordsTheChainAnchor(t *testing.T) {
 	again, err := s.Anchor(auditReaderCtx())
 	if err != nil || again.Hash != old.Hash {
 		t.Fatalf("anchor after a no-op prune = %+v, %v", again, err)
+	}
+}
+
+// secondAuditHandle opens an independent pool. A PostgreSQL advisory lock belongs
+// to a database session, not to a Go value, so a second pool behaves exactly like
+// a second agenthub instance - which is the deployment shape the chain lock is
+// for.
+func secondAuditHandle(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := OpenWithOptions(testdb.DSN(t), OpenOptions{})
+	if err != nil {
+		t.Fatalf("open a second handle: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := Close(db); err != nil {
+			t.Errorf("close the second handle: %v", err)
+		}
+	})
+	return db
+}
+
+// TestAuditAppendWaitsForTheChainLock is the cross-instance guarantee without a
+// second process: one transaction on another pool holds the chain lock, and
+// Append must not return until that transaction ends. Before the lock existed
+// this case would pass instantly and two instances would fork the trail.
+func TestAuditAppendWaitsForTheChainLock(t *testing.T) {
+	db := requireAuditLedger(t)
+	s := NewAuditStore(db)
+	t.Cleanup(func() { auditCleanup(t, s) })
+
+	held := make(chan struct{})
+	release := make(chan struct{})
+	blocker := make(chan error, 1)
+	go func() {
+		blocker <- secondAuditHandle(t).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, auditChainLockKey).Error; err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	ev := auditTestEvent(t, uniqueName("audit-lock"), uniqueName("audit-lock"), "tasks.get", auditOldTime, 200, true)
+	appended := make(chan error, 1)
+	go func() {
+		_, err := s.Append(auditWriterCtx(), []audit.Event{ev})
+		appended <- err
+	}()
+
+	select {
+	case err := <-appended:
+		t.Fatalf("Append returned %v while another session held the chain lock", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-blocker; err != nil {
+		t.Fatalf("release the chain lock: %v", err)
+	}
+	if err := <-appended; err != nil {
+		t.Fatalf("Append after the lock was released: %v", err)
+	}
+	if got, err := s.Get(auditReaderCtx(), ev.EventID); err != nil || got == nil {
+		t.Fatalf("the event was not written after the wait: %v, %v", got, err)
+	}
+}
+
+// TestAuditConcurrentWritersKeepOneChain is the failure the round-11 report
+// found: two instances sharing a database each read their own tail and commit,
+// and /api/audit/verify reports the fork. With the lock the rows written by two
+// pools must still form one verifiable chain.
+func TestAuditConcurrentWritersKeepOneChain(t *testing.T) {
+	db := requireAuditLedger(t)
+	first := NewAuditStore(db)
+	second := NewAuditStore(secondAuditHandle(t))
+	t.Cleanup(func() { auditCleanup(t, first) })
+
+	tail, before, err := first.LastHash(auditReaderCtx())
+	if err != nil {
+		t.Fatalf("LastHash: %v", err)
+	}
+
+	tag := uniqueName("audit-race")
+	const writers, perWriter = 4, 4
+	var wg sync.WaitGroup
+	failures := make(chan error, writers)
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			store := first
+			if w%2 == 1 {
+				store = second
+			}
+			for i := 0; i < perWriter; i++ {
+				ev := auditTestEvent(t, fmt.Sprintf("%s-%d-%d", tag, w, i), tag, "tasks.get", auditOldTime, 200, true)
+				if _, err := store.Append(auditWriterCtx(), []audit.Event{ev}); err != nil {
+					failures <- err
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		t.Fatalf("concurrent Append: %v", err)
+	}
+
+	rows, err := first.Segment(auditReaderCtx(), time.Time{}, before, 0)
+	if err != nil {
+		t.Fatalf("Segment: %v", err)
+	}
+	ours := make([]audit.Event, 0, writers*perWriter)
+	for _, row := range rows {
+		if !strings.HasPrefix(row.EventID, tag) {
+			// The developer machine may run a live instance against the same
+			// database; a foreign row inside the window makes the continuity
+			// assertion meaningless rather than failing. CI has no such writer,
+			// so the check still runs where it matters.
+			t.Skipf("the ledger received a foreign row (%s) during the window", row.EventID)
+		}
+		ours = append(ours, row)
+	}
+	if len(ours) != writers*perWriter {
+		t.Fatalf("rows in the window = %d, want %d", len(ours), writers*perWriter)
+	}
+	if ours[0].PrevHash != tail {
+		t.Fatalf("the window starts at %q, want the tail it inherited %q", ours[0].PrevHash, tail)
+	}
+	if _, broken := audit.VerifySegment(tail, ours); broken != nil {
+		t.Fatalf("two writers forked the chain: %+v", broken)
 	}
 }

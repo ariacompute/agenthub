@@ -55,6 +55,35 @@ func scoped[T any](ctx context.Context, db *gorm.DB, fn func(*gorm.DB) (T, error
 	return out, nil
 }
 
+// scopedTx is scoped with the transaction always opened.
+//
+// A transaction-scoped advisory lock is only legal inside a transaction block,
+// and the audit writer needs one even when the caller carries no identity (a
+// unit test, the retention sweep before the first request). scoped's "no
+// identity, no transaction" shortcut would therefore turn into an error there,
+// so callers that need the lock ask for this variant instead.
+func scopedTx[T any](ctx context.Context, db *gorm.DB, fn func(*gorm.DB) (T, error)) (T, error) {
+	var zero T
+	if db == nil {
+		return zero, gorm.ErrInvalidDB
+	}
+	var out T
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if id, ok := identity.From(ctx); ok {
+			if err := applyIdentity(tx, id); err != nil {
+				return err
+			}
+		}
+		v, err := fn(tx)
+		out = v
+		return err
+	})
+	if err != nil {
+		return zero, err
+	}
+	return out, nil
+}
+
 // applyIdentity publishes id to the current transaction.
 func applyIdentity(tx *gorm.DB, id identity.Identity) error {
 	return tx.Exec(scopeSettings,
