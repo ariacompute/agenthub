@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"agenthub/internal/audit"
 	"agenthub/internal/identity"
+	"agenthub/internal/model"
 	"agenthub/internal/testdb"
 )
 
@@ -41,11 +43,61 @@ func requireAuditLedger(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := openGovernanceDB(t)
 	testdb.RequireTablePrivilege(t, db, "audit_log", "DELETE")
+	// Every case below prunes, and Prune always moves the global anchor.
+	testdb.RequireTablePrivilege(t, db, "audit_chain_anchor", "UPDATE")
+	preserveChainAnchor(t, db)
 	return db
 }
 
 func auditRetentionCtx() context.Context {
 	return identity.SystemWith(identity.Identity{Retention: true})
+}
+
+// preservedChainAnchor is the single-row anchor table as the case found it.
+type preservedChainAnchor struct {
+	found    bool
+	hash     string
+	eventID  string
+	prunedAt time.Time
+}
+
+// preserveChainAnchor captures the anchor before a case can move it and puts it
+// back afterwards.
+//
+// The table is global and Prune rewrites it on every call, including the cleanup
+// prune. Leaving a case's own seed behind is not cosmetic: /api/audit/verify
+// seeds the walk from that hash, so the next caller - the console, or an e2e run
+// sharing this database - is told a healthy chain is broken at its first row,
+// because no row is preceded by a hash the pruned test row invented.
+func preserveChainAnchor(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var rows []model.AuditChainAnchor
+	if err := db.Where("id = ?", 1).Limit(1).Find(&rows).Error; err != nil {
+		t.Fatalf("read the chain anchor: %v", err)
+	}
+	before := preservedChainAnchor{}
+	if len(rows) > 0 {
+		before = preservedChainAnchor{found: true, hash: rows[0].Hash, eventID: rows[0].EventID, prunedAt: rows[0].PrunedAt}
+	}
+	// Registered before the case's own cleanup, so it runs after it: cleanups are
+	// LIFO, and the prune has to happen before the anchor is put back.
+	t.Cleanup(func() {
+		// An empty hash is how Anchor() reports "never pruned", so an anchor that
+		// did not exist comes back as an empty one: the table keeps its single-row
+		// shape without needing DELETE on it.
+		anchor := model.AuditChainAnchor{ID: 1, Hash: before.hash, EventID: before.eventID, PrunedAt: before.prunedAt}
+		if anchor.PrunedAt.IsZero() {
+			anchor.PrunedAt = time.Now().UTC()
+		}
+		if err := withIdentity(auditRetentionCtx(), db, func(tx *gorm.DB) error {
+			return tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"hash", "event_id", "pruned_at"}),
+			}).Create(&anchor).Error
+		}); err != nil {
+			t.Errorf("restore the chain anchor after the test: %v", err)
+		}
+	})
 }
 
 // auditTestEvent builds one event with a unique id and the fields the filters
@@ -349,7 +401,6 @@ func TestAuditStorePruneStopsAtTheCutoff(t *testing.T) {
 // a healthy trail broken at its first row.
 func TestAuditStorePruneRecordsTheChainAnchor(t *testing.T) {
 	db := requireAuditLedger(t)
-	testdb.RequireTablePrivilege(t, db, "audit_chain_anchor", "UPDATE")
 	s := NewAuditStore(db)
 	t.Cleanup(func() { auditCleanup(t, s) })
 

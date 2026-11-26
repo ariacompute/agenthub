@@ -1726,3 +1726,54 @@ agentbuddy 的 Tasks 页要「清理所有 task」。上一轮只能在本机隐
   等驱动错误分支。
 - e2e：`triggerId` / `ticketId` 两条派生 SKIP 没有上游原因可带——它们的生产用例**通过了**，只是
   该实例没有产出 id（路由禁用）；这与「上游用例跳过」不是一回事，故不硬凑原因。
+
+## M29 — 修正 e2e 的 audit chain FAIL：测试污染了全局链锚点（2026-11-26）
+
+### 1. 症状与诊断
+
+`e2e/api` 的「the hash chain verifies」在共享库上恒红，`/api/audit/verify` 报
+`ok:false`，`brokenAt` 停在**创世行**（id=1，`e3276eea…`），reason 为
+`prev_hash does not match the previous row`。两次运行断在同一事件 id。
+
+逐行核对后，链本身是完好的：6743 行逐行重算，`hash == Hash(prev_hash, 内容)`
+无一例外，从空种子起整条链 `VerifySegment` 通过。真正的断点是
+`audit_chain_anchor` 里的一行：
+
+```
+hash = audit-anchor-20261126033136.212200478-new-hash
+event_id = audit-anchor-20261126033136.212200478-new
+```
+
+这不是任何真实行的 hash，而是 `TestAuditStorePruneRecordsTheChainAnchor` 用
+`uniqueName("audit-anchor")` + `"-new-hash"` 造出来的。`Verify` 在该表有行时以它
+为 seed（`AnchorRetention`），而表中没有哪一行的 `prev_hash` 等于这个字符串，
+于是校验在**第一行**就判定断链——后面的 6742 行根本没被走到。
+
+写入路径：`Prune` 每次都会 upsert 这一行（设计如此，retention 剪枝后幸存头要靠它
+做种子），而该测试结束时 `t.Cleanup(auditCleanup)` 又跑了一次 `Prune(2004)`，
+把锚点覆盖成最新被删行（2003 年那条测试行）的 hash，随后没有任何代码把它放回去。
+`audit_chain_anchor` 是单行全局表，所以这条测试残留对**所有**调用方生效：控制台、
+下一个 e2e 运行、任何排查审计的人。
+
+（`audit_log` 的 56 个 id 跳号与断链无关：那是 `Append` 的
+`ON CONFLICT DO NOTHING` 与回滚消耗掉的序列值，不是被删的行。）
+
+### 2. 修复
+
+- **测试不再留下自己的种子**（`internal/store/audit_store_test.go`）：
+  `requireAuditLedger` 先读出锚点现值再注册 `t.Cleanup` 恢复它。cleanup 是 LIFO，
+  它先于 `auditCleanup` 注册，因此在该用例自己的 prune 之后执行；恢复用 retention
+  身份 upsert，原有的行写回原值，原本没有行则写回**空 hash**——`Anchor()` 把空
+  hash 当作「从未剪枝」，语义与缺行一致，也就不需要 `audit_chain_anchor` 的 DELETE
+  权限。同时把 `audit_chain_anchor` 的 UPDATE 权限检查提到
+  `requireAuditLedger`：这一组用例都会 prune，都应能写回。
+- **数据修复（仅本机共享库，不是发布步骤）**：删除那行测试残留锚点。链从 id=1
+  起、从未真正剪枝过，所以正确状态就是「无锚点」。
+
+### 3. 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `go test ./internal/store -run TestAuditStore`（有库） | 全绿；跑完后 `audit_chain_anchor` 为一行空 hash（无锚点语义） |
+| 重建实例后 `GET /api/audit/verify` | `{"checked":6744,"ok":true}` |
+| `e2e/api`（对 127.0.0.1:3513） | **177 passed / 0 failed / 44 skipped**，`the hash chain verifies` PASS |
