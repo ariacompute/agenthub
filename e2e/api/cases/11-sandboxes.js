@@ -140,7 +140,7 @@ export default [
     expectStatus(res, [200, 201], 'register node')
     ctx.state.nodeId = id
     ctx.cleanup(`node ${id}`, () => deleteIfExists(ctx.api, `/api/sandbox-nodes/${id}`))
-  }),
+  }, { provides: 'nodeId' }),
 
   c('an invalid node id is refused', 'POST /api/sandbox-nodes', async (ctx) => {
     const res = await ctx.api('POST', '/api/sandbox-nodes', { body: { id: 'not a valid id!' } })

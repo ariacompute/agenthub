@@ -163,6 +163,14 @@ expires, or when its opt-in switch is off. Each SKIP line carries the reason.
 This follows `requirements.md` §8: a missing capability is reported, never
 faked.
 
+When the case that would have produced a state key skips, its reason is carried
+forward: the dependent SKIP line ends with that reason in parentheses, for
+example `channelId unavailable: no channelId was produced by an earlier case
+(channels are disabled: AGENTHUB_CHANNELS_ENABLED=false)`. A derived SKIP
+therefore never hides the module-level reason printed above it. The runner
+clears the remembered reason once the key is produced or the producing case
+fails, so a stale reason cannot leak into a later group.
+
 A sandbox-backed kind that answers `resource_unreachable` with
 `data.code=sandbox_unsupported` / `sandbox_disabled` / `sandbox_node_offline` is
 the host saying "no container runtime", not the product failing. The per-kind

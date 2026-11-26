@@ -26,7 +26,7 @@ export default [
     ctx.state.threadId = res.json?.ID || res.json?.id || res.json?.thread?.ID || res.json?.thread?.id
     requireState(ctx, 'threadId')
     ctx.cleanup(`thread ${ctx.state.threadId}`, () => deleteIfExists(ctx.api, `/api/threads/${ctx.state.threadId}`))
-  }),
+  }, { provides: 'threadId' }),
 
   c('a thread carries its message history', 'GET /api/threads/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/threads/${requireState(ctx, 'threadId')}`)

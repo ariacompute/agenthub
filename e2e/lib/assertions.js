@@ -222,10 +222,17 @@ export function expectTaskState(result, state, label = 'task') {
   return result
 }
 
-/** A state value must be present in ctx.state or the dependent case skips. */
+/**
+ * A state value must be present in ctx.state or the dependent case skips.
+ *
+ * When the case that would have produced it skipped (a disabled module, a
+ * missing opt-in switch), the runner recorded why; that reason is appended here
+ * so the derived SKIP does not bury the actionable one.
+ */
 export function requireState(ctx, key, label = key) {
   if (ctx.state[key] === undefined || ctx.state[key] === null || ctx.state[key] === '') {
-    skip(`${label} unavailable: no ${key} was produced by an earlier case`)
+    const cause = ctx.state.skipReasons?.[key]
+    skip(`${label} unavailable: no ${key} was produced by an earlier case${cause ? ` (${cause})` : ''}`)
   }
   return ctx.state[key]
 }

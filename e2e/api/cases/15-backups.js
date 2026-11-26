@@ -59,7 +59,7 @@ export default [
     ctx.state.checkpointId = res.json?.checkpoint?.id || res.json?.id
     requireState(ctx, 'checkpointId')
     ctx.cleanup(`checkpoint ${ctx.state.checkpointId}`, () => deleteIfExists(ctx.api, `/api/backups/${ctx.state.checkpointId}`))
-  }, { enabled: backupsOn }),
+  }, { enabled: backupsOn, provides: 'checkpointId' }),
 
   c('a checkpoint can be read', 'GET /api/backups/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/backups/${requireState(ctx, 'checkpointId')}`)

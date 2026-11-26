@@ -49,7 +49,7 @@ export default [
     ctx.state.channelId = res.json?.id
     requireState(ctx, 'channelId')
     ctx.cleanup(`channel ${ctx.state.channelId}`, () => deleteIfExists(ctx.api, `/api/channels/${ctx.state.channelId}`))
-  }),
+  }, { provides: 'channelId' }),
 
   c('the channel can be read', 'GET /api/channels/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/channels/${requireState(ctx, 'channelId')}`)
@@ -121,7 +121,7 @@ export default [
     expectStatus(res, 200, 'set policy off')
     const action = await ctx.api('POST', `/api/connectors/${id}/actions`, { body: { action: 'invoke', args: {} } })
     expectStatusAndCode(action, 403, 'connector_policy_off', 'off policy')
-  }),
+  }, { provides: 'connectorId' }),
 
   c('connector actions are enumerable', 'GET /api/connectors/{id}/actions', async (ctx) => {
     const res = await ctx.api('GET', `/api/connectors/${requireState(ctx, 'connectorId')}/actions`)

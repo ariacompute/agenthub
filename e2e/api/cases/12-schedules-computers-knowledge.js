@@ -30,7 +30,7 @@ export default [
     ctx.state.scheduleId = res.json?.id
     requireState(ctx, 'scheduleId')
     ctx.cleanup(`schedule ${ctx.state.scheduleId}`, () => deleteIfExists(ctx.api, `/api/schedules/${ctx.state.scheduleId}`))
-  }),
+  }, { provides: 'scheduleId' }),
 
   c('a schedule can be read', 'GET /api/schedules/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/schedules/${requireState(ctx, 'scheduleId')}`)
@@ -85,7 +85,7 @@ export default [
     ctx.state.computerId = res.json?.id
     requireState(ctx, 'computerId')
     ctx.cleanup(`computer ${ctx.state.computerId}`, () => deleteIfExists(ctx.api, `/api/computers/${ctx.state.computerId}`))
-  }),
+  }, { provides: 'computerId' }),
 
   c('a computer card can be read', 'GET /api/computers/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/computers/${requireState(ctx, 'computerId')}`)

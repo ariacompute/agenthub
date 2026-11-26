@@ -16,7 +16,7 @@ export default [
     ctx.state.sendResource = sendable.id
     ctx.state.parkResource = parkable.id
     ctx.reporter.note(`A2A targets: send=${sendable.origin}, park=${parkable.origin}`)
-  }),
+  }, { provides: ['sendResource', 'parkResource'] }),
 
   c('message/send completes a task', 'POST /a2a', async (ctx) => {
     const resourceId = requireState(ctx, 'sendResource')

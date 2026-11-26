@@ -25,7 +25,7 @@ export default [
     ctx.state.fileId = res.json?.id
     requireState(ctx, 'fileId')
     ctx.cleanup(`file ${ctx.state.fileId}`, () => deleteIfExists(ctx.api, `/api/files/${ctx.state.fileId}`))
-  }),
+  }, { provides: 'fileId' }),
 
   c('file metadata is readable', 'GET /api/files/{id}', async (ctx) => {
     const res = await ctx.api('GET', `/api/files/${requireState(ctx, 'fileId')}`)

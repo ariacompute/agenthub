@@ -87,7 +87,10 @@ async function main() {
       reporter,
       health,
       identity,
-      state: { demoResources: [] },
+      // skipReasons is filled by the runner: a case that skips records why under
+      // the state key it would have produced, and requireState() replays it in
+      // the dependent SKIP line (see lib/runner.js).
+      state: { demoResources: [], skipReasons: {} },
       api: (method, path, opts = {}) => client.request(method, path, { mode: 'session', ...opts }),
       anon: (method, path, opts = {}) => client.request(method, path, { mode: 'anon', ...opts }),
       cookie: (method, path, opts = {}) => client.request(method, path, { mode: 'cookie', ...opts }),
