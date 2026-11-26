@@ -424,20 +424,24 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   per-kind 配置的 jsonb 往返、唯一索引拒绝重复、命名空间 CRUD、同步结果留痕。两者均以
   `DATABASE_URL` 门控。
 - **覆盖率**：`make test-cover` 跑 `-coverprofile` 并打印 `go tool cover -func`。
-  **不接数据库**测得（跳过的用例因此不会把数字撑高）：`a2a`、`audit`、`authz`、
-  `channels`、`computers`、`config`、`files`、`httputil`、`identity`、`middleware`、
-  `model`、`netutil`、`sandbox`、`schedules`、`secure` 均为 **100%**；`adapter` 96.3%、
-  `router` 91.8%、`hub` 90.6%、`registry` 89.3%、`auth` 84.5%、`handlers` 84.2%、
+  **不接数据库**测得（跳过的用例因此不会把数字撑高）：`a2a`、`adapter`、`audit`、
+  `authz`、`channels`、`computers`、`config`、`files`、`httputil`、`identity`、
+  `middleware`、`model`、`netutil`、`schedules`、`secure` 均为 **100%**；`sandbox`
+  99.9%、`hub` 99.0%、`registry` 92.1%、`router` 91.8%、`auth` 84.5%、`handlers` 84.3%、
   `backup` 57.9%。三个包明确不在范围内并写明原因：`store` 4.5% 与 `testdb` 9.4%
   需要 PostgreSQL，`cmd/agenthub-server` 26.3% 是只有整个进程才走得到的装配层。
-- **只有故障才走得到的分支**：新增 11 个 `*_edges_test.go`（75 条用例），覆盖健康机器
+- **只有故障才走得到的分支**：先新增 11 个 `*_edges_test.go`（75 条用例），覆盖健康机器
   永远走不到的臂——`Put` 中途失败的文件系统步骤、授权查询背后的存储故障、限流器清扫
-  过期窗口、操作系统拒绝的 `.env` 键名、管道已被占用的会话、始终不领取任务的远端节点。
-  三条规则让这件事不至于变成「为了覆盖而覆盖」：
+  过期窗口、操作系统拒绝的 `.env` 键名、管道已被占用的会话、始终不领取任务的远端节点；
+  第二轮把 `adapter` 推到 100%、`hub` 推到 99.0%（`adapter_coverage_test.go` 32 条 +
+  `hub/coverage2_test.go` 42 条，后者的仓储故障走包内假 store）。三条规则让这件事不至于
+  变成「为了覆盖而覆盖」：
   - **构造上不可能的分支直接删掉，而不是绕过去测**：固定 32 字节密钥下的
     `aes.NewCipher` 与 AES 分组下的 `cipher.NewGCM` 不可能失败；`authz.Load` 已在
     开头对 nil store 返回；`NormalizeNetwork` / `NormalizeArgsPolicy` 是满射，它们身后
-    的 `default` 是死代码。
+    的 `default` 是死代码；`json.Marshal` 定长载荷、写进 `bytes.Buffer` 的 multipart、
+    `ValidateURL` 已经筛过目标的 `NewRequest`、供应商链走完后的模拟兜底，同样不可能
+    失败或不可达。
   - **本机不可能、别处真实存在的分支抽成纯函数**，用例可直接调用：`normalizeExitCode`
     （「被信号杀死记 1，不是 -1」，Windows 主机永远产生不出来）、`dockerRefusalReason`
     （stderr 为空时的兜底文案，`-cover` 构建会把它污染掉）、`namesNoDirectory`
@@ -446,9 +450,11 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
     `files.fsOps` 对应 `Put`/`Open`/`Delete`/`Probe` 的十一个 `ErrStore` 分支，
     `sandbox.commandContext` 与 `sessionFrameTimeout` 对应管道接线与两分钟兜底，
     `sandbox.remoteJobGrace`、`config.getwd`、`channels.deliverClient`（出厂客户端
-    按设计拒绝回环，否则投递的成功路径永远只能看到失败），以及用
+    按设计拒绝回环，否则投递的成功路径永远只能看到失败），用
     `io.ReadFull(rand.Reader, …)` 取代 `rand.Read`，让随机源故障可达——这正是
-    `secure` 既有用例已经在用的手法。
+    `secure` 既有用例已经在用的手法；第二轮又加了 `adapter.randRead`（消息 ID 是关联
+    标识，不是密钥）、`adapter.hostOS`（`file://` 的盘符规则只有 Windows 主机走得到）
+    与 `hub.nonceRand`（签名 nonce 是新鲜度，不是密钥）。
   没有 `t.Skip`、没有覆盖率排除、没有拿 `Sleep` 当断言：涉及时序的用例缩小包内间隔，
   而不是去等出厂值。
 - **隔离与审计用例**：`internal/identity` 覆盖「没有身份」的四种形态；`internal/audit` 覆盖
@@ -457,20 +463,28 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   并断言「读审计不会被提权为 system 身份」。`model_test.go` 用 46 张表的表名钉住迁移
   （含审计链锚点表），`auth-store.spec.js` 直接读 Go 源码里的 `authz.AllPermissions`，
   两端词表无法再悄悄漂移。
-- **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 覆盖六段链路
-  （启动检查 → 服务发现 → 发起任务 → 流式运行 → 挂起恢复 → 控制面闭环）。
-- **前端**：`bunx vitest run` 24 个文件 **475 项通过**（languages / copy-fallback / enums-copy /
+- **端到端用例**：`tests/e2e_test.go` 以 httptest 真实 HTTP 走 **12 个用例**——发现与健康检查、
+  五类资源各发一次、任务生命周期与取消、`input-required` 后续接、流式（含错误帧）、flow 分支与
+  并行、v0.1 别名、推送通知、控制面往返与坏输入、备份关闭时的如实报告。
+- **前端**：`bunx vitest run` 26 个文件 **494 项通过**（languages / copy-fallback / enums-copy /
   api / api-endpoints / audit / auth-store / format / errors / backup-api / docs-content /
   playground / store / user-form / use-copy / use-dismiss / style 护栏，外加沙盒、调度、
-  共享文件、分页与启动四块面）。`bun run test:coverage`（v8）报告：语句 100%、分支 99.36%、
-  函数 100%（统计范围 `src/lib/**`）；未覆盖的分支是界面永远走不到的防御臂。
+  共享文件、分页、能力下发与启动各面）。`bun run test:coverage`（v8）报告：语句 100%、
+  分支 98.78%、函数 100%（统计范围 `src/lib/**`）；未覆盖的分支是界面永远走不到的防御臂。
 - **同一套用例也以生产角色跑**：CI 的第二个 job 依据 `scripts/provision-db-roles.sql` 建出
   `agenthub_migrator` / `agenthub_app`，用 migrator 迁移，再以 `agenthub_app`（只有 DML、
   `NOBYPASSRLS`、无 DDL）跑完整 `go test ./...`。需要建表的用例统一走 `internal/testdb`：
   `TempSchema` 建一个 `it_<随机>` schema 并把 `search_path` 指过去，`RequireDDL` 把「这个角色
   建不了表」变成带原因的跳过（`production role: no DDL, use a migrator DSN`），而不是失败——
   否则生产形态第一次进流水线时会报一个根本不是缺陷的「权限不足」。
-- **成品也进 CI**：新增第四个 job，先 `make build`（控制台 + 二进制），再依次跑路由覆盖守卫、接口套件与八段 Playwright 旅程，对着真实 Postgres 与真实进程——单测证明的是零件，这条证明的是产品。守卫放最前，因为它不需要服务：`docs/` 里加了路由却没有用例，失败在流水线而不是在评审。Chromium 与沙盒默认镜像预先装好（首个租约会耗在拉镜像上，然后以超时报错，看起来像缺陷）；失败时报告、Playwright HTML 报告与服务端日志一并归档。
+- **成品也进 CI**：新增第四个 job，先 `make build`（控制台 + 二进制），再依次跑路由覆盖
+  守卫、接口套件与八段 Playwright 旅程，对着真实 Postgres 与真实进程——单测证明的是零件，
+  这条证明的是产品。接口套件实测 **186 通过、0 失败**，35 条跳过全部是实例能力或未开的
+  `AGENTHUB_E2E_*` 开关（路由关闭、备份关闭）；界面套件 8 个文件 14 条通过，覆盖全部十屏。
+  此前线程那一段把创建响应里的 `ID` 读成 `id`，于是整段以「threadId 缺失」静默跳过——改正后
+  8 条用例由跳过转为实跑。守卫放最前，因为它不需要服务：`docs/` 里加了路由却没有用例，
+  失败在流水线而不是在评审。Chromium 与沙盒默认镜像预先装好（首个租约会耗在拉镜像上，
+  然后以超时报错，看起来像缺陷）；失败时报告、Playwright HTML 报告与服务端日志一并归档。
 - **目录分页与批量读**：`internal/handlers/api_paging_test.go` 钉住窗口（`limit` / `offset` 回显、`total` 准确、offset 越界为空页、`abc` / `-1` / `201` / 负 offset 的 400）、去 kind 的计数、批量读（请求顺序、去重、不存在与不可见都进 `missing`、恰好 100 条可用、空数组 / 空白 id / 101 条为 400），以及「被拒的记录不会从这两条路径漏出来」。`e2e/api/cases/02-resources.js` 再以真实 HTTP 把同一套契约钉一次。
 - **A2A 与控制面冒烟**：send（五类各一次）、stream（无 `[DONE]`、终态帧结尾）、
   `input-required` → `tasks/resume`、`tasks/get` 历史裁剪、v0.1 别名、flow 分支与并行、
@@ -489,10 +503,10 @@ Vue 3 + Vite（bun）构建产物由 Go 进程托管于 `/`，既是运维界面
   （主题过滤、慢消费者、关闭、nil 安全）；`internal/netutil/ssrf_test.go` 钉住 SSRF 护栏
   （loopback、可信私网、拒绝跟随重定向）；`internal/handlers/speech_test.go` 把空片段（400）
   与超限片段（413）拆成两条用例。
-- **脚本化接口测试**：`scripts/test-api.sh` 新增治理段落——建命名空间、记录走
-  `draft → pending → approved`（并验证 `draft → approved` 被拒、草稿不进可发现列表）、
-  去重启用键、fixture 源同步两次（首轮导入、次轮刷新）。对着运行中实例：**167 通过、
-  0 失败、3 跳过**。
+- **脚本化接口测试**：`scripts/test-api.sh` 现在是 `e2e/` 套件的转发壳，旧引用继续可用，
+  用例只有一处。其中治理段落建命名空间、记录走 `draft → pending → approved`（并验证
+  `draft → approved` 被拒、草稿不进可发现列表）、去重启用键、fixture 源同步两次
+  （首轮导入、次轮刷新）。对着运行中实例：**186 通过、0 失败、35 跳过**。
 - **示例装载脚本**：`example/load.sh` 对着运行实例灌入全部 41 份示例载荷——首轮
   41 条 created，后两轮各 41 条 updated，经 `GET /api/resources?namespace=…` 回读全部为
   `approved` 且 `healthy`。

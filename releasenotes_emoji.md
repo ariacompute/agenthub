@@ -133,12 +133,12 @@
 ## 🧪 十四、测试
 
 - ✅ **后端**：构建、静态检查与全量单测通过。纯逻辑用例不依赖外部服务，数据库用例没配连接串就跳过，不伪造结果。
-- 📈 **覆盖率**（不接数据库测得，跳过的用例不会撑高数字）：a2a、audit、authz、channels、computers、config、files、httputil、identity、middleware、model、netutil、sandbox、schedules、secure 均为 **100%**；adapter 96.3%、router 91.8%、hub 90.6%、registry 89.3%、auth 84.5%、handlers 84.2%、backup 57.9%。store（4.5%）、testdb（9.4%）需要 PostgreSQL，cmd/agenthub-server（26.3%）是只有整个进程才走得到的装配层，三者不在范围内。
-- 🎯 **只有故障才走得到的分支**：新增 11 个 `*_edges_test.go`（75 条用例），覆盖健康机器永远走不到的臂——`Put` 中途失败的文件系统步骤、授权查询背后的存储故障、限流器清扫过期窗口、操作系统拒绝的 `.env` 键名、管道已被占用的会话、始终不领取任务的远端节点。构造上不可能的分支（固定密钥下的 AES 构造、满射归一函数身后的 `default`）直接删除；本机不可能而别处真实的分支抽成纯函数（信号退出归一、空 stderr 兜底、卷根判定）；真实但需注入故障的只开一处窄接缝（`files.fsOps`、`commandContext`、`sessionFrameTimeout`、`remoteJobGrace`、`getwd`、`deliverClient`、`io.ReadFull(rand.Reader, …)`），每处都注明生产代码从不重新赋值。没有 `t.Skip`、没有覆盖率排除、没有拿 `Sleep` 当断言。
+- 📈 **覆盖率**（不接数据库测得，跳过的用例不会撑高数字）：a2a、adapter、audit、authz、channels、computers、config、files、httputil、identity、middleware、model、netutil、schedules、secure 均为 **100%**；sandbox 99.9%、hub 99.0%、registry 92.1%、router 91.8%、auth 84.5%、handlers 84.3%、backup 57.9%。store（4.5%）、testdb（9.4%）需要 PostgreSQL，cmd/agenthub-server（26.3%）是只有整个进程才走得到的装配层，三者不在范围内。
+- 🎯 **只有故障才走得到的分支**：先新增 11 个 `*_edges_test.go`（75 条用例），覆盖健康机器永远走不到的臂——`Put` 中途失败的文件系统步骤、授权查询背后的存储故障、限流器清扫过期窗口、操作系统拒绝的 `.env` 键名、管道已被占用的会话、始终不领取任务的远端节点；再把 adapter 推到 100%、hub 推到 99.0%（`adapter_coverage_test.go` 32 条 + `hub/coverage2_test.go` 42 条，后者的仓储故障走的是包内假 store）。三条规矩始终一致：构造上不可能的分支直接删掉（固定密钥下的 AES 构造、归一函数身后的 `default`、定长载荷的 `json.Marshal`、写进 `bytes.Buffer` 的 multipart、`ValidateURL` 已挡下的 `NewRequest`、供应商链走完后的模拟兜底）；本机不可能而别处真实的分支抽成纯函数（信号退出归一、空 stderr 兜底、卷根判定）；真实但需注入故障的只开一处窄接缝（`files.fsOps`、`commandContext`、`sessionFrameTimeout`、`remoteJobGrace`、`getwd`、`deliverClient`、`io.ReadFull(rand.Reader, …)`，以及 adapter 的消息 ID 熵源、`hostOS`、hub 的签名 nonce 熵源），每处都注明生产代码从不重新赋值。没有 `t.Skip`、没有覆盖率排除、没有拿 `Sleep` 当断言。
 - 🟡 **环境门控**：端到端用例遇到「这台机器没有容器运行时」（`resource_unreachable` 搭配 `sandbox_unsupported` 一类明细）记为跳过并写明原因，其它错误仍判失败；静态守卫保证全部 147 条已文档化路由都有用例。
-- 🔁 **端到端纳入持续集成**：与后端、前端单测并列新增一个 job，在真实 Postgres、真实二进制与构建好的控制台上依次跑路由覆盖守卫、API 套件与六条 Playwright 旅程；Chromium 与沙盒默认镜像预先装好，失败时归档 `e2e/reports`、`playwright-report` 与服务端日志。
+- 🔁 **端到端纳入持续集成**：与后端、前端单测并列新增一个 job，在真实 Postgres、真实二进制与构建好的控制台上依次跑路由覆盖守卫、接口套件与八条 Playwright 旅程。接口套件实测 186 条通过、0 失败，35 条按实例能力或外部依赖跳过（路由关闭、备份关闭、`AGENTHUB_E2E_*` 开关未开）；界面套件 8 个文件 14 条通过，覆盖全部十屏。此前线程那一段因把返回体的 `ID` 写成 `id` 而长期以「threadId 缺失」静默跳过，改正后 8 条用例由跳过转为实跑。Chromium 与沙盒默认镜像预先装好，失败时归档 `e2e/reports`、`playwright-report` 与服务端日志。
 - 🧷 **隔离与审计护栏**：用 46 张表的清单钉住迁移脚本（含审计链锚点表）；覆盖审计续链、写入失败只计数、队列满丢帧和断点定位；断言「读审计不会被提权为系统身份」；前端的权限集合直接与后端源码比对。
 - 🛡️ **异常路径护栏**：错误码全量穷举与语法树守卫、panic 转成 JSON 响应与安全头、API 密钥窗口与范围、调度门面与事件总线、SSRF 白名单（含私网与 IPv6 字面量、域名解析到内网、白名单放行与重定向拒绝）。
 - 🧪 **沙盒**：覆盖租约复用、作用域隔离、匿名不复用、单人上限、审计行、终止、续租上限、清扫、后端不可用原因、重复注册、统计、事件回放与任务队列。端到端用例用真实 HTTP 打控制台接口：空命令被拒、未知租约 404、他人租约不可见、未接线 503、节点从注册到领取再到回报、事件回放。
-- 🧾 **端到端与脚本**：六段链路的端到端测试；对运行实例的全量探针脚本；示例数据灌入后回读校验。
-- 🌐 **前端**：21 个测试文件、417 项通过，覆盖语言与文案兜底、枚举、接口契约、审计、权限集合、错误码、样式守卫和 13 语文档分组；覆盖率语句 100%、分支 95.8%、函数 100%。
+- 🧾 **端到端与脚本**：`tests/e2e_test.go` 用 httptest 走真实 HTTP，12 个用例覆盖发现与健康检查、五类资源各发一次、任务生命周期与取消、等待人工输入后续接、流式与错误帧、分支与并行、旧方法别名、推送通知、控制面往返与坏输入、备份关闭时的如实报告；另有对运行实例的全量探针脚本与示例数据灌入后的回读校验。
+- 🌐 **前端**：26 个测试文件、494 项通过，覆盖语言与文案兜底、枚举、接口契约、审计、权限集合、错误码、样式守卫和 13 语文档分组，另含沙箱、路由器、文件、分页与能力下发各面；覆盖率语句 100%、分支 98.78%、函数 100%，未覆盖分支都是界面走不到的防御臂。

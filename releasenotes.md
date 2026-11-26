@@ -563,24 +563,29 @@ screen and a visual inspector for the A2A contract.
   `DATABASE_URL`.
 - **Coverage**: `make test-cover` runs `-coverprofile` and prints
   `go tool cover -func`. Measured with **no database attached**, so the cases
-  that skip cannot flatter the number: `a2a`, `audit`, `authz`, `channels`,
-  `computers`, `config`, `files`, `httputil`, `identity`, `middleware`, `model`,
-  `netutil`, `sandbox`, `schedules` and `secure` at **100%**; `adapter` 96.3%,
-  `router` 91.8%, `hub` 90.6%, `registry` 89.3%, `auth` 84.5%, `handlers` 84.2%,
-  `backup` 57.9%. Three packages stay out of scope and say so: `store` 4.5% and
-  `testdb` 9.4% need a PostgreSQL, `cmd/agenthub-server` 26.3% is the assembly
-  that only a whole process walks.
+  that skip cannot flatter the number: `a2a`, `adapter`, `audit`, `authz`,
+  `channels`, `computers`, `config`, `files`, `httputil`, `identity`,
+  `middleware`, `model`, `netutil`, `schedules` and `secure` at **100%**;
+  `sandbox` 99.9%, `hub` 99.0%, `registry` 92.1%, `router` 91.8%, `auth` 84.5%,
+  `handlers` 84.3%, `backup` 57.9%. Three packages stay out of scope and say so:
+  `store` 4.5% and `testdb` 9.4% need a PostgreSQL, `cmd/agenthub-server` 26.3%
+  is the assembly that only a whole process walks.
 - **Branches only a fault can reach**: eleven new `*_edges_test.go` files
   (75 cases) cover the arms a healthy host never walks — a filesystem step that
   fails mid-`Put`, a store outage behind a grant lookup, the limiter sweeping an
   expired window, a `.env` key the OS refuses, a session whose pipes are already
-  taken, a remote node that never claims its job. Three rules kept that from
-  becoming cosmetic:
+  taken, a remote node that never claims its job. A second pass then took
+  `adapter` to 100% and `hub` to 99.0% (`adapter_coverage_test.go`, 32 cases,
+  plus `hub/coverage2_test.go`, 42, whose repository failures run through the
+  in-package fake store). Three rules kept that from becoming cosmetic:
   - **Impossible by construction is deleted, not tested around**:
     `aes.NewCipher` over a fixed 32 byte key and `cipher.NewGCM` over an AES
     block cannot fail; `authz.Load` already returns on a nil store; the
     `default` arms after `NormalizeNetwork` / `NormalizeArgsPolicy` are dead
-    because both functions are total.
+    because both functions are total; so are `json.Marshal` over the fixed
+    adapter payloads, the multipart writes into a `bytes.Buffer`, the
+    `NewRequest` that `ValidateURL` has already screened, and the mock fallback
+    after a provider chain has run out.
   - **Impossible on this host but real elsewhere becomes a pure function**
     that a case can call directly: `normalizeExitCode` ("killed by a signal is
     1, not -1", which a Windows host never produces), `dockerRefusalReason`
@@ -593,9 +598,13 @@ screen and a visual inspector for the A2A contract.
     `sessionFrameTimeout` for pipe wiring and the two minute backstop,
     `sandbox.remoteJobGrace`, `config.getwd`, `channels.deliverClient` (the
     shipped client refuses loopback on purpose, so a test could otherwise only
-    ever see a delivery fail), and `io.ReadFull(rand.Reader, …)` in place of
+    ever see a delivery fail), `io.ReadFull(rand.Reader, …)` in place of
     `rand.Read` so a broken entropy source is reachable — the same trick
-    `secure`'s existing cases already use.
+    `secure`'s existing cases already use — and, in the second pass,
+    `adapter.randRead` (a message id is correlation, not a secret),
+    `adapter.hostOS` (the `file://` drive-letter rule only a Windows host
+    reaches) and `hub.nonceRand` (the signature nonce is freshness, not a
+    secret).
   No `t.Skip`, no coverage exclusion, no sleep-as-assertion: the timing cases
   shrink a package-level interval instead of waiting out the shipped one.
 - **Isolation & audit cases**: `internal/identity` covers the four shapes of "no
@@ -607,16 +616,18 @@ screen and a visual inspector for the A2A contract.
   escalate to the system identity. `model_test.go` pins all 46 table names against the
   migrations (the audit chain anchor included), and `auth-store.spec.js` reads
   `authz.AllPermissions` out of the Go source so the console vocabulary cannot drift.
-- **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest across six
-  legs (startup check → discovery → send a task → streaming run → suspend/resume →
-  control-plane round trip).
-- **Frontend**: `bunx vitest run`, 475 tests passing across 24 files (languages /
+- **End-to-end cases**: `tests/e2e_test.go` drives real HTTP through httptest in twelve
+  cases — discovery and the health check, one send per kind, the task lifecycle with
+  cancel, suspend/resume through `input-required`, streaming including its error frame,
+  flow branch and parallel, the v0.1 alias, push notification, the control-plane round
+  trip with its bad-input arms, and the honest report when backups are disabled.
+- **Frontend**: `bunx vitest run`, 494 tests passing across 26 files (languages /
   copy-fallback / enums-copy / api / api-endpoints / audit / auth-store / format /
   errors / backup-api / docs-content / playground / store / user-form / use-copy /
-  use-dismiss / style guard, plus the sandbox, router, files, paging and setup surfaces).
-  `bun run test:coverage` (v8) reports 100% of statements, 99.36% of branches and 100% of
-  functions over `src/lib/**`; the uncovered branches are the defensive arms a screen never
-  reaches.
+  use-dismiss / style guard, plus the sandbox, router, files, paging, distribution and
+  setup surfaces). `bun run test:coverage` (v8) reports 100% of statements, 98.78% of
+  branches and 100% of functions over `src/lib/**`; the uncovered branches are the
+  defensive arms a screen never reaches.
 - **The suite runs as the production role too**: a second CI job provisions
   `agenthub_migrator` / `agenthub_app` from `scripts/provision-db-roles.sql`, migrates as the
   migrator and then runs the whole `go test ./...` as `agenthub_app` — DML only, no
@@ -628,11 +639,15 @@ screen and a visual inspector for the A2A contract.
 - **The assembled product runs in CI too**: a fourth job builds the console and the binary
   (`make build`), then runs the route-coverage guard, the API suite and the eight Playwright
   journeys against a real Postgres and the real process — the parts are unit-tested, this is
-  the product. The guard goes first because it needs no server: a route added to `docs/`
-  without a case fails the job, not a review. Chromium and the sandbox default image are
-  installed up front (a first lease spent on a pull fails on a timeout, which reads like a
-  defect), and on failure the reports, the Playwright HTML report and the server log are
-  archived together.
+  the product. The API suite reports 186 passed / 0 failed with 35 skips, every one of them
+  an instance capability or an unset `AGENTHUB_E2E_*` switch (router off, backups off);
+  the UI suite runs 14 cases over eight files and covers all ten screens. The thread
+  section used to skip itself out of existence because it read the create response's `ID`
+  as `id`; with that fixed, eight cases execute that never had. The guard goes first
+  because it needs no server: a route added to `docs/` without a case fails the job, not a
+  review. Chromium and the sandbox default image are installed up front (a first lease
+  spent on a pull fails on a timeout, which reads like a defect), and on failure the
+  reports, the Playwright HTML report and the server log are archived together.
 - **Catalogue paging and batch reads**: `internal/handlers/api_paging_test.go` pins the window
   (echoed `limit` / `offset`, accurate `total`, an offset past the end as an empty page, 400s
   for `abc`, `-1`, `201` and a negative offset), the kind-agnostic counts, the batch read
@@ -662,11 +677,12 @@ screen and a visual inspector for the A2A contract.
   `internal/netutil/ssrf_test.go` pins the SSRF guards (loopback, trusted private hosts,
   redirect refusal); `internal/handlers/speech_test.go` separates an empty clip (400) from
   an oversized one (413).
-- **Scripted API test**: `scripts/test-api.sh` grew a governance section —
-  creating a namespace, watching a record go `draft → pending → approved` (and proving
-  that `draft → approved` is refused and a draft stays out of the discoverable list), the
-  dedup key, and a fixture source syncing twice (imported on the first run, refreshed on
-  the   second). Against a running instance: **167 passed, 0 failed, 3 skipped**.
+- **Scripted API test**: `scripts/test-api.sh` is now a shim onto the `e2e/` suite, so the
+  old references keep working while the cases live in one place. Its governance section
+  creates a namespace, watches a record go `draft → pending → approved` (and proves that
+  `draft → approved` is refused and a draft stays out of the discoverable list), checks
+  the dedup key, and syncs a fixture source twice (imported on the first run, refreshed on
+  the second). Against a running instance: **186 passed, 0 failed, 35 skipped**.
 - **Example loader**: `example/load.sh` registers all 41 example payloads
   against a running instance — 41 created on the first run, 41 updated on the next two,
   every record `approved` and `healthy`, read back through
